@@ -1,8 +1,10 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.20
+# hadolint ignore=DL3006
 FROM ${BUILD_FROM}
 
 WORKDIR /app
 
+# hadolint ignore=DL3018
 RUN apk add --no-cache python3 py3-pip py3-virtualenv
 
 COPY requirements.txt /app/requirements.txt
