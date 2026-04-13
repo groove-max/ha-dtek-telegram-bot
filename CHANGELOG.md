@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-04-13
+
+### Added
+
+- Added Home Assistant add-on branding assets with dedicated `logo.png` and `icon.png` files.
+
+### Fixed
+
+- Updated `actions/setup-python` to `v6` to remove deprecated Node 20 runtime warnings in GitHub Actions.
+- Preserved the original uploaded artwork under `.assets/logo-source.png` while generating Home Assistant-compatible asset sizes.
+
 ## [0.3.1] - 2026-04-13
 
 ### Fixed
