@@ -1,0 +1,14 @@
+---
+configuration:
+  telegram_bot_token:
+    name: Telegram bot token
+    description: >-
+      Bot token obtained from BotFather. Use a dedicated bot token for this
+      add-on when possible, especially if the same Home Assistant instance also
+      uses other Telegram integrations.
+  telegram_chat_id:
+    name: Default Telegram chat ID
+    description: >-
+      Default target chat for notifications. Individual addresses can override
+      this chat in the ingress configuration UI.
+

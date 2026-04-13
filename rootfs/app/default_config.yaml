@@ -1,0 +1,79 @@
+# DTEK Telegram Bot — Configuration
+# This file is the main configuration for the add-on.
+# Telegram bot token and chat ID are configured in the add-on options (HA UI).
+
+# Home Assistant Long-Lived Access Token (fallback if SUPERVISOR_TOKEN is unavailable).
+# Create one at: Profile -> Security -> Long-Lived Access Tokens -> Create Token
+ha_token: ""
+
+# Set to true to export built-in message templates to /data/templates/
+# for customization. Files are not overwritten if they already exist.
+export_default_templates: false
+
+# Addresses to monitor. Each address corresponds to a dtek_monitor device.
+# entity_prefix: the part after "sensor.dtek_" and before "_status" in your entity IDs
+#   Example: for sensor.dtek_doroga_liustdorfska_56v_status -> "dtek_doroga_liustdorfska_56v"
+addresses:
+  - entity_prefix: "dtek_doroga_liustdorfska_56v"
+    # display_name is auto-resolved from dtek_monitor device.
+    # Set manually only to override, e.g.:
+    # display_name: "Odesa • Liustdorfska doroga, 56v"
+    # Optional per-address Telegram chat override.
+    # telegram_chat_id: "-1001234567890"
+
+    # Simple features: use `true`/`false` or `{enabled: true/false}`
+    schedule_change:
+      enabled: true
+      silent: true
+    emergency:
+      enabled: true
+      silent: false
+    group_change:
+      enabled: true
+      silent: false
+
+    voltage:
+      enabled: false
+      entities:
+        # Single-phase example:
+        # - entity: "sensor.atorch_smart_energy_meter_at2pl_voltage"
+        #   label: ""
+        # Three-phase example:
+        # - entity: "sensor.smart_meter_voltage_l1"
+        #   label: "L1"
+        # - entity: "sensor.smart_meter_voltage_l2"
+        #   label: "L2"
+        # - entity: "sensor.smart_meter_voltage_l3"
+        #   label: "L3"
+      low: 195
+      high: 245
+      delay: 15    # seconds
+      present_above: 50  # below = phase/power absent
+      unavailable_as_missing: true  # false = ignore unavailable for power-off detection
+      silent: false  # separate low/high/normal alerts only
+
+    power:
+      enabled: false
+      mode: "dtek_only"    # dtek_only | voltage_only | loss_plus_voltage
+      # For loss_plus_voltage mode:
+      loss_entity: ""
+      loss_state: "0"      # "0", "<50", "unavailable"
+      loss_delay: 30       # seconds
+      confirm_timeout: 15  # seconds to wait for a fresh voltage update after loss trigger
+      restore_delay: 10    # seconds
+      silent: false        # house on/off notifications
+      phase_notifications: true
+
+    upcoming_outage:
+      enabled: true
+      minutes: 10
+      silent: false
+      power_filter: "only_when_available"  # always | only_when_available | only_when_missing
+
+    status_message:
+      enabled: true
+      update_interval: 300      # seconds, periodic voltage refresh
+      min_update_interval: 10   # seconds, rate limit for push updates
+      delivery_mode: "pinned_edit"  # pinned_edit | send_new
+      pin: true
+      silent: true

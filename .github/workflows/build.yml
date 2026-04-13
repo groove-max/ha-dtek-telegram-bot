@@ -1,0 +1,24 @@
+name: Build Add-on
+
+on:
+  push:
+    tags-ignore:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  docker-smoke-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Build add-on image
+        run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.20 \
+            --tag ha-dtek-telegram-bot:test \
+            .

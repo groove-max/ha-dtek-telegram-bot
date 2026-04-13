@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: DTEK Monitor dependency
+    url: https://github.com/groove-max/ha-dtek-monitor
+    about: Check here if the problem is caused by missing or incorrect DTEK Monitor entities.
+  - name: Add-on installation docs
+    url: https://github.com/groove-max/ha-dtek-telegram-bot/blob/main/README.md
+    about: Review the installation and configuration guide before opening an issue.
+

@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Verify tag matches add-on version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CONFIG_VERSION="$(grep '^version:' config.yaml | sed -E 's/version:[[:space:]]*\"?([^"]+)\"?/\1/')"
+
+          if [[ -z "${CONFIG_VERSION}" ]]; then
+            echo "Failed to read version from config.yaml"
+            exit 1
+          fi
+
+          echo "Tag version:    ${TAG_VERSION}"
+          echo "Config version: ${CONFIG_VERSION}"
+
+          if [[ "${TAG_VERSION}" != "${CONFIG_VERSION}" ]]; then
+            echo "Tag version does not match config.yaml version"
+            exit 1
+          fi
+
+      - name: Verify changelog contains this version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          grep -F "## [${TAG_VERSION}]" CHANGELOG.md
+
+  addon-linter:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Run add-on linter
+        uses: frenck/action-addon-linter@v2
+        with:
+          path: .
+
+  yamllint:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Run YAMLLint
+        uses: frenck/action-yamllint@v1.5
+
+  shellcheck:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          additional_files: run.sh
+
+  hadolint:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Lint Dockerfile
+        run: docker run --rm -i hadolint/hadolint:v2.12.0-alpine < Dockerfile
+
+  unit-tests:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Compile add-on sources
+        run: python -m compileall rootfs/app tests
+
+  docker-smoke-build:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Build add-on image
+        run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.20 \
+            --tag ha-dtek-telegram-bot:test \
+            .
+
+  github-release:
+    needs:
+      - verify-version
+      - addon-linter
+      - yamllint
+      - shellcheck
+      - hadolint
+      - unit-tests
+      - docker-smoke-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

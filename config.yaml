@@ -1,0 +1,29 @@
+name: "DTEK Telegram Bot"
+version: "0.3.0"
+slug: "dtek_telegram_bot"
+description: "Telegram notifications for DTEK Monitor with local power validation"
+url: "https://github.com/groove-max/ha-dtek-telegram-bot"
+homeassistant: "2026.3.0"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+init: false
+startup: application
+boot: auto
+homeassistant_api: true
+hassio_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:flash
+panel_title: DTEK Bot
+map:
+  - config:rw
+options:
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+schema:
+  telegram_bot_token: str
+  telegram_chat_id: str

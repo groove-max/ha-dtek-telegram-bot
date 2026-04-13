@@ -1,0 +1,13 @@
+---
+configuration:
+  telegram_bot_token:
+    name: Токен Telegram-бота
+    description: >-
+      Токен бота, отриманий у BotFather. Бажано використовувати окремий токен
+      саме для цього add-on, особливо якщо в Home Assistant є інші Telegram
+      інтеграції або автоматизації.
+  telegram_chat_id:
+    name: Telegram chat ID за замовчуванням
+    description: >-
+      Основний чат для сповіщень. Для окремих адрес цей чат можна перевизначити
+      у вбудованому ingress-інтерфейсі конфігурації.

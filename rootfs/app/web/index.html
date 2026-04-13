@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DTEK Bot</title>
+    <link rel="stylesheet" href="./styles.css?v=20260413-1910" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <h1>DTEK Telegram Bot</h1>
+          <p id="last-updated" class="muted">Очікування першого знімка…</p>
+        </div>
+        <div class="hero-actions">
+          <button id="refresh-button" class="primary-button" type="button">
+            Оновити
+          </button>
+        </div>
+      </header>
+
+      <section class="stats-grid" id="stats-grid"></section>
+
+      <nav class="tab-bar" id="tab-bar">
+        <button class="tab-button active" type="button" data-tab="configure">Налаштування</button>
+        <button class="tab-button" type="button" data-tab="templates">Шаблони</button>
+        <button class="tab-button" type="button" data-tab="runtime">Поточний стан</button>
+        <button class="tab-button" type="button" data-tab="discovery">Пошук</button>
+        <button class="tab-button" type="button" data-tab="diagnostics">Діагностика</button>
+      </nav>
+
+      <main class="tab-shell">
+        <section id="panel-configure" class="tab-panel">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Редактор</h2>
+              <p>
+                Редагуйте runtime-конфіг, обирайте сенсори зі списків,
+                перевіряйте його проти живого стану HA і потім зберігайте або
+                перезапускайте add-on.
+              </p>
+            </div>
+            <div class="editor-toolbar">
+              <button id="add-address-button" class="secondary-button" type="button">
+                Додати адресу
+              </button>
+              <button id="import-config-button" class="secondary-button" type="button">
+                Імпортувати конфіг
+              </button>
+              <button id="export-config-button" class="secondary-button" type="button">
+                Експортувати конфіг
+              </button>
+              <button id="import-address-button" class="secondary-button" type="button">
+                Імпортувати адресу
+              </button>
+              <button id="validate-button" class="secondary-button" type="button">
+                Перевірити
+              </button>
+              <button id="save-button" class="secondary-button" type="button">
+                Зберегти конфіг
+              </button>
+              <button id="save-restart-button" class="primary-button" type="button">
+                Зберегти і перезапустити
+              </button>
+            </div>
+            <p id="editor-status" class="status-message muted">Редактор завантажується…</p>
+            <div id="editor-container" class="stack"></div>
+            <input id="config-import-input" type="file" accept="application/json,.json" class="visually-hidden-input" />
+            <input id="address-import-input" type="file" accept="application/json,.json" class="visually-hidden-input" />
+          </section>
+        </section>
+
+        <section id="panel-templates" class="tab-panel hidden">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Шаблони</h2>
+              <p>
+                Перевіряйте, перевизначайте та тестуйте Telegram-повідомлення на
+                основі поточного draft-конфіга без перескладання add-on.
+              </p>
+            </div>
+            <p id="template-status" class="status-message muted">Шаблони завантажуються…</p>
+            <div id="templates-container"></div>
+          </section>
+        </section>
+
+        <section id="panel-runtime" class="tab-panel hidden">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Налаштовані адреси</h2>
+              <p>Поточні профілі, увімкнені функції та живі значення entity.</p>
+            </div>
+            <div id="addresses-list" class="stack"></div>
+          </section>
+        </section>
+
+        <section id="panel-discovery" class="tab-panel hidden">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Пошук</h2>
+              <p>
+                DTEK-подібні пристрої та каталог доступних сенсорів із поточного
+                стану Home Assistant.
+              </p>
+            </div>
+            <div id="discovery-list" class="stack compact"></div>
+          </section>
+        </section>
+
+        <section id="panel-diagnostics" class="tab-panel hidden">
+          <section class="panel diagnostics-panel">
+            <div class="panel-head">
+              <h2>Діагностика</h2>
+              <p>Знімок runtime для пошуку проблем і перевірки конфіга.</p>
+            </div>
+            <pre id="diagnostics-output" class="diagnostics"></pre>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js?v=20260413-1910"></script>
+  </body>
+</html>

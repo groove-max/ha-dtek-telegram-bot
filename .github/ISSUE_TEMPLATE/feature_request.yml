@@ -1,0 +1,63 @@
+name: Feature request
+description: Suggest an improvement for the DTEK Telegram Bot add-on
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem first, then the proposed solution.
+
+        The most useful requests explain the real-world use case: apartment-building chat, private house, multi-phase input, DTEK mismatch, Telegram workflow, and so on.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      placeholder: |
+        We need to migrate one monitored address between Home Assistant instances without recreating all settings manually.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: |
+        Add import/export for a single address in the ingress UI and keep it JSON-based.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Telegram delivery
+        - Power detection
+        - DTEK outage updates
+        - Schedule / upcoming outage
+        - Status message
+        - Ingress UI
+        - Import / export
+        - Template system
+        - Documentation
+        - CI / release
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: |
+        I currently work around this by manually editing YAML on each HA instance.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Mockups, example messages, example config snippets, or links to related issues.
+
