@@ -1,6 +1,7 @@
+---
 name: Release
 
-on:
+"on":
   push:
     tags:
       - "v*"
@@ -18,7 +19,10 @@ jobs:
         shell: bash
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          CONFIG_VERSION="$(grep '^version:' config.yaml | sed -E 's/version:[[:space:]]*\"?([^"]+)\"?/\1/')"
+          CONFIG_VERSION="$(
+            grep '^version:' config.yaml \
+              | sed -E 's/version:[[:space:]]*\"?([^"]+)\"?/\1/'
+          )"
 
           if [[ -z "${CONFIG_VERSION}" ]]; then
             echo "Failed to read version from config.yaml"

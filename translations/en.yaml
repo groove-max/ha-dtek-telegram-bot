@@ -11,4 +11,3 @@ configuration:
     description: >-
       Default target chat for notifications. Individual addresses can override
       this chat in the ingress configuration UI.
-

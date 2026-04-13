@@ -1,3 +1,4 @@
+---
 name: Feature request
 description: Suggest an improvement for the DTEK Telegram Bot add-on
 title: "[Feature]: "
@@ -9,14 +10,17 @@ body:
       value: |
         Describe the problem first, then the proposed solution.
 
-        The most useful requests explain the real-world use case: apartment-building chat, private house, multi-phase input, DTEK mismatch, Telegram workflow, and so on.
+        The most useful requests explain the real-world use case:
+        apartment-building chat, private house, multi-phase input, DTEK
+        mismatch, Telegram workflow, and so on.
 
   - type: textarea
     id: problem
     attributes:
       label: What problem are you trying to solve?
       placeholder: |
-        We need to migrate one monitored address between Home Assistant instances without recreating all settings manually.
+        We need to migrate one monitored address between Home Assistant
+        instances without recreating all settings manually.
     validations:
       required: true
 
@@ -25,7 +29,8 @@ body:
     attributes:
       label: Proposed solution
       placeholder: |
-        Add import/export for a single address in the ingress UI and keep it JSON-based.
+        Add import/export for a single address in the ingress UI and keep it
+        JSON-based.
     validations:
       required: true
 
@@ -53,11 +58,13 @@ body:
     attributes:
       label: Alternatives considered
       placeholder: |
-        I currently work around this by manually editing YAML on each HA instance.
+        I currently work around this by manually editing YAML on each HA
+        instance.
 
   - type: textarea
     id: extra
     attributes:
       label: Additional context
-      description: Mockups, example messages, example config snippets, or links to related issues.
-
+      description: >-
+        Mockups, example messages, example config snippets, or links to
+        related issues.

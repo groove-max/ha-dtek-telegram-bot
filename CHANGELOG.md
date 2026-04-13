@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-04-13
+
+### Fixed
+
+- Adjusted add-on metadata to satisfy current Home Assistant add-on linter rules.
+- Removed deprecated architectures from public repository metadata and build config.
+- Fixed YAML formatting issues that broke `yamllint` in GitHub Actions.
+- Pinned the default Docker base image argument to satisfy `hadolint`.
+
 ## [0.3.0] - 2026-04-13
 
 ### Added
@@ -19,4 +28,3 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Separated browser download/export flows from on-device config save flows in the ingress editor so export no longer implies writing to the add-on filesystem.
-

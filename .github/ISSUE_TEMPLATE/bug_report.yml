@@ -1,3 +1,4 @@
+---
 name: Bug report
 description: Report a reproducible problem in the DTEK Telegram Bot add-on
 title: "[Bug]: "
@@ -9,7 +10,8 @@ body:
       value: |
         Use this template for issues in the add-on itself.
 
-        If the problem is caused by missing or incorrect DTEK entities, also verify your `ha-dtek-monitor` setup first.
+        If the problem is caused by missing or incorrect DTEK entities,
+        also verify your `ha-dtek-monitor` setup first.
 
   - type: input
     id: ha_version
@@ -61,7 +63,9 @@ body:
     attributes:
       label: What happened?
       description: Describe the actual behavior and why it is wrong.
-      placeholder: The add-on sent a false power-loss notification while voltage was still present.
+      placeholder: >-
+        The add-on sent a false power-loss notification while voltage was
+        still present.
     validations:
       required: true
 
@@ -89,14 +93,17 @@ body:
     id: config_context
     attributes:
       label: Relevant config context
-      description: Remove secrets. Include only the relevant address, power mode, and sensor choices.
+      description: >-
+        Remove secrets. Include only the relevant address, power mode, and
+        sensor choices.
       render: yaml
 
   - type: textarea
     id: entity_states
     attributes:
       label: Relevant Home Assistant entity states
-      description: Include the relevant `ha-dtek-monitor` entities and local sensors.
+      description: >-
+        Include the relevant `ha-dtek-monitor` entities and local sensors.
       render: yaml
 
   - type: textarea
@@ -110,5 +117,6 @@ body:
     id: extra
     attributes:
       label: Additional context
-      description: Screenshots, Telegram messages, diagnostics output, or anything else that helps.
-
+      description: >-
+        Screenshots, Telegram messages, diagnostics output, or anything else
+        that helps.

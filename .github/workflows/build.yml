@@ -1,6 +1,7 @@
+---
 name: Build Add-on
 
-on:
+"on":
   push:
     tags-ignore:
       - "v*"
