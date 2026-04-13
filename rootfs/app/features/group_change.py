@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
 from outage_calendar import build_schedule_lines, extract_calendar_events
 from utils import now_kyiv
+
+if TYPE_CHECKING:
+    from features.status_message import StatusMessageFeature
 
 
 class GroupChangeFeature(Feature):
@@ -20,12 +23,20 @@ class GroupChangeFeature(Feature):
 
     name = "group_change"
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._status_message: StatusMessageFeature | None = None
+
+    def set_status_message(self, sm: StatusMessageFeature) -> None:
+        """Inject StatusMessageFeature to refresh the pinned status on group updates."""
+        self._status_message = sm
+
     @property
     def enabled(self) -> bool:
         return self.config.group_change.enabled
 
     def get_watched_entities(self) -> list[str]:
-        return [self.entity("schedule_group")]
+        return self.entity_candidates("schedule_group")
 
     async def on_state_change(
         self, entity_id: str, old_state: dict[str, Any], new_state: dict[str, Any]
@@ -38,6 +49,7 @@ class GroupChangeFeature(Feature):
         if old_val in ("unavailable", "unknown", ""):
             # First valid value — just store it
             self.state_set("current_group", new_val)
+            await self._notify_status_message()
             return
         if old_val == new_val:
             return
@@ -58,6 +70,7 @@ class GroupChangeFeature(Feature):
             text,
             disable_notification=self.config.group_change.silent,
         )
+        await self._notify_status_message()
 
     async def _fetch_outage_events(self) -> list[dict[str, Any]]:
         """Fetch outage calendar events for today and tomorrow."""
@@ -83,10 +96,17 @@ class GroupChangeFeature(Feature):
 
     async def on_start(self) -> None:
         """Store initial group value on startup."""
-        entity_id = self.entity("schedule_group")
-        state = await self.ha.get_state(entity_id)
-        if state:
+        for entity_id in self.entity_candidates("schedule_group"):
+            state = await self.ha.get_state(entity_id)
+            if not state:
+                continue
             val = self.get_state_value(state)
             if val not in ("unavailable", "unknown", ""):
                 self.state_set("current_group", val)
                 self.log.info("Initial group: %s", val)
+                return
+
+    async def _notify_status_message(self) -> None:
+        """Refresh the pinned status when the current group becomes available or changes."""
+        if self._status_message:
+            await self._status_message.request_update()

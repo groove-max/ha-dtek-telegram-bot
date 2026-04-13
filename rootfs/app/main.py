@@ -20,6 +20,7 @@ from config import (
 from features import ALL_FEATURES
 from features.base import Feature
 from features.emergency import EmergencyFeature
+from features.group_change import GroupChangeFeature
 from features.power_presence import PowerPresenceFeature
 from features.status_message import StatusMessageFeature
 from ha_client import HAClient
@@ -45,6 +46,10 @@ ENTITY_SUFFIX_MAP = {
     "status": "outage_status",
     "possible_schedule": "possible_outage_schedule",
 }
+SCHEDULE_GROUP_ENTITY_SUFFIXES = (
+    "primary_schedule_group",
+    "schedule_group",
+)
 TEMPLATE_GROUPS = {
     "schedule_change": "Schedule",
     "schedule_empty": "Schedule",
@@ -123,6 +128,9 @@ class Orchestrator:
             for f in addr_features:
                 if isinstance(f, StatusMessageFeature):
                     f.set_power_monitor(power_monitor)
+                elif isinstance(f, GroupChangeFeature):
+                    if status_message:
+                        f.set_status_message(status_message)
                 elif isinstance(f, PowerPresenceFeature):
                     f.set_power_monitor(power_monitor)
                     if status_message:
@@ -395,9 +403,16 @@ class Orchestrator:
 
             prefix = entity_id.removeprefix("binary_sensor.").removesuffix("_power")
             status_entity = f"sensor.{prefix}_outage_status"
-            schedule_group_entity = f"sensor.{prefix}_schedule_group"
+            schedule_group_entity = next(
+                (
+                    f"sensor.{prefix}_{suffix}"
+                    for suffix in SCHEDULE_GROUP_ENTITY_SUFFIXES
+                    if f"sensor.{prefix}_{suffix}" in entity_map
+                ),
+                "",
+            )
             calendar_entity = f"calendar.{prefix}_outage_schedule"
-            if status_entity not in entity_map and schedule_group_entity not in entity_map:
+            if status_entity not in entity_map and not schedule_group_entity:
                 continue
 
             candidates.append(
@@ -408,7 +423,7 @@ class Orchestrator:
                     "entities": {
                         "power": entity_id,
                         "status": status_entity if status_entity in entity_map else "",
-                        "schedule_group": schedule_group_entity if schedule_group_entity in entity_map else "",
+                        "schedule_group": schedule_group_entity,
                         "outage_schedule": calendar_entity if calendar_entity in entity_map else "",
                     },
                 }
@@ -819,13 +834,29 @@ class Orchestrator:
             raise ValueError(f"Invalid address index: {address_index}") from exc
 
     @staticmethod
-    def _template_entity(address: AddressConfig, suffix: str) -> str:
-        suffix = ENTITY_SUFFIX_MAP.get(suffix, suffix)
-        if suffix == "power":
-            return f"binary_sensor.{address.entity_prefix}_{suffix}"
-        if suffix in ("outage_schedule", "possible_outage_schedule"):
-            return f"calendar.{address.entity_prefix}_{suffix}"
-        return f"sensor.{address.entity_prefix}_{suffix}"
+    def _template_suffixes(suffix: str) -> tuple[str, ...]:
+        if suffix == "schedule_group":
+            return SCHEDULE_GROUP_ENTITY_SUFFIXES
+        return (ENTITY_SUFFIX_MAP.get(suffix, suffix),)
+
+    @classmethod
+    def _template_entities(cls, address: AddressConfig, suffix: str) -> list[str]:
+        if suffix.startswith("binary_sensor.") or suffix.startswith("sensor.") or suffix.startswith("calendar."):
+            return [suffix]
+
+        entity_ids: list[str] = []
+        for resolved_suffix in cls._template_suffixes(suffix):
+            if resolved_suffix == "power":
+                entity_ids.append(f"binary_sensor.{address.entity_prefix}_{resolved_suffix}")
+            elif resolved_suffix in ("outage_schedule", "possible_outage_schedule"):
+                entity_ids.append(f"calendar.{address.entity_prefix}_{resolved_suffix}")
+            else:
+                entity_ids.append(f"sensor.{address.entity_prefix}_{resolved_suffix}")
+        return entity_ids
+
+    @classmethod
+    def _template_entity(cls, address: AddressConfig, suffix: str) -> str:
+        return cls._template_entities(address, suffix)[0]
 
     async def _current_group_for_address(self, address: AddressConfig) -> str:
         stored = self.state.get(address.entity_prefix, "current_group")
@@ -837,14 +868,15 @@ class Orchestrator:
     async def _get_entity_value(self, address: AddressConfig, suffix: str) -> str | None:
         if not self.ha.is_connected or not address.entity_prefix:
             return None
-        entity_id = self._template_entity(address, suffix)
-        state = await self.ha.get_state(entity_id)
-        if state is None:
-            return None
-        value = str(state.get("state", ""))
-        if value in ("", "unknown", "unavailable"):
-            return None
-        return value
+        for entity_id in self._template_entities(address, suffix):
+            state = await self.ha.get_state(entity_id)
+            if state is None:
+                continue
+            value = str(state.get("state", ""))
+            if value in ("", "unknown", "unavailable"):
+                continue
+            return value
+        return None
 
     async def _fetch_calendar_events_for_address(
         self,

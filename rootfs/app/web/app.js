@@ -25,6 +25,10 @@ const REFRESH_INTERVAL_MS = 15000;
 const MAX_QUICK_PICKS = 8;
 const CONFIG_EXPORT_SCHEMA = "dtek-telegram-bot/config-export-v1";
 const ADDRESS_EXPORT_SCHEMA = "dtek-telegram-bot/address-export-v1";
+const UI_STORAGE_PREFIX = "dtek-telegram-bot-ui";
+const ACTIVE_TAB_STORAGE_KEY = `${UI_STORAGE_PREFIX}:active-tab`;
+const EDITOR_DRAFT_STORAGE_KEY = `${UI_STORAGE_PREFIX}:editor-draft`;
+const TEMPLATE_DRAFT_STORAGE_KEY = `${UI_STORAGE_PREFIX}:template-draft`;
 const TONE_LABELS = {
   good: "норма",
   warn: "увага",
@@ -79,6 +83,127 @@ const state = {
   collapsedPanels: {},
   pendingAddressImportIndex: null,
 };
+
+function readSessionValue(key) {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionValue(key, value) {
+  try {
+    if (value === null || value === undefined || value === "") {
+      window.sessionStorage.removeItem(key);
+      return;
+    }
+    window.sessionStorage.setItem(key, String(value));
+  } catch {
+    // Ignore storage failures and keep the UI usable.
+  }
+}
+
+function readSessionJson(key) {
+  const raw = readSessionValue(key);
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionJson(key, value) {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures and keep the UI usable.
+  }
+}
+
+function removeSessionValue(key) {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage failures and keep the UI usable.
+  }
+}
+
+function persistEditorDraftSnapshot(config = null) {
+  let draft = config;
+  if (!draft) {
+    try {
+      draft = collectEditorConfig();
+    } catch {
+      draft = state.draftConfig;
+    }
+  }
+  if (!draft) {
+    return;
+  }
+  state.draftConfig = cloneJson(draft);
+  writeSessionJson(EDITOR_DRAFT_STORAGE_KEY, state.draftConfig);
+}
+
+function clearEditorDraftSnapshot() {
+  removeSessionValue(EDITOR_DRAFT_STORAGE_KEY);
+}
+
+function persistTemplateDraftSnapshot() {
+  writeSessionJson(TEMPLATE_DRAFT_STORAGE_KEY, {
+    templateSelection: { ...state.templateSelection },
+    templateSourceDraft: state.templateSourceDraft,
+    templateSourceDirty: state.templateSourceDirty,
+    templateSourceName: state.templateSourceName,
+  });
+}
+
+function restorePersistedUiState() {
+  const savedTab = readSessionValue(ACTIVE_TAB_STORAGE_KEY);
+  if (savedTab) {
+    state.activeTab = savedTab;
+  }
+
+  const savedDraft = readSessionJson(EDITOR_DRAFT_STORAGE_KEY);
+  if (isPlainObject(savedDraft)) {
+    state.draftConfig = savedDraft;
+    state.editorDirty = true;
+    state.editorStatus = {
+      message: "Чернетку відновлено після перезавантаження сторінки.",
+      tone: "status-warn",
+    };
+  }
+
+  const savedTemplateDraft = readSessionJson(TEMPLATE_DRAFT_STORAGE_KEY);
+  if (isPlainObject(savedTemplateDraft)) {
+    const savedSelection = isPlainObject(savedTemplateDraft.templateSelection)
+      ? savedTemplateDraft.templateSelection
+      : {};
+    state.templateSelection = {
+      addressIndex: Number.parseInt(savedSelection.addressIndex, 10) || 0,
+      templateName: String(savedSelection.templateName || ""),
+    };
+    state.templateSourceDraft = String(savedTemplateDraft.templateSourceDraft || "");
+    state.templateSourceDirty = Boolean(savedTemplateDraft.templateSourceDirty);
+    state.templateSourceName = String(savedTemplateDraft.templateSourceName || "");
+    if (state.templateSourceDirty) {
+      state.templateStatus = {
+        message: "Чернетку шаблону відновлено після перезавантаження сторінки.",
+        tone: "status-warn",
+      };
+    }
+  }
+}
+
+function shouldPauseBackgroundRefresh() {
+  return (
+    (state.activeTab === "configure" && state.editorDirty)
+    || (state.activeTab === "templates" && state.templateSourceDirty)
+  );
+}
 
 function getAddressUiKey(address, index) {
   const prefix = address?.entity_prefix?.trim();
@@ -632,6 +757,7 @@ function renderEntityOptions(items, selectedValue = "", placeholder = "Обер�
 
 function setActiveTab(tab) {
   state.activeTab = tab;
+  writeSessionValue(ACTIVE_TAB_STORAGE_KEY, tab);
   tabButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tab);
   });
@@ -1871,9 +1997,10 @@ function syncAllEditorVisibility() {
 }
 
 function setDraftConfig(config, message, tone = "muted") {
-  state.draftConfig = config;
+  state.draftConfig = cloneJson(config);
   state.editorDirty = true;
   state.templatePreview = null;
+  persistEditorDraftSnapshot(state.draftConfig);
   renderEditor(true);
   renderTemplates(true);
   setEditorStatus(message, tone);
@@ -2015,6 +2142,7 @@ async function validateConfig() {
   state.configPayload = { ...state.configPayload, config: result.config, preview: result.preview };
   state.draftConfig = cloneJson(result.config);
   state.editorDirty = false;
+  clearEditorDraftSnapshot();
   renderEditor(true);
   renderTemplates(true);
   setEditorStatus("Конфіг валідний. Живе прев'ю оновлено з Home Assistant.", "status-good");
@@ -2034,6 +2162,7 @@ async function saveConfig({ restart }) {
   };
   state.draftConfig = cloneJson(result.config);
   state.editorDirty = false;
+  clearEditorDraftSnapshot();
   renderEditor(true);
   renderTemplates(true);
   if (restart) {
@@ -2074,6 +2203,7 @@ function syncTemplateSource(force = false) {
     state.templateSourceDraft = "";
     state.templateSourceDirty = false;
     state.templateSourceName = "";
+    persistTemplateDraftSnapshot();
     return;
   }
   if (force || !state.templateSourceDirty || state.templateSourceName !== meta.name) {
@@ -2081,6 +2211,7 @@ function syncTemplateSource(force = false) {
     state.templateSourceDirty = false;
     state.templateSourceName = meta.name;
   }
+  persistTemplateDraftSnapshot();
 }
 
 function renderTemplatePreviewPanel() {
@@ -2227,6 +2358,7 @@ async function previewSelectedTemplate({ sendTest = false } = {}) {
     body: JSON.stringify(body),
   });
   state.templatePreview = result.preview;
+  persistTemplateDraftSnapshot();
   renderTemplates(true);
   if (sendTest) {
     const sent = result.preview.sent;
@@ -2254,6 +2386,7 @@ async function saveTemplateOverride() {
   state.templateSourceDraft = result.template.source;
   state.templateSourceDirty = false;
   state.templateSourceName = result.template.name;
+  persistTemplateDraftSnapshot();
   renderTemplates(true);
   setTemplateStatus(`Override для ${result.template.name} збережено.`, "status-good");
 }
@@ -2272,6 +2405,7 @@ async function resetTemplateOverride() {
   state.templateSourceDirty = false;
   state.templateSourceName = result.template.name;
   state.templatePreview = null;
+  persistTemplateDraftSnapshot();
   renderTemplates(true);
   setTemplateStatus(`Шаблон ${result.template.name} скинуто до вбудованого джерела.`, "status-good");
 }
@@ -2281,6 +2415,10 @@ async function loadTemplatesSnapshot() {
 }
 
 async function loadDashboard({ background = false } = {}) {
+  if (background && shouldPauseBackgroundRefresh()) {
+    return;
+  }
+
   if (!background) {
     refreshButton.disabled = true;
     refreshButton.textContent = "Оновлення…";
@@ -2325,6 +2463,12 @@ async function loadDashboard({ background = false } = {}) {
     }
     if (!state.templateSourceDirty) {
       setTemplateStatus("Шаблони готові.", "muted");
+    }
+    if (!state.editorDirty) {
+      clearEditorDraftSnapshot();
+    }
+    if (!state.templateSourceDirty) {
+      persistTemplateDraftSnapshot();
     }
   } catch (error) {
     diagnosticsOutput.textContent = `Не вдалося завантажити dashboard:\n${error}`;
@@ -2441,6 +2585,7 @@ editorContainer.addEventListener("change", (event) => {
     }
     state.editorDirty = true;
     syncAddressFormVisibility(form);
+    persistEditorDraftSnapshot();
     setEditorStatus("Чернетку змінено. Запустіть перевірку, щоб оновити живе прев'ю.", "muted");
   }
 });
@@ -2452,6 +2597,7 @@ editorContainer.addEventListener("input", (event) => {
   }
   if (target.closest(".address-editor-card") || target.id === "cfg-ha-token") {
     state.editorDirty = true;
+    persistEditorDraftSnapshot();
   }
 });
 
@@ -2463,6 +2609,7 @@ templatesContainer.addEventListener("change", (event) => {
   if (target.id === "template-address-select") {
     state.templateSelection.addressIndex = Number.parseInt(target.value, 10) || 0;
     state.templatePreview = null;
+    persistTemplateDraftSnapshot();
     renderTemplates(true);
     setTemplateStatus("Адресу шаблону змінено. Побудуйте прев'ю знову, щоб використати поточний draft-конфіг.", "muted");
   }
@@ -2470,6 +2617,7 @@ templatesContainer.addEventListener("change", (event) => {
     state.templateSelection.templateName = target.value;
     state.templatePreview = null;
     state.templateSourceDirty = false;
+    persistTemplateDraftSnapshot();
     renderTemplates(true);
     setTemplateStatus("Шаблон змінено. Відредагуйте джерело або побудуйте прев'ю.", "muted");
   }
@@ -2484,6 +2632,7 @@ templatesContainer.addEventListener("input", (event) => {
     state.templateSourceDraft = target.value;
     state.templateSourceDirty = true;
     state.templatePreview = null;
+    persistTemplateDraftSnapshot();
     setTemplateStatus("Джерело шаблону змінено. Побудуйте прев'ю, щоб рендерити поточний draft.", "muted");
   }
 });
@@ -2604,8 +2753,12 @@ document.addEventListener("click", (event) => {
   }
 });
 
+restorePersistedUiState();
 setActiveTab(state.activeTab);
 void loadDashboard();
 window.setInterval(() => {
+  if (shouldPauseBackgroundRefresh()) {
+    return;
+  }
   void loadDashboard({ background: true });
 }, REFRESH_INTERVAL_MS);

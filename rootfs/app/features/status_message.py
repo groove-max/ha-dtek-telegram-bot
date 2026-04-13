@@ -174,14 +174,15 @@ class StatusMessageFeature(Feature):
     async def _build_status_text(self, house_state: str) -> str:
         """Build the status message text."""
         short_name = self.config.display_name
+        group = await self._resolve_current_group()
 
         if house_state == "on":
-            return await self._build_on_text(short_name)
+            return await self._build_on_text(short_name, group)
         if house_state == "partial":
-            return await self._build_partial_text(short_name)
-        return await self._build_off_text(short_name)
+            return await self._build_partial_text(short_name, group)
+        return await self._build_off_text(short_name, group)
 
-    async def _build_on_text(self, short_name: str) -> str:
+    async def _build_on_text(self, short_name: str, group: str) -> str:
         """Build status text when power is on."""
         snapshot: dict[str, Any] = {}
 
@@ -193,12 +194,13 @@ class StatusMessageFeature(Feature):
         return self.render(
             "status_on",
             short_name=short_name,
+            group=group,
             voltage=snapshot.get("single_voltage"),
             phases=snapshot.get("phases"),
             next_outage=next_outage,
         )
 
-    async def _build_partial_text(self, short_name: str) -> str:
+    async def _build_partial_text(self, short_name: str, group: str) -> str:
         """Build status text when only part of the configured phases are present."""
         snapshot: dict[str, Any] = {}
         if self._power_monitor:
@@ -209,13 +211,14 @@ class StatusMessageFeature(Feature):
         return self.render(
             "status_partial",
             short_name=short_name,
+            group=group,
             phases=snapshot.get("phases"),
             missing_phases=snapshot.get("missing_phases"),
             unknown_phases=snapshot.get("unknown_phases"),
             next_outage=next_outage,
         )
 
-    async def _build_off_text(self, short_name: str) -> str:
+    async def _build_off_text(self, short_name: str, group: str) -> str:
         """Build status text when power is off."""
         status_raw = None
         dtek_reports_ok = False
@@ -265,6 +268,7 @@ class StatusMessageFeature(Feature):
         return self.render(
             "status_off",
             short_name=short_name,
+            group=group,
             outage_duration=outage_duration,
             dtek_reports_ok=dtek_reports_ok,
             outage_type=outage_type,
@@ -272,6 +276,24 @@ class StatusMessageFeature(Feature):
             outage_start=outage_start,
             outage_end=outage_end,
         )
+
+    async def _resolve_current_group(self) -> str:
+        """Get the current schedule group, falling back to live HA state when needed."""
+        stored = str(self.state_get("current_group", "")).strip()
+        if stored and stored not in ("unknown", "unavailable"):
+            return stored
+
+        for entity_id in self.entity_candidates("schedule_group"):
+            state = await self.ha.get_state(entity_id)
+            if not state:
+                continue
+            value = self.get_state_value(state)
+            if value in ("", "unknown", "unavailable"):
+                continue
+            self.state_set("current_group", value)
+            return value
+
+        return "—"
 
     async def _get_next_outage(self) -> str | None:
         """Get the next planned outage as a formatted string."""

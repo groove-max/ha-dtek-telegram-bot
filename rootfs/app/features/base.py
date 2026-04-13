@@ -72,30 +72,45 @@ class Feature(ABC):
 
     # ── Helpers ──
 
-    # Map short feature names to actual dtek_monitor entity suffixes
-    _SUFFIX_MAP: dict[str, str] = {
-        "status": "outage_status",
-        "possible_schedule": "possible_outage_schedule",
+    # Map logical names to actual dtek_monitor entity suffixes.
+    # schedule_group supports both the current primary_schedule_group entity
+    # and the legacy schedule_group name used by older builds.
+    _SUFFIX_ALIASES: dict[str, tuple[str, ...]] = {
+        "status": ("outage_status",),
+        "possible_schedule": ("possible_outage_schedule",),
+        "schedule_group": ("primary_schedule_group", "schedule_group"),
     }
+
+    @classmethod
+    def _entity_domain(cls, suffix: str) -> str:
+        if suffix == "power":
+            return "binary_sensor"
+        if suffix in ("outage_schedule", "possible_outage_schedule"):
+            return "calendar"
+        return "sensor"
+
+    def entity_candidates(self, suffix: str) -> list[str]:
+        """Build all supported entity_id candidates for a logical suffix."""
+        prefix = self.config.entity_prefix
+        if suffix.startswith("binary_sensor.") or suffix.startswith("sensor.") or suffix.startswith("calendar."):
+            return [suffix]
+        if suffix.startswith("_"):
+            suffix = suffix[1:]
+
+        resolved_suffixes = self._SUFFIX_ALIASES.get(suffix, (suffix,))
+        entity_ids: list[str] = []
+        for resolved_suffix in resolved_suffixes:
+            entity_ids.append(
+                f"{self._entity_domain(resolved_suffix)}.{prefix}_{resolved_suffix}"
+            )
+        return entity_ids
 
     def entity(self, suffix: str) -> str:
         """Build full entity_id from address prefix and suffix.
 
         Example: entity("status") -> "sensor.dtek_doroga_liustdorfska_56v_outage_status"
         """
-        prefix = self.config.entity_prefix
-        if suffix.startswith("binary_sensor.") or suffix.startswith("sensor.") or suffix.startswith("calendar."):
-            return suffix
-        if suffix.startswith("_"):
-            suffix = suffix[1:]
-        # Remap short names to actual entity suffixes
-        suffix = self._SUFFIX_MAP.get(suffix, suffix)
-        # Determine domain by suffix
-        if suffix == "power":
-            return f"binary_sensor.{prefix}_{suffix}"
-        if suffix in ("outage_schedule", "possible_outage_schedule"):
-            return f"calendar.{prefix}_{suffix}"
-        return f"sensor.{prefix}_{suffix}"
+        return self.entity_candidates(suffix)[0]
 
     def render(self, template_name: str, **extra_context: Any) -> str:
         """Render a template with common context + extra variables."""

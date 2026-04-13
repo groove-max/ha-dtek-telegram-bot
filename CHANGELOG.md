@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-04-13
+
+### Fixed
+
+- Preserved unsaved ingress UI drafts during editing and paused background refresh while configuration or templates are being changed.
+- Resolved DTEK schedule group detection against both legacy `schedule_group` entities and current `primary_schedule_group` entities so Telegram status messages show the active group correctly.
+
 ## [0.3.2] - 2026-04-13
 
 ### Added

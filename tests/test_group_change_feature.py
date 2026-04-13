@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import sys
 import types
 import unittest
@@ -64,7 +63,7 @@ if "jinja2" not in sys.modules:
     sys.modules["jinja2"] = jinja2
 
 if HAS_RUNTIME_DEPS:
-    from features.status_message import StatusMessageFeature
+    from features.group_change import GroupChangeFeature
 
 
 class DummyHA:
@@ -74,27 +73,17 @@ class DummyHA:
     async def get_state(self, entity_id: str) -> dict[str, str] | None:
         return self.states.get(entity_id)
 
-    async def call_service(self, **kwargs: object) -> object:
+    async def call_service(self, *args: object, **kwargs: object) -> dict[str, object]:
         return {}
 
 
 class DummyTelegram:
-    def __init__(self, *, edit_result: str) -> None:
-        self.edit_result = edit_result
-        self.sent_messages: list[str] = []
-        self.edit_calls = 0
+    def __init__(self) -> None:
+        self.messages: list[str] = []
 
-    async def send_message(self, text: str, **kwargs: object) -> int | None:
-        self.sent_messages.append(text)
-        return 44
-
-    async def edit_message_result(self, message_id: int, text: str, **kwargs: object) -> str:
-        self.edit_calls += 1
-        return self.edit_result
-
-    async def edit_message(self, message_id: int, text: str, **kwargs: object) -> bool:
-        self.edit_calls += 1
-        return self.edit_result == "ok"
+    async def send_message(self, text: str, **kwargs: object) -> int:
+        self.messages.append(text)
+        return len(self.messages)
 
 
 class DummyState:
@@ -111,93 +100,94 @@ class DummyState:
 class DummyTemplates:
     def render(self, template_name: str, **context: object) -> str:
         return (
-            f"{template_name}|"
-            f"{context.get('short_name') or context.get('display_name')}|"
-            f"group={context.get('group')}"
+            f"{template_name}|{context.get('old_group')}->{context.get('new_group')}"
         )
 
 
-class DummyPowerMonitor:
-    async def get_power_state(self) -> str:
-        return "on"
+class DummyStatusMessage:
+    def __init__(self) -> None:
+        self.request_count = 0
 
-    async def get_voltage_snapshot(self) -> dict[str, object]:
-        return {
-            "single_voltage": 227.1,
-            "phases": [{"label": "L1", "voltage": 227.1, "available": True}],
-            "missing_phases": [],
-            "unknown_phases": [],
-        }
+    async def request_update(self) -> None:
+        self.request_count += 1
 
 
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
-class StatusMessageFeatureTest(unittest.IsolatedAsyncioTestCase):
+class GroupChangeFeatureTest(unittest.IsolatedAsyncioTestCase):
     prefix = "doroga_liustdorfska_56v"
 
     def _build_feature(
         self,
         *,
-        edit_result: str,
         states: dict[str, dict[str, str]] | None = None,
-    ) -> tuple[StatusMessageFeature, DummyTelegram, DummyState]:
-        telegram = DummyTelegram(edit_result=edit_result)
+    ) -> tuple[GroupChangeFeature, DummyTelegram, DummyState, DummyStatusMessage]:
+        telegram = DummyTelegram()
         state = DummyState()
-        state.set(self.prefix, "status_message_id", 33)
+        status_message = DummyStatusMessage()
         config = SimpleNamespace(
             entity_prefix=self.prefix,
             display_name="Одеса • дорога Люстдорфська, 56В",
             telegram_chat_id="",
-            status_message=SimpleNamespace(
-                enabled=True,
-                min_update_interval=0,
-                update_interval=300,
-                delivery_mode="pinned_edit",
-                pin=True,
-                silent=False,
-            ),
+            group_change=SimpleNamespace(enabled=True, silent=False),
         )
-        feature = StatusMessageFeature(
+        feature = GroupChangeFeature(
             address_config=config,
             ha_client=DummyHA(states=states),
             telegram=telegram,
             state_store=state,
             templates=DummyTemplates(),
         )
-        feature.set_power_monitor(DummyPowerMonitor())
-        return feature, telegram, state
+        feature.set_status_message(status_message)
+        return feature, telegram, state, status_message
 
-    async def test_network_edit_error_does_not_create_new_status_message(self) -> None:
-        feature, telegram, state = self._build_feature(edit_result="error")
+    def test_watches_primary_and_legacy_schedule_group_entities(self) -> None:
+        feature, _telegram, _state, _status = self._build_feature()
 
-        await feature.on_start()
-        await asyncio.sleep(0)
+        self.assertEqual(
+            feature.get_watched_entities(),
+            [
+                f"sensor.{self.prefix}_primary_schedule_group",
+                f"sensor.{self.prefix}_schedule_group",
+            ],
+        )
 
-        self.assertEqual(telegram.edit_calls, 1)
-        self.assertEqual(telegram.sent_messages, [])
-        self.assertEqual(state.get(self.prefix, "status_message_id"), 33)
-
-    async def test_missing_message_recreates_status_message(self) -> None:
-        feature, telegram, state = self._build_feature(edit_result="not_found")
-
-        await feature.on_start()
-
-        self.assertEqual(telegram.edit_calls, 1)
-        self.assertEqual(len(telegram.sent_messages), 1)
-        self.assertEqual(state.get(self.prefix, "status_message_id"), 44)
-
-    async def test_status_message_uses_primary_schedule_group_when_state_is_missing(self) -> None:
-        feature, telegram, state = self._build_feature(
-            edit_result="not_found",
+    async def test_on_start_reads_primary_schedule_group_entity(self) -> None:
+        feature, _telegram, state, _status = self._build_feature(
             states={
-                f"sensor.{self.prefix}_primary_schedule_group": {"state": "6"},
+                f"sensor.{self.prefix}_primary_schedule_group": {"state": "4"},
             },
         )
 
         await feature.on_start()
 
+        self.assertEqual(state.get(self.prefix, "current_group"), "4")
+
+    async def test_first_valid_group_updates_status_without_notification(self) -> None:
+        feature, telegram, state, status_message = self._build_feature()
+
+        await feature.on_state_change(
+            f"sensor.{self.prefix}_primary_schedule_group",
+            {"state": "unknown"},
+            {"state": "6"},
+        )
+
         self.assertEqual(state.get(self.prefix, "current_group"), "6")
-        self.assertEqual(len(telegram.sent_messages), 1)
-        self.assertIn("group=6", telegram.sent_messages[0])
+        self.assertEqual(telegram.messages, [])
+        self.assertEqual(status_message.request_count, 1)
+
+    async def test_group_change_notification_refreshes_status_message(self) -> None:
+        feature, telegram, state, status_message = self._build_feature()
+        state.set(self.prefix, "current_group", "5")
+
+        await feature.on_state_change(
+            f"sensor.{self.prefix}_primary_schedule_group",
+            {"state": "5"},
+            {"state": "6"},
+        )
+
+        self.assertEqual(state.get(self.prefix, "current_group"), "6")
+        self.assertEqual(telegram.messages, ["group_change|5->6"])
+        self.assertEqual(status_message.request_count, 1)
 
 
 if __name__ == "__main__":
