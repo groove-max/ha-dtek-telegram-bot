@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2026-04-15
+
+### Fixed
+
+- Fixed ingress editor reloads after save so the web UI now reflects the latest persisted runtime config instead of stale startup state.
+- Preserved saved voltage quality thresholds and other runtime fields in the web UI after save and refresh.
+
 ## [0.3.3] - 2026-04-13
 
 ### Fixed

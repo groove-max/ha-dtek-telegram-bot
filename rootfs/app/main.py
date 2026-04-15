@@ -16,6 +16,8 @@ from config import (
     build_runtime_config_payload,
     get_runtime_config_path,
     load_config,
+    load_runtime_config_payload,
+    validate_runtime_config_payload,
 )
 from features import ALL_FEATURES
 from features.base import Feature
@@ -273,6 +275,33 @@ class Orchestrator:
                     "Could not fetch device info for %s, using prefix",
                     addr.entity_prefix,
                 )
+
+    def _get_editor_runtime_config(self) -> FullConfig:
+        """Return the latest saved editor config without mutating active runtime state."""
+        try:
+            editor_config = validate_runtime_config_payload(
+                load_runtime_config_payload(),
+                options={
+                    "telegram_bot_token": self.config.telegram_bot_token,
+                    "telegram_chat_id": self.config.telegram_chat_id,
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to reload persisted runtime config for ingress editor"
+            )
+            return self.config
+
+        active_by_prefix = {
+            address.entity_prefix: address for address in self.config.addresses
+        }
+        for address in editor_config.addresses:
+            if address.display_name:
+                continue
+            active = active_by_prefix.get(address.entity_prefix)
+            if active and active.display_name:
+                address.display_name = active.display_name
+        return editor_config
 
     async def shutdown(self) -> None:
         """Graceful shutdown."""
@@ -1191,10 +1220,11 @@ class Orchestrator:
 
     async def get_editor_config(self) -> dict[str, Any]:
         """Return the editable runtime config payload for the ingress editor."""
+        editor_config = self._get_editor_runtime_config()
         return {
             "config_path": str(get_runtime_config_path()),
-            "config": build_runtime_config_payload(self.config),
-            "preview": await self.preview_runtime_config(self.config),
+            "config": build_runtime_config_payload(editor_config),
+            "preview": await self.preview_runtime_config(editor_config),
             "options": {
                 "default_chat_id": self.config.telegram_chat_id,
                 "has_telegram_token": bool(self.config.telegram_bot_token),
