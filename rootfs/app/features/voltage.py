@@ -28,6 +28,46 @@ class VoltageFeature(Feature):
         for ve in self.config.voltage.entities:
             self._entity_labels[ve.entity] = ve.label
 
+    @staticmethod
+    def _alert_keys(entity_id: str) -> tuple[str, str]:
+        return f"voltage_alert_{entity_id}", f"voltage_alert_type_{entity_id}"
+
+    def _get_active_alert_type(
+        self,
+        entity_id: str,
+        voltage: float,
+        low: float,
+        high: float,
+    ) -> str | None:
+        alert_key, alert_type_key = self._alert_keys(entity_id)
+        if not self.state_get(alert_key, False):
+            return None
+
+        active_type = self.state_get(alert_type_key, "")
+        if active_type in {"low", "high"}:
+            return active_type
+
+        # Compatibility with states written by older versions that only stored
+        # the boolean active flag but not the alert direction.
+        if voltage < low:
+            return "low"
+        if voltage > high:
+            return "high"
+
+        self._clear_alert_state(entity_id)
+        return None
+
+    def _has_recovered(self, alert_type: str, voltage: float) -> bool:
+        hysteresis = self.config.voltage.hysteresis
+        if alert_type == "low":
+            return voltage >= (self.config.voltage.low + hysteresis)
+        return voltage <= (self.config.voltage.high - hysteresis)
+
+    def _clear_alert_state(self, entity_id: str) -> None:
+        alert_key, alert_type_key = self._alert_keys(entity_id)
+        self.state_set(alert_key, False)
+        self.state_set(alert_type_key, "")
+
     @property
     def enabled(self) -> bool:
         return self.config.voltage.enabled and len(self.config.voltage.entities) > 0
@@ -48,24 +88,25 @@ class VoltageFeature(Feature):
             return
 
         label = self._entity_labels.get(entity_id, "")
-        alert_key = f"voltage_alert_{entity_id}"
-        is_alert_active = self.state_get(alert_key, False)
 
         low = self.config.voltage.low
         high = self.config.voltage.high
+        active_type = self._get_active_alert_type(entity_id, voltage, low, high)
+
+        if active_type is not None:
+            self._cancel_pending(entity_id)
+            if self._has_recovered(active_type, voltage):
+                await self._send_normalized(label, voltage)
+                self._clear_alert_state(entity_id)
+            else:
+                return
 
         if voltage < low:
-            if not is_alert_active:
-                self._schedule_alert(entity_id, label, voltage, "low")
+            self._schedule_alert(entity_id, label, voltage, "low")
         elif voltage > high:
-            if not is_alert_active:
-                self._schedule_alert(entity_id, label, voltage, "high")
+            self._schedule_alert(entity_id, label, voltage, "high")
         else:
-            # Voltage is normal
             self._cancel_pending(entity_id)
-            if is_alert_active:
-                await self._send_normalized(label, voltage)
-                self.state_set(alert_key, False)
 
     def _schedule_alert(
         self, entity_id: str, label: str, voltage: float, alert_type: str
@@ -91,8 +132,9 @@ class VoltageFeature(Feature):
             )
 
             if still_bad:
-                alert_key = f"voltage_alert_{entity_id}"
+                alert_key, alert_type_key = self._alert_keys(entity_id)
                 self.state_set(alert_key, True)
+                self.state_set(alert_type_key, alert_type)
                 await self._send_alert(label, current, alert_type)
 
         self._pending_alerts[entity_id] = asyncio.create_task(_delayed_alert())

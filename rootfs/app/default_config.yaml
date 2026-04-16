@@ -56,6 +56,7 @@ addresses:
       entities:
       low: 195
       high: 245
+      hysteresis: 5  # return-to-normal margin in volts to avoid alert flapping
       delay: 15    # seconds
       present_above: 50  # below = phase/power absent
       unavailable_as_missing: true  # false = ignore unavailable for off state

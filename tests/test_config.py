@@ -26,6 +26,10 @@ class ConfigValidationTest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             VoltageConfig(delay=-1)
 
+    def test_voltage_hysteresis_must_be_non_negative(self) -> None:
+        with self.assertRaises(ValidationError):
+            VoltageConfig(hysteresis=-0.1)
+
     def test_upcoming_outage_minutes_must_be_positive(self) -> None:
         with self.assertRaises(ValidationError):
             UpcomingOutageConfig(minutes=0)

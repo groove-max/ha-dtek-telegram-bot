@@ -249,6 +249,12 @@ They are useful when:
 - the power is technically available
 - but voltage quality is poor and equipment may behave badly
 
+The voltage section also supports a hysteresis margin for recovery notifications.
+
+- Low/high alerts still trigger at the configured threshold.
+- The `voltage_normal` recovery message is sent only after the value moves back past the threshold by the configured hysteresis margin.
+- This helps avoid repeated low/high/normal flapping when voltage oscillates close to the boundary.
+
 ### Power-loss and restore messages
 
 These are the most important messages for most users.

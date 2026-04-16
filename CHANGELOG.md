@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.5] - 2026-04-16
+
+### Fixed
+
+- Added configurable voltage hysteresis so low/high voltage alerts normalize only after returning to a safer range instead of flapping at the threshold.
+- Exposed the voltage hysteresis control in the ingress UI and persisted it in runtime config.
+
 ## [0.3.4] - 2026-04-15
 
 ### Fixed

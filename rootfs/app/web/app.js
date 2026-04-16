@@ -317,6 +317,7 @@ function createBlankAddress(prefill = {}) {
       unavailable_as_missing: true,
       low: 195,
       high: 245,
+      hysteresis: 5,
       delay: 15,
       silent: false,
     },
@@ -1620,10 +1621,17 @@ function renderAddressEditor(address, index) {
               <input class="voltage-high" type="number" step="0.1" value="${escapeHtml(address.voltage?.high ?? 245)}" />
             </label>
             <label class="field compact-field">
+              <span>Гістерезис (В)</span>
+              <input class="voltage-hysteresis" type="number" step="0.1" min="0" value="${escapeHtml(address.voltage?.hysteresis ?? 5)}" />
+            </label>
+            <label class="field compact-field">
               <span>Затримка (с)</span>
               <input class="voltage-delay" type="number" step="1" value="${escapeHtml(address.voltage?.delay ?? 15)}" />
             </label>
           </div>
+          <p class="helper-copy voltage-alert-only">
+            Після low/high alert повідомлення про нормалізацію надсилається тільки тоді, коли напруга повернулась у безпечний діапазон із цим запасом, щоб не спамити біля порога.
+          </p>
         </div>
       </div>
 
@@ -1902,6 +1910,7 @@ function collectEditorConfig() {
         ).checked,
         low: toNumber(form.querySelector(".voltage-low").value, 195),
         high: toNumber(form.querySelector(".voltage-high").value, 245),
+        hysteresis: toNumber(form.querySelector(".voltage-hysteresis").value, 5),
         delay: toNumber(form.querySelector(".voltage-delay").value, 15, Number.parseInt),
         silent: form.querySelector(".voltage-silent").checked,
       },

@@ -54,6 +54,7 @@ class VoltageConfig(BaseModel):
     entities: list[VoltageEntityConfig] = Field(default_factory=list)
     low: float = 195.0
     high: float = 245.0
+    hysteresis: float = 5.0
     delay: int = 15
     present_above: float = 50.0
     unavailable_as_missing: bool = True
@@ -71,6 +72,13 @@ class VoltageConfig(BaseModel):
     def validate_delay(cls, v: int) -> int:
         if v < 0:
             raise ValueError("voltage.delay must be >= 0")
+        return v
+
+    @field_validator("hysteresis")
+    @classmethod
+    def validate_hysteresis(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("voltage.hysteresis must be >= 0")
         return v
 
 
