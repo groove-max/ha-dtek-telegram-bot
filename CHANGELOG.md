@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.6] - 2026-04-22
+
+### Fixed
+
+- Suppressed voltage quality alerts for missing phases so zero or phase-loss values no longer generate false low-voltage notifications.
+- Cleared active voltage quality alerts silently when a phase drops below the presence threshold, avoiding misleading recovery chatter during real phase loss.
+
 ## [0.3.5] - 2026-04-16
 
 ### Fixed
