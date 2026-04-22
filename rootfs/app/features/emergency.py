@@ -75,6 +75,7 @@ class EmergencyFeature(Feature):
             self.state_set("last_outage_end", None)
             self.state_set("last_outage_description", None)
             self.state_set("last_emergency_context_at", None)
+            self.state_set("last_emergency_snapshot_key", None)
             return
 
         start_raw = await self._get_entity_value("outage_start", "")
@@ -87,6 +88,15 @@ class EmergencyFeature(Feature):
         self._mark_emergency_context()
         if start_raw:
             self.state_set("outage_start_time", start_raw)
+        self.state_set(
+            "last_emergency_snapshot_key",
+            self._emergency_snapshot_key(
+                outage_type=current_status,
+                description=description,
+                start_raw=start_raw,
+                end_raw=end_raw,
+            ),
+        )
 
     async def on_stop(self) -> None:
         """Cancel any pending batched outage update during shutdown."""
@@ -293,6 +303,7 @@ class EmergencyFeature(Feature):
         self.state_set("last_outage_end", None)
         self.state_set("last_outage_description", None)
         self.state_set("last_emergency_context_at", None)
+        self.state_set("last_emergency_snapshot_key", None)
         await self._notify_status_message()
 
     async def _on_type_change(self, old_type: str, new_type: str) -> None:
@@ -319,6 +330,12 @@ class EmergencyFeature(Feature):
         description = await self._get_entity_value("outage_description", "")
         start_raw = await self._get_entity_value("outage_start", "")
         end_raw = await self._get_entity_value("outage_end", "")
+        snapshot_key = self._emergency_snapshot_key(
+            outage_type=outage_type,
+            description=description,
+            start_raw=start_raw,
+            end_raw=end_raw,
+        )
 
         self.state_set("last_outage_start", start_raw or None)
         self.state_set("last_outage_end", end_raw)
@@ -326,6 +343,13 @@ class EmergencyFeature(Feature):
         self._mark_emergency_context()
         if start_raw:
             self.state_set("outage_start_time", start_raw)
+
+        if self.state_get("last_emergency_snapshot_key") == snapshot_key:
+            self.log.info("Duplicate outage snapshot suppressed: %s", snapshot_key)
+            await self._notify_status_message()
+            return
+
+        self.state_set("last_emergency_snapshot_key", snapshot_key)
 
         text = self.render(
             "emergency_start",
@@ -451,3 +475,21 @@ class EmergencyFeature(Feature):
 
     def _mark_emergency_context(self) -> None:
         self.state_set("last_emergency_context_at", now_kyiv().isoformat())
+
+    @staticmethod
+    def _emergency_snapshot_key(
+        *,
+        outage_type: str,
+        description: str,
+        start_raw: str,
+        end_raw: str,
+    ) -> str:
+        """Build an idempotency key for a full outage snapshot notification."""
+        return "|".join(
+            (
+                str(outage_type or ""),
+                str(description or ""),
+                str(start_raw or ""),
+                str(end_raw or ""),
+            )
+        )

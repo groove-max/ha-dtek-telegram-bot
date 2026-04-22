@@ -257,6 +257,27 @@ class EmergencyFeatureTest(unittest.IsolatedAsyncioTestCase):
             "2026-03-09T05:17:00+00:00",
         )
 
+    async def test_duplicate_start_snapshot_is_suppressed(self) -> None:
+        feature, ha, telegram, state = self._build_feature()
+        ha.states[feature.entity("status")] = {"state": "emergency"}
+
+        await feature.on_state_change(
+            feature.entity("status"),
+            {"state": "ok"},
+            {"state": "emergency"},
+        )
+        await feature.on_state_change(
+            feature.entity("status"),
+            {"state": "ok"},
+            {"state": "emergency"},
+        )
+
+        self.assertEqual(len(telegram.messages), 1)
+        self.assertTrue(telegram.messages[0].startswith("emergency_start|"))
+        self.assertIsNotNone(
+            state.get(feature.config.entity_prefix, "last_emergency_snapshot_key")
+        )
+
     async def test_duplicate_outage_end_after_snapshot_is_suppressed(self) -> None:
         feature, ha, telegram, state = self._build_feature()
         state.set(feature.config.entity_prefix, "last_emergency_status", "emergency")
