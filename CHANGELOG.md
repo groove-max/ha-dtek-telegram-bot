@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.7] - 2026-04-22
+
+### Fixed
+
+- Suppressed duplicate emergency snapshot notifications when Home Assistant delivers the same outage-start snapshot more than once.
+
 ## [0.3.6] - 2026-04-22
 
 ### Fixed
