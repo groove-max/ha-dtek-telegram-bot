@@ -63,6 +63,10 @@ class VoltageFeature(Feature):
             return voltage >= (self.config.voltage.low + hysteresis)
         return voltage <= (self.config.voltage.high - hysteresis)
 
+    def _phase_is_present(self, voltage: float) -> bool:
+        """Return whether a voltage sample means the phase is electrically present."""
+        return voltage >= getattr(self.config.voltage, "present_above", 50.0)
+
     def _clear_alert_state(self, entity_id: str) -> None:
         alert_key, alert_type_key = self._alert_keys(entity_id)
         self.state_set(alert_key, False)
@@ -88,6 +92,16 @@ class VoltageFeature(Feature):
             return
 
         label = self._entity_labels.get(entity_id, "")
+
+        if not self._phase_is_present(voltage):
+            self._cancel_pending(entity_id)
+            self._clear_alert_state(entity_id)
+            self.log.debug(
+                "Voltage quality ignored because phase %s is missing: %.1f V",
+                label or entity_id,
+                voltage,
+            )
+            return
 
         low = self.config.voltage.low
         high = self.config.voltage.high
@@ -123,6 +137,10 @@ class VoltageFeature(Feature):
             try:
                 current = float(self.get_state_value(state))
             except (ValueError, TypeError):
+                return
+
+            if not self._phase_is_present(current):
+                self._clear_alert_state(entity_id)
                 return
 
             low = self.config.voltage.low

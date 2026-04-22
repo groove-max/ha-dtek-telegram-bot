@@ -131,6 +131,7 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
                 high=high,
                 hysteresis=hysteresis,
                 delay=delay,
+                present_above=50.0,
                 silent=False,
             ),
         )
@@ -229,6 +230,66 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
                 "voltage_normal|voltage=249.9|phase=L1",
             ],
         )
+
+    async def test_zero_voltage_is_missing_phase_not_low_voltage_alert(self) -> None:
+        feature, ha, telegram, state = self._build_feature(
+            low=195.0,
+            hysteresis=5.0,
+        )
+
+        missing_state = {"state": "0.0"}
+        ha.states[self.voltage_entity] = missing_state
+        await feature.on_state_change(
+            self.voltage_entity,
+            {"state": "224.0"},
+            missing_state,
+        )
+        await asyncio.sleep(0.01)
+
+        recovered_state = {"state": "224.9"}
+        ha.states[self.voltage_entity] = recovered_state
+        await feature.on_state_change(
+            self.voltage_entity,
+            missing_state,
+            recovered_state,
+        )
+
+        self.assertEqual(telegram.messages, [])
+        self.assertFalse(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
+
+    async def test_voltage_below_presence_threshold_clears_active_alert_silently(self) -> None:
+        feature, ha, telegram, state = self._build_feature(
+            low=195.0,
+            hysteresis=5.0,
+        )
+
+        low_state = {"state": "190.0"}
+        ha.states[self.voltage_entity] = low_state
+        await feature.on_state_change(
+            self.voltage_entity,
+            {"state": "224.0"},
+            low_state,
+        )
+        await asyncio.sleep(0.01)
+
+        missing_state = {"state": "0.0"}
+        ha.states[self.voltage_entity] = missing_state
+        await feature.on_state_change(
+            self.voltage_entity,
+            low_state,
+            missing_state,
+        )
+
+        recovered_state = {"state": "224.9"}
+        ha.states[self.voltage_entity] = recovered_state
+        await feature.on_state_change(
+            self.voltage_entity,
+            missing_state,
+            recovered_state,
+        )
+
+        self.assertEqual(telegram.messages, ["voltage_low|voltage=190.0|phase=L1"])
+        self.assertFalse(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
 
 
 if __name__ == "__main__":
