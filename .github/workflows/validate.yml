@@ -3,8 +3,8 @@ name: Validate
 
 "on":
   push:
-    tags-ignore:
-      - "v*"
+    branches:
+      - "**"
   pull_request:
   schedule:
     - cron: "0 0 * * *"
