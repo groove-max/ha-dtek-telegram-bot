@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+import math
 from typing import Any
 
 from config import AddressConfig
@@ -27,55 +28,61 @@ class PowerMonitor:
         self._ha = ha
         self._state = state
         self._prefix = config.entity_prefix
+        self._loss_fresh_after = getattr(ha, "connected_at", None) or now_kyiv()
 
     async def get_power_state(self, *, prefer_stored: bool = True) -> str:
         """Return current house state: on, partial, or off."""
+        if not getattr(self._ha, "is_connected", True):
+            return "unknown"
         if prefer_stored and self._config.power.enabled:
             stored = self._state.get(self._prefix, "power_state")
-            if stored in ("on", "partial", "off"):
+            if stored in ("on", "partial", "off", "unknown"):
                 return str(stored)
         return await self.detect_current_power()
 
     async def is_on(self) -> bool:
         """Check if the house has at least some power."""
-        return await self.get_power_state() != "off"
+        return await self.get_power_state() in ("on", "partial")
 
     async def detect_current_power(self) -> str:
         """Detect current power state directly from HA entities."""
+        if not getattr(self._ha, "is_connected", True):
+            return "unknown"
         mode = self._config.power.mode if self._config.power.enabled else "dtek_only"
 
         if mode == "dtek_only":
             return await self._detect_dtek_power()
 
         if mode in ("voltage_only", "loss_plus_voltage"):
-            loss_met = await self.loss_condition_met() if mode == "loss_plus_voltage" else False
-            stale_reference = (
-                self._loss_stale_reference() if mode == "loss_plus_voltage" else None
+            loss_met = (
+                await self.loss_condition_met()
+                if mode == "loss_plus_voltage"
+                else False
             )
+            stale_reference = self._loss_stale_reference() if loss_met else None
             snapshot = await self.get_voltage_snapshot(
-                stale_reference=stale_reference if stale_reference is not None else None,
-                stale_after_seconds=self._config.power.confirm_timeout
-                if mode == "loss_plus_voltage" and stale_reference is not None
-                else None,
-                unavailable_as_missing=(
-                    self._unavailable_as_missing()
-                    if mode == "voltage_only"
-                    else self._unavailable_as_missing() and (loss_met or stale_reference is not None)
+                stale_reference=(
+                    stale_reference if stale_reference is not None else None
                 ),
+                stale_after_seconds=(
+                    self._config.power.confirm_timeout
+                    if mode == "loss_plus_voltage" and stale_reference is not None
+                    else None
+                ),
+                unavailable_as_missing=False,
             )
             house_state = snapshot.get("house_state")
             if house_state in ("on", "partial", "off"):
                 return str(house_state)
 
-        return await self._detect_dtek_power()
+        return "unknown"
 
     async def _detect_dtek_power(self) -> str:
         """Detect power state from the DTEK binary sensor."""
         entity_id = f"binary_sensor.{self._prefix}_power"
         state = await self._ha.get_state(entity_id)
-        if state and str(state.get("state", "")) == "off":
-            return "off"
-        return "on"
+        value = str((state or {}).get("state", ""))
+        return value if value in ("on", "off") else "unknown"
 
     async def get_voltage_snapshot(
         self,
@@ -88,11 +95,8 @@ class PowerMonitor:
         entities = list(self._config.voltage.entities or [])
         phases: list[dict[str, Any]] = []
         total = len(entities)
-        treat_unavailable_as_missing = (
-            self._unavailable_as_missing()
-            if unavailable_as_missing is None
-            else bool(unavailable_as_missing)
-        )
+        # Kept as a compatibility argument only. Availability is not voltage.
+        treat_unavailable_as_missing = False
         reference_dt = self._parse_state_datetime(stale_reference)
         stale_timeout_elapsed = False
         if (
@@ -110,44 +114,62 @@ class PowerMonitor:
                 total=total,
                 raw_label=entity_cfg.label,
             )
-            state = await self._ha.get_state(entity_cfg.entity)
+            state = (
+                await self._ha.get_state(entity_cfg.entity)
+                if getattr(self._ha, "is_connected", True)
+                else None
+            )
             state_missing = state is None
+            restored = bool((state or {}).get("attributes", {}).get("restored"))
             raw_value = str(state.get("state", "")) if state is not None else ""
-            last_updated = state.get("last_updated") if state is not None else None
+            last_updated = (
+                (state.get("last_reported") or state.get("last_updated"))
+                if state is not None
+                else None
+            )
             last_updated_dt = self._parse_state_datetime(last_updated)
             voltage: float | None = None
             available: bool | None = None
             counts_for_power = False
             stale_after_loss = False
 
-            if state_missing:
-                # A transient REST miss is not evidence of a missing phase.
-                # Treat it as unknown unless a loss-trigger timeout later
-                # explicitly marks the cached reading as stale.
-                available = None
-                counts_for_power = False
-            elif raw_value not in ("unavailable", "unknown", ""):
+            if not state_missing and raw_value not in ("unavailable", "unknown", ""):
                 try:
                     voltage = float(raw_value)
                 except (ValueError, TypeError):
-                    if treat_unavailable_as_missing:
-                        available = False
-                        counts_for_power = True
+                    pass
                 else:
-                    available = voltage >= self._config.voltage.present_above
-                    counts_for_power = True
-            elif treat_unavailable_as_missing:
-                available = False
-                counts_for_power = True
+                    if math.isfinite(voltage) and voltage >= 0:
+                        available = voltage >= self._config.voltage.present_above
+                        counts_for_power = True
+            age = (
+                (now_kyiv() - last_updated_dt).total_seconds()
+                if last_updated_dt
+                else None
+            )
+            stale = (
+                age is None
+                or age < -5
+                or age > getattr(self._config.voltage, "max_age_seconds", 600)
+            )
+            if stale or restored or not counts_for_power:
+                voltage, available, counts_for_power = None, None, False
 
+            # Only a fresh independent loss signal may invalidate an older
+            # cached voltage. Missing REST results never prove a power failure.
             if (
                 stale_timeout_elapsed
+                and not state_missing
+                and not restored
                 and reference_dt is not None
-                and (last_updated_dt is None or last_updated_dt < reference_dt)
+                and last_updated_dt is not None
+                and (
+                    last_updated_dt < reference_dt
+                    or raw_value in ("unavailable", "unknown")
+                )
+                and await self.loss_condition_met()
             ):
-                voltage = None
-                available = False
-                counts_for_power = True
+                voltage, available, counts_for_power = None, False, True
                 stale_after_loss = True
 
             phases.append(
@@ -160,6 +182,8 @@ class PowerMonitor:
                     "raw_state": raw_value,
                     "last_updated": last_updated,
                     "stale_after_loss": stale_after_loss,
+                    "stale": stale,
+                    "restored": restored,
                 }
             )
 
@@ -168,7 +192,9 @@ class PowerMonitor:
         phase_count = len(phases)
         if not phases:
             house_state: str | None = None
-        elif known_phase_count == 0:
+        elif known_phase_count == 0 or (
+            present_phase_count == 0 and known_phase_count < phase_count
+        ):
             house_state = None
         elif present_phase_count == phase_count and known_phase_count == phase_count:
             house_state = "on"
@@ -184,9 +210,7 @@ class PowerMonitor:
             if phase["counts_for_power"] and phase["available"] is False
         ]
         unknown_phases = [
-            phase["label"]
-            for phase in phases
-            if not phase["counts_for_power"]
+            phase["label"] for phase in phases if not phase["counts_for_power"]
         ]
 
         return {
@@ -231,14 +255,51 @@ class PowerMonitor:
         if not loss_entity:
             return False
 
-        state = await self._ha.get_state(loss_entity)
-        if state is None:
+        if not getattr(self._ha, "is_connected", True):
             return False
-
+        state = await self._ha.get_state(loss_entity)
+        if not state or state.get("attributes", {}).get("restored"):
+            return False
+        topic = getattr(self._config.power, "loss_mqtt_topic", "")
+        if topic:
+            live = self._ha.mqtt_observation(topic)
+            if live is None:
+                return False
+            try:
+                agrees = float(live["state"]) == float(state["state"])
+            except (ValueError, TypeError):
+                agrees = live["state"] == state["state"]
+            if not agrees:
+                return False
+            state = live
         value = str(state.get("state", ""))
-        return parse_condition(self._config.power.loss_state, value) or (
-            value in ("unavailable", "unknown")
+        stamp = self._parse_state_datetime(
+            state.get("last_reported") or state.get("last_updated")
         )
+        connection_time = self._parse_state_datetime(
+            getattr(self._ha, "connected_at", None)
+        )
+        floor = (
+            max(self._loss_fresh_after, connection_time)
+            if connection_time
+            else self._loss_fresh_after
+        )
+        if (
+            stamp is None
+            or stamp <= floor
+            or not -5
+            <= (now_kyiv() - stamp).total_seconds()
+            <= getattr(self._config.voltage, "max_age_seconds", 600)
+        ):
+            return False
+        if value in ("unavailable", "unknown", ""):
+            return False
+        try:
+            if not math.isfinite(float(value)):
+                return False
+        except ValueError:
+            pass  # Binary sensors (off/on) may also be independent witnesses.
+        return parse_condition(self._config.power.loss_state, value)
 
     def phase_label_for_entity(self, entity_id: str) -> str:
         """Return the display label for a configured voltage entity."""
@@ -252,9 +313,6 @@ class PowerMonitor:
                     raw_label=entity_cfg.label,
                 )
         return entity_id
-
-    def _unavailable_as_missing(self) -> bool:
-        return bool(getattr(self._config.voltage, "unavailable_as_missing", True))
 
     def _loss_stale_reference(self) -> datetime | None:
         return self._parse_state_datetime(

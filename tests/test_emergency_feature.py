@@ -113,7 +113,7 @@ class DummyTemplates:
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
 class EmergencyFeatureTest(unittest.IsolatedAsyncioTestCase):
     def _build_feature(self) -> tuple[EmergencyFeature, DummyHA, DummyTelegram, DummyState]:
-        prefix = "doroga_liustdorfska_56v"
+        prefix = "vulytsia_prykladna_12a"
         states = {
             f"sensor.{prefix}_outage_status": {"state": "emergency"},
             f"sensor.{prefix}_outage_description": {"state": "Аварійні ремонтні роботи"},
@@ -126,7 +126,7 @@ class EmergencyFeatureTest(unittest.IsolatedAsyncioTestCase):
         feature = EmergencyFeature(
             address_config=SimpleNamespace(
                 entity_prefix=prefix,
-                display_name="Одеса • дорога Люстдорфська, 56В",
+                display_name="Одеса • вулиця Прикладна, 12А",
                 telegram_chat_id="",
                 emergency=SimpleNamespace(enabled=True, silent=False),
                 power=SimpleNamespace(enabled=True),

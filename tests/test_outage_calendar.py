@@ -40,14 +40,38 @@ class OutageCalendarTest(unittest.TestCase):
             ],
         )
 
+    def test_single_group_already_in_header_is_not_repeated(self) -> None:
+        now = datetime(2026, 10, 17, 14, 0, tzinfo=TZ_KYIV)
+        events = [{"start": "2026-10-17T13:00:00+03:00", "end": "2026-10-17T16:00:00+03:00", "description": "Planned; group=GPV5.1"}]
+        with patch.object(outage_calendar, "now_kyiv", return_value=now):
+            lines = outage_calendar.build_schedule_lines(events, header_group="GPV5.1")
+        self.assertEqual(lines, ["📅 17.10 — 13:00–16:00"])
+
+    def test_multiple_groups_keep_separate_labels_and_overlapping_intervals(self) -> None:
+        now = datetime(2026, 10, 17, 9, 0, tzinfo=TZ_KYIV)
+        events = [
+            {"start": "2026-10-17T10:00:00+03:00", "end": "2026-10-17T12:00:00+03:00", "description": "Planned; group=GPV3.1"},
+            {"start": "2026-10-17T11:00:00+03:00", "end": "2026-10-17T13:00:00+03:00", "description": "Planned; group=GPV5.1"},
+        ]
+        with patch.object(outage_calendar, "now_kyiv", return_value=now):
+            lines = outage_calendar.build_schedule_lines(events, header_group="GPV3.1, GPV5.1")
+        self.assertEqual(lines, ["🔵 GPV3.1", "📅 17.10 — 10:00–12:00", "🔵 GPV5.1", "📅 17.10 — 11:00–13:00"])
+
+    def test_one_schedule_of_multi_group_address_still_identifies_its_group(self) -> None:
+        now = datetime(2026, 10, 17, 9, 0, tzinfo=TZ_KYIV)
+        events = [{"start": "2026-10-17T10:00:00+03:00", "end": "2026-10-17T12:00:00+03:00", "description": "Planned; group=GPV3.1"}]
+        with patch.object(outage_calendar, "now_kyiv", return_value=now):
+            lines = outage_calendar.build_schedule_lines(events, header_group="GPV3.1, GPV5.1")
+        self.assertEqual(lines, ["🔵 GPV3.1", "📅 17.10 — 10:00–12:00"])
+
     def test_extract_calendar_events_can_skip_emergency(self) -> None:
         result = {
             "result": {
                 "response": {
                     "calendar.test": {
                         "events": [
-                            {"start": "2026-03-10T10:00:00+02:00", "description": "normal"},
-                            {"start": "2026-03-09T10:00:00+02:00", "description": "emergency"},
+                            {"start": "2026-03-10T10:00:00+02:00", "end": "2026-03-10T11:00:00+02:00", "description": "normal"},
+                            {"start": "2026-03-09T10:00:00+02:00", "end": "2026-03-09T11:00:00+02:00", "description": "emergency"},
                         ]
                     }
                 }

@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.13] - 2026-10-17
+
+- Preserve configuration and per-template drafts during refresh, validation, previews and delayed saves; reject conflicting saves from another tab.
+- Keep selected template addresses stable when the address list changes; support empty configurations, keyboard section controls and narrow screens.
+- Add browser regression tests to CI and JSON-safe validation errors to the editor API.
+
+- Start new installations without sample address subscriptions; preserve existing user configuration.
+- Share release checks with branch/PR CI and build/test both amd64 and aarch64 images.
+
+- License new releases under PolyForm Noncommercial 1.0.0; earlier MIT releases keep their original terms.
+
+- Rewrite English/Ukrainian guides with personal chat, group and channel setup; clarify destination help and cover all chat types, pin permissions and private test routing with regression tests.
+
+- Separate unknown telemetry from confirmed power loss; retire unavailable-as-off inference while retaining legacy configuration compatibility.
+- Use monotonic debounce deadlines, a 5-second freshness watchdog and independent telemetry-loss/recovery notices. Preserve confirmed outage history through unknown periods.
+- Validate loss-trigger freshness, reject invalid/future voltage samples, reset loss confirmation after restart and debounce per-phase notifications.
+- Reject retained MQTT replay for configured loss witnesses via a passive HA websocket subscription; require live payloads matching the HA sensor.
+- Add transition, restart, freshness, MQTT replay and disconnection regression tests; expose telemetry settings in the editor.
+- Disable standalone telemetry notices by default while keeping pinned status updates; preserve the line break before the recovery caveat.
+- Document one backed-up grid-input voltage sensor as a complete supported setup, with reporting, connectivity and freshness requirements; keep the second loss sensor optional.
+- Remove repeated single-group labels from the pinned status; place the next planned interval on its own line and share formatting with template previews.
+
+## [0.3.12] - 2026-10-17
+
+- Respect HA's group-label visibility: display local schedule variants when the operator hides public group numbers, including Kyiv city / KEM.
+- Keep opaque IDs for selection, source validation and deduplication; only presentation changes. Existing public/legacy group formatting stays compatible.
+- Use the same presentation for schedule/group/upcoming messages, pinned status and template previews. Explain selected-group behavior in the address editor.
+- Add hidden-group presentation and provenance regression tests.
+
+## [0.3.11] - 2026-10-17
+
+- Share schedule delivery acknowledgements between group-change and schedule-change notifications; serialize concurrent handlers per address and defer schedule updates while a group notification is pending.
+- Persist acknowledgement only after successful delivery; failed sends remain retryable and later schedule changes still notify.
+- Remove the unpublished-dates note from group notifications. An incomplete empty calendar produces only the group change, without an all-clear claim.
+- Add regression tests for event order, concurrent ticks, failed delivery, restart, disabled group notifications and publication coverage.
+
+## [0.3.10] - 2026-10-17
+
+### Fixed
+
+- Recheck provider and address identity together with groups and snapshot revision before schedule notification delivery.
+- Use the integration's explicit coverage contract: unpublished dates cannot trigger an all-clear notification, and group-change messages explain incomplete publication.
+- Preserve compatibility with integrations that do not yet expose provider/coverage metadata.
+
+## [0.3.9] - 2026-10-17
+
+### Fixed
+
+- Require the integration's verified schedule flag and stable snapshot identity when fetching schedules and immediately before automatic schedule/group/countdown notifications.
+- Revalidate after persistent state writes, so a failed poll or same-group schedule change during a pending send cannot deliver the old text.
+- Reject display-only saved calendar events. Recovery refetches current events and does not replay warnings for already started outages.
+- Remain compatible with integrations predating the freshness attributes; those still use the existing group/calendar checks.
+
+## [0.3.8] - 2026-10-17
+
+- Avoid repeating a schedule group already identified by the message header; retain labels for ambiguous or multi-group schedules.
+- Isolate test routing, state and message ownership; collect Telegram feedback and delivery evidence in SQLite.
+- Reconcile complete address groups after unavailable/reconnect, preserve per-group calendars and support an explicit selected group.
+- Reject failed calendar responses instead of announcing an empty schedule.
+- Detect stale voltage, preserve voltage alert timers and apply outage debounce during periodic reconciliation.
+- Revalidate calendar notifications before retrying; deduplicate upcoming alerts across countdown changes and expire them at outage start.
+- Keep voltage retry streams independent per sensor and ignore stale/restored recovery samples.
+- Pin tested Python dependencies for Docker and CI; run tests with real runtime imports.
+- Persist bounded retries for explicit temporary Telegram failures and retain ambiguous results for inspection.
+- Save state/config atomically, use the actual Home Assistant config mount, and show saved/active configuration differences.
+
 ## [0.3.7] - 2026-04-22
 
 ### Fixed

@@ -7,19 +7,56 @@ name: Build Add-on
       - "v*"
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   docker-smoke-build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
       - name: Build add-on image
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
         run: |
+          BASE_IMAGE="ghcr.io/home-assistant/${BUILD_ARCH}-base:3.20"
+          BUILD_VERSION="$(sed -n 's/^version: "\(.*\)"/\1/p' config.yaml)"
+          test -n "$BUILD_VERSION"
           docker build \
-            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.20 \
+            --build-arg BUILD_FROM="$BASE_IMAGE" \
+            --build-arg BUILD_ARCH="$BUILD_ARCH" \
+            --build-arg BUILD_VERSION="$BUILD_VERSION" \
             --tag ha-dtek-telegram-bot:test \
             .
+
+      - name: Test inside the shipped image
+        run: |
+          docker run --rm --entrypoint /opt/venv/bin/python \
+            -v "$PWD/tests:/verification/tests:ro" -e PYTHONPATH=/app \
+            ha-dtek-telegram-bot:test -c '
+          import aiogram, jinja2, unittest
+          from pathlib import Path
+          Path("/verification/rootfs").mkdir(exist_ok=True)
+          Path("/verification/rootfs/app").symlink_to("/app")
+          result = unittest.TextTestRunner(verbosity=2).run(
+              unittest.defaultTestLoader.discover("/verification/tests")
+          )
+          raise SystemExit(not result.wasSuccessful())'
+
+      - name: Check installed dependencies
+        run: |
+          docker run --rm --entrypoint /opt/venv/bin/python \
+            ha-dtek-telegram-bot:test -m pip check

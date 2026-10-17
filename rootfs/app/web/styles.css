@@ -4,8 +4,8 @@
   --surface: #1a1d22;
   --surface-raised: #22262c;
   --text: #dce0e5;
-  --text-2: #7d848e;
-  --text-3: #555a62;
+  --text-2: #a2a9b4;
+  --text-3: #939ba7;
   --border: #2e3239;
   --accent: #5b9cf6;
   --accent-bg: rgba(91, 156, 246, 0.12);
@@ -1120,4 +1120,37 @@ input[readonly] {
     border-bottom: none;
     border-radius: 0;
   }
+}
+
+/* Forms must fit narrow HA sidebars and mobile ingress views. */
+.tab-shell, .tab-panel, .panel, .editor-card,
+.side-stack, .subpanel, .preview-card, .signal-card,
+.selected-entity-item > div, .catalog-row > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.field-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+.template-toolbar-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+.addr-identity-grid { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); }
+.entity-name, .preview-copy, .helper-copy, .status-message, .template-meta-copy {
+  overflow-wrap: anywhere;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button:focus-visible, select:focus-visible, textarea:focus-visible, .subpanel-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.template-source:focus { border-color: var(--accent); }
+#editor-notices:empty { display: none; }
+@media (max-width: 768px) {
+  .addr-identity-grid { grid-template-columns: minmax(0, 1fr); }
+  .inline-fields { align-items: stretch; }
+  .inline-fields .field { width: 100%; }
+  .template-source, .template-preview { min-height: 220px; }
+}
+@media (max-width: 380px) {
+  .page-shell { padding: 8px; }
+  .panel, .editor-card { padding: 10px; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .addr-title-row { flex-wrap: wrap; }
 }
