@@ -25,7 +25,33 @@ body:
     id: addon_version
     attributes:
       label: Add-on version
-      placeholder: "0.3.0"
+      placeholder: "0.3.13"
+    validations:
+      required: true
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: DTEK Monitor integration version
+      description: >-
+        Include the beta suffix if present. If you cannot install the integration
+        yet, enter "not installed".
+      placeholder: "2.0.0b1 or 1.7.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operator
+    attributes:
+      label: DTEK operator / region
+      description: Do not include your exact address or personal account number.
+      options:
+        - Odesa oblast (OEM)
+        - Kyiv oblast (KREM)
+        - Dnipropetrovsk oblast (DNEM)
+        - Kyiv city (KEM)
+        - Multiple operators
+        - Unknown / not configured yet
     validations:
       required: true
 
@@ -94,8 +120,8 @@ body:
     attributes:
       label: Relevant config context
       description: >-
-        Remove secrets. Include only the relevant address, power mode, and
-        sensor choices.
+        Remove tokens, chat IDs, personal account details and exact addresses.
+        Include the relevant power mode, selected group and sensor choices.
       render: yaml
 
   - type: textarea
@@ -103,7 +129,9 @@ body:
     attributes:
       label: Relevant Home Assistant entity states
       description: >-
-        Include the relevant `ha-dtek-monitor` entities and local sensors.
+        Include the relevant DTEK Monitor entities and local sensors. For
+        schedule issues, include connection diagnostics and Schedule availability
+        if present in your integration version. Remove private details.
       render: yaml
 
   - type: textarea

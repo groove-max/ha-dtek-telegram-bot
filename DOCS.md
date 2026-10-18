@@ -2,7 +2,58 @@
 
 **English** · [Українська](DOCS.uk.md) · [Installation and overview](README.md)
 
-[Telegram](#telegram) · [Configuration](#configuration) · [Power detection](#power) · [Notifications](#notifications) · [Templates](#templates) · [Testing](#testing) · [Updates](#updates)
+[DTEK Monitor](#dtek-monitor) · [Telegram](#telegram) · [Addresses and chats](#destinations) · [Configuration](#configuration) · [Power detection](#power) · [Notifications](#notifications) · [Templates](#templates) · [Testing](#testing) · [Updates](#updates)
+
+<a id="dtek-monitor"></a>
+## Connect DTEK Monitor
+
+Bot **0.3.13** supports the public building entities from DTEK Monitor **1.7.0** and **2.0.0b1**. These projects have independent version numbers; the integration's beta does not require a beta bot. Both require HA **2026.3.0+**. Regional support comes from the integration: Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
+
+| Your setup | What to select in the bot |
+| --- | --- |
+| An address configured directly in DTEK Monitor | Discover and select that building in the bot's web editor. |
+| An Odesa personal account in Monitor 2.0 | First check the building link in **My DTEK → Settings**. A unique address match links automatically; resolve an ambiguous or missing link there. Then discover the public building in the bot. |
+| Several personal accounts in the same building | Use the shared building entry once. The bot does not need a separate address for each account. |
+| Accounts or addresses in different buildings | Add each discovered building as a separate bot address. |
+
+The bot does not need your DTEK phone, password, account number or apartment number. It does not use the personal calendar, send readings, or deliver the integration's account reminders. Those features remain in [My DTEK](https://github.com/groove-max/ha-dtek-monitor/blob/v2.0.0b1/docs/PERSONAL_ACCOUNT.md), even when the bot's destination is a private conversation.
+
+For a shared building chat, leave `selected_group` empty to include all building groups. For personal alerts, choose a confirmed group in the bot if needed. **The apartment group selected in My DTEK does not change the bot's selection**, and changing the bot's selection does not filter the building entities. If the building has one group, leaving the field empty follows it automatically.
+
+Discovery uses the building's power/status/group entities and their common ID prefix. A cabinet account entity is not an address candidate. Keep these entity IDs consistent; renaming individual IDs can break discovery or notifications. A friendly display name can be changed in the bot without renaming HA entities.
+
+<a id="monitor-upgrade"></a>
+### Upgrade the integration to 2.0.0b1
+
+This is an optional public beta. Working 1.7.0 installations can continue using the bot. However, 1.7.0 has a [known first-setup issue](https://github.com/groove-max/ha-dtek-monitor/issues/5): when no schedule is published, setup can retry indefinitely without creating the address entities. **2.0.0b1 fixes this case** and loads the address independently of schedule availability.
+
+1. Create a full HA backup that includes integration files, `.storage`, app data, `dtek_telegram_bot.yaml` and template overrides.
+2. In HACS, select **2.0.0b1** for DTEK Monitor and restart HA. If beta versions are hidden, follow the [beta installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/v2.0.0b1/docs/BETA.md).
+3. Keep the existing integration entry and bot addresses. Existing entity IDs, destinations, sensor bindings and group selections should remain unchanged.
+4. Check that the integration entry is loaded, the bot reconnects to HA, and local sensors report fresh values. A missing published schedule alone is not an upgrade failure.
+5. If you change bot settings, use **Save and restart**. For an optional delivery test, first choose a [test destination](#testing).
+
+Version 2 migrates the integration's configuration format. **Returning to 1.7.0 requires restoring the pre-upgrade backup**, including configuration and old integration files; reinstalling old code alone is insufficient. See the integration's [rollback instructions](https://github.com/groove-max/ha-dtek-monitor/blob/v2.0.0b1/docs/BETA.md#return-to-the-previous-version).
+
+<a id="schedule-availability"></a>
+### Understand a missing schedule
+
+In Monitor 2.0, check the building's **DTEK connection** and **Schedule availability** entities separately. A connection can be healthy while no daily schedule is published. Schedule availability describes today's data in Kyiv time for the relevant groups:
+
+| State | Meaning |
+| --- | --- |
+| `current` | A complete daily schedule is verified and contains planned outage intervals. |
+| `empty` | Complete daily data confirms no planned outages for that date and those groups. Emergency outages are still possible. |
+| `partial` | Only some groups or parts of the day have verified daily coverage. |
+| `forecast` | Only forecast/possible-window coverage is available; it does not confirm an empty daily schedule. |
+| `missing` | There is not enough published coverage for the date/groups. |
+| `unpublished` | The operator has disabled publication. |
+| `unsupported` | The address is marked as served by an unsupported external operator. |
+| `error` | A request failed or the response could not be validated. |
+
+The bot also checks the requested notification interval and groups, so today's status does not guarantee coverage for tomorrow. It pauses unverified schedule/group/upcoming-outage messages and resumes checking automatically. A log entry such as `Schedule has not been verified; notifications paused` can therefore reflect missing publication, not a broken Telegram token. Do not select the **Last known schedule (view only)** calendar as a live notification source.
+
+Power monitoring from fresh local sensors can continue while DTEK schedules are unavailable. The `dtek_only` mode still depends on DTEK address data and does not measure actual electricity.
 
 <a id="telegram"></a>
 ## Set up Telegram
@@ -24,6 +75,28 @@ Configure your address in HA and enable the notifications you want. `feedback_en
 If you do not need pinning, turn off `status_message.pin` or the entire `status_message.enabled` feature. `delivery_mode: pinned_edit` with `pin: false` still updates one ordinary message. In a group, this also avoids needing pin permission. [Telegram pinning permissions](https://core.telegram.org/bots/api#pinchatmessage).
 
 Each address has one destination; automatic subscriptions for arbitrary users and selecting individual forum topics are not currently implemented. If a group upgrades to a supergroup and its ID changes, update the configured ID and restart the app.
+
+<a id="destinations"></a>
+### Multiple addresses, chats and bot instances
+
+One installation can monitor several buildings and send each one's updates to a different chat. Set the main `telegram_chat_id` in the app Configuration tab, then use an address's `telegram_chat_id` override when it needs another destination. The same bot must be allowed to send to every destination.
+
+For example, this runtime configuration follows all groups for two buildings. The first uses the main chat; the second uses its own group. Replace the fictional entity prefixes through discovery and the example chat ID with your own:
+
+```yaml
+addresses:
+  - entity_prefix: vulytsia_prykladna_12a
+    display_name: Example building A
+    selected_group: ""
+  - entity_prefix: dtek_krem_0123456789abcdef
+    display_name: Example building B
+    selected_group: ""
+    telegram_chat_id: "-1001234567890"
+```
+
+**Current limits:** one bot token per installation and one destination per address. Per-address tokens and multiple delivery profiles for the same address are not implemented. Do not duplicate an `entity_prefix` to simulate separate subscriptions: its stored state and notification coordination are shared.
+
+A separate instance can be useful for another Telegram bot identity or an isolated development environment. On the same HA, such installations must also use separate runtime configuration files; changing only the app name or slug leaves `/homeassistant/dtek_telegram_bot.yaml` shared. The standard app does not provide an instance manager. For ordinary testing, use [test routing](#testing) and stop any other instance using the same token.
 
 ### Find the chat ID
 

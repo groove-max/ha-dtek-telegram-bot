@@ -45,7 +45,13 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 | [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) | Fetches DTEK data and creates HA sensors/calendars | HACS custom integration or manual copy |
 | **DTEK Telegram Bot** — this repository | Sends Telegram messages using those entities and optional local sensors | Home Assistant app repository, not HACS |
 
-Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a configured DTEK Monitor address, a Telegram bot token and a target chat ID. Install matching current releases of both projects.
+Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a configured DTEK Monitor building address, a Telegram bot token and a target chat ID.
+
+**Bot 0.3.13 works with DTEK Monitor 1.7.0 and the optional 2.0.0b1 beta.** The two projects have independent version numbers. Updating the integration to 2.0 does not require a new bot version. [Compatibility and beta upgrade steps →](DOCS.md#dtek-monitor)
+
+With Monitor 2.0, you can add an address directly or use the building linked to an Odesa personal account. The bot uses that building's public entities. Cabinet login, account numbers, meter readings and reading reminders belong to the integration; this bot does not send or manage them. A private Telegram chat still receives building notifications.
+
+**Several addresses or chats? Use one installation.** Each address has its own notifications, sensors, group selection and optional chat override. All messages use one Telegram bot token. Separate Telegram bot identities require separate instances; see [addresses, chats and instances](DOCS.md#destinations).
 
 Home Assistant now calls add-ons **apps**; older installations show **Add-ons** instead. HA Container does not include the app manager. See [Home Assistant's app requirements](https://www.home-assistant.io/apps).
 
@@ -69,7 +75,7 @@ For personal use, a conversation with the bot is enough: no group or channel is 
 
 1. In the web editor's **Налаштування** (Configure) tab, add an address from discovery. A new installation starts with an empty address list. Discovery selects the HA entity prefix; do not guess it from a street name.
 2. Set a recognizable display name. Leave the address's chat override empty to use the app's main chat.
-3. Leave **selected group** empty to follow all groups for the address. Only choose a specific group if you know it applies to your home.
+3. Leave **selected group** empty to follow all groups for the building, especially in a shared residents' chat. For personal notifications, choose a confirmed apartment group if needed. This is independent of the personal group selected in Monitor 2.0.
 4. Enable the notifications you need. For a first setup without local sensors, start with DTEK schedule/group updates and a pinned status.
 5. If using local power detection, choose a mode from the table below and select the voltage entities.
 6. Validate, then click **Зберегти й перезапустити** (Save and restart). Saving alone does not apply settings to the running features.
@@ -113,13 +119,14 @@ Standalone telemetry-loss/recovery notices are **off by default** (`power.teleme
 | Symptom | What to do |
 | --- | --- |
 | Cannot find the app | Add this repository to the HA app store, not HACS. Check the installation method and CPU architecture. |
-| Address is missing from discovery | Configure [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) first; check its entities and HA connection. |
+| Address is missing from discovery | Check the building's entities and HA connection. With Monitor 2.0, verify the account's building link; the account itself is not a bot address. [Connection guide](DOCS.md#dtek-monitor). |
+| Monitor 1.7.0 says “Current schedule coverage is missing” during setup | This known integration issue can prevent entity creation. Monitor 2.0.0b1 fixes it; see [beta upgrade and rollback](DOCS.md#monitor-upgrade). |
 | No Telegram messages | Verify token, full chat ID and bot permissions; try a labeled template test and inspect the app log. |
 | Settings appear saved but behavior is unchanged | Use **Save and restart** and check the pending-restart indicator. |
 | Power is `unknown` | Inspect the sensor's availability, reporting time and configured maximum age. A stale number does not prove power. |
 | Status posts keep appearing | Check `delivery_mode`; use `pinned_edit` and ensure the bot can edit its own message. |
 | Group is listed twice in a custom message | Reset that template to the current default, or update the override. Overrides survive app upgrades. |
-| Schedule notices stopped | Check DTEK Monitor's connection/freshness diagnostics. Local power monitoring can continue independently. |
+| Schedule notices stopped | Check DTEK Monitor's connection and, in 2.0, **Schedule availability**. Missing publication is not a confirmed empty schedule. [Availability states](DOCS.md#schedule-availability). Local sensor monitoring can continue. |
 
 <a id="support"></a>
 ## Guides and support

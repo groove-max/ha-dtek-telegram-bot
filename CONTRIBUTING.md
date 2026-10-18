@@ -25,6 +25,8 @@ python -m compileall rootfs/app tests
 
 CI tests Python 3.12 and 3.13. Also build the shipped Dockerfile for runtime changes. Unit tests must use the real runtime dependencies, including Jinja rendering and aiogram error types.
 
+`requirements.txt` sets supported ranges; `requirements.lock` pins the versions used by both CI and the shipped image. Review dependency PRs against both files. Raising a lower bound to an already pinned version does not change installed packages. When changing the pinned versions, check dependency resolution, `python -m pip check`, unit/browser tests and both architecture builds.
+
 For sensor changes, cover fresh, stale, unavailable and restored readings; both orders of independent/voltage events; repeated observations; reconnect/restart; and failed delivery. For schedule changes, cover multiple/hidden groups, changing snapshots, missing publication coverage and retry relevance. UI changes need an ingress smoke check.
 
 
