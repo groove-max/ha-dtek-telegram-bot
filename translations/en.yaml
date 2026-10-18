@@ -4,10 +4,24 @@ configuration:
     name: Telegram bot token
     description: >-
       Bot token obtained from BotFather. Use a dedicated bot token for this
-      add-on when possible, especially if the same Home Assistant instance also
-      uses other Telegram integrations.
+      add-on when possible, especially if the same Home Assistant instance
+      also uses other Telegram integrations.
   telegram_chat_id:
     name: Default Telegram chat ID
     description: >-
-      Default target chat for notifications. Individual addresses can override
-      this chat in the ingress configuration UI.
+      Personal chat, group or channel ID. For personal messages, open your bot
+      and press Start first; no channel is needed. Use the numeric chat ID,
+      including the minus sign for groups/channels. Individual addresses can
+      override this destination in the web editor.
+  test_chat_id:
+    name: Test destination chat ID
+    description: >-
+      Optional personal chat, group or channel that receives ALL messages
+      while set. Overrides the default destination and every address
+      destination. Restart to apply.
+  feedback_enabled:
+    name: Collect test feedback
+    description: >-
+      Collect new messages visible to the bot in the test destination.
+      Requires test_chat_id and one update collector per bot token. Not needed
+      for sending notifications to a personal chat, group or channel.

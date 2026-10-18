@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from features.base import Feature
+from groups import event_group
 from outage_calendar import extract_calendar_events, parse_event_time
 from utils import TZ_KYIV, format_datetime, now_kyiv
 
@@ -35,9 +36,12 @@ class UpcomingOutageFeature(Feature):
 
     async def on_tick(self) -> None:
         """Check for upcoming outages."""
-        power_state = self.state_get("power_state", "on")
+        power_state = self.state_get("power_state", "unknown")
         power_filter = self.config.upcoming_outage.power_filter
-        if power_filter == "only_when_available" and power_state == "off":
+        if power_filter == "only_when_available" and power_state not in (
+            "on",
+            "partial",
+        ):
             return
         if power_filter == "only_when_missing" and power_state != "off":
             return
@@ -46,7 +50,9 @@ class UpcomingOutageFeature(Feature):
         minutes = self.config.upcoming_outage.minutes
         window_end = now + timedelta(minutes=minutes)
 
-        events = await self._fetch_upcoming_events(now, window_end)
+        events = await self.calendar_snapshot(
+            lambda: self._fetch_upcoming_events(now, window_end)
+        )
         if not events:
             return
 
@@ -66,25 +72,32 @@ class UpcomingOutageFeature(Feature):
                 continue
 
             # Deduplication: don't warn about the same event twice
-            event_key = ev_start.isoformat()
+            event_key = (
+                f"{event_group(event)}:{ev_start.isoformat()}:{ev_end.isoformat()}"
+            )
             warned = self.state_get("warned_outage_start", "")
-            if warned == event_key:
+            warned_events = self.state_get("warned_outages", [])
+            if warned == event_key or event_key in warned_events:
                 continue
-
-            self.state_set("warned_outage_start", event_key)
 
             text = self.render(
                 "upcoming_outage",
+                group=event_group(event) or self.state_get("current_group", "—"),
                 minutes=max(math.ceil(time_until), 1),
                 start=format_datetime(ev_start),
                 end=format_datetime(ev_end),
             )
-            await self.send_message(
+            delivered = await self.send_message(
                 text,
+                delivery_key=f"upcoming:{self.config.entity_prefix}:{event_key}",
+                delivery_context={"stream": event_key, "expires": ev_start.timestamp()},
                 disable_notification=self.config.upcoming_outage.silent,
             )
+            if delivered:
+                self.state_set("warned_outage_start", event_key)
+                self.state_set("warned_outages", [*warned_events, event_key][-64:])
             self.log.info(
-                "Sent upcoming outage warning (in %d min): %s – %s",
+                "Processed upcoming outage warning (in %d min): %s – %s",
                 max(math.ceil(time_until), 1),
                 format_datetime(ev_start),
                 format_datetime(ev_end),
@@ -106,4 +119,4 @@ class UpcomingOutageFeature(Feature):
             },
             return_response=True,
         )
-        return extract_calendar_events(result, calendar_entity)
+        return extract_calendar_events(result, calendar_entity, exclude_emergency=True)

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from contextlib import suppress
+from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
 import aiohttp
@@ -56,6 +57,10 @@ class HAClient:
         )
         self._dispatcher_task: asyncio.Task[None] | None = None
         self._connected = asyncio.Event()
+        self.connected_at: datetime | None = None
+        self._mqtt_topics: set[str] = set()
+        self._mqtt_subscriptions: dict[int, str] = {}
+        self._mqtt_observations: dict[str, dict[str, Any]] = {}
         self._running = False
 
     @property
@@ -67,9 +72,9 @@ class HAClient:
         """Whether the HA websocket is currently connected."""
         return self._connected.is_set()
 
-    async def wait_connected(self) -> None:
+    async def wait_connected(self, timeout: float | None = 30) -> None:
         """Wait until the Home Assistant connection is ready."""
-        await self._connected.wait()
+        await asyncio.wait_for(self._connected.wait(), timeout=timeout)
 
     @property
     def queued_events(self) -> int:
@@ -84,6 +89,13 @@ class HAClient:
         """Add entity IDs to the watch list."""
         self._watched_entities.update(entity_ids)
 
+    def watch_mqtt_topics(self, topics: set[str]) -> None:
+        """Observe configured loss witnesses through HA, without broker credentials."""
+        self._mqtt_topics.update(topics)
+
+    def mqtt_observation(self, topic: str) -> dict[str, Any] | None:
+        return self._mqtt_observations.get(topic) if self.is_connected else None
+
     def _next_id(self) -> int:
         self._msg_id += 1
         return self._msg_id
@@ -93,7 +105,7 @@ class HAClient:
         self._running = True
         if self._dispatcher_task is None or self._dispatcher_task.done():
             self._dispatcher_task = asyncio.create_task(self._dispatch_loop())
-        self._session = aiohttp.ClientSession()
+        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
         while self._running:
             try:
                 await self._connect()
@@ -102,6 +114,11 @@ class HAClient:
                 logger.warning("WebSocket error: %s", e)
             if self._running:
                 self._connected.clear()
+                for future in list(self._pending.values()):
+                    if not future.done():
+                        future.set_exception(ConnectionError("HA disconnected"))
+                if self._ws and not self._ws.closed:
+                    await self._ws.close()
                 logger.info("Reconnecting in 5 seconds...")
                 await asyncio.sleep(5)
 
@@ -135,6 +152,8 @@ class HAClient:
     async def _connect(self) -> None:
         """Establish WebSocket connection and authenticate."""
         assert self._session is not None
+        self._mqtt_observations.clear()
+        self._mqtt_subscriptions.clear()
 
         # Build list of WS URLs to try based on token source
         if self._use_supervisor:
@@ -182,7 +201,12 @@ class HAClient:
             raise ConnectionError(f"Subscription failed: {msg}")
 
         logger.info("Subscribed to state_changed events")
+        self.connected_at = datetime.now(timezone.utc)
         self._connected.set()
+        for topic in sorted(self._mqtt_topics):
+            sub_id = self._next_id()
+            self._mqtt_subscriptions[sub_id] = topic
+            await self._ws.send_json({"id": sub_id, "type": "mqtt/subscribe", "topic": topic})
 
     @property
     def rest_url(self) -> str:
@@ -203,8 +227,25 @@ class HAClient:
         """Process incoming WebSocket message."""
         msg_type = msg.get("type")
 
-        # Handle response to a command
         msg_id = msg.get("id")
+        if msg_id in self._mqtt_subscriptions:
+            topic = self._mqtt_subscriptions[msg_id]
+            if msg_type == "result" and not msg.get("success"):
+                self._mqtt_observations.pop(topic, None)
+                logger.error("MQTT witness subscription rejected for %s", topic)
+            elif msg_type == "event":
+                event = msg.get("event", {})
+                if event.get("topic") == topic and event.get("retain") is False:
+                    self._mqtt_observations[topic] = {
+                        "state": str(event.get("payload", "")),
+                        "last_reported": datetime.now(timezone.utc).isoformat(),
+                    }
+                else:
+                    # Replayed broker state has no trustworthy sample timestamp.
+                    self._mqtt_observations.pop(topic, None)
+            return
+
+        # Handle response to a command
         if msg_id and msg_id in self._pending:
             future = self._pending[msg_id]
             if not future.done():

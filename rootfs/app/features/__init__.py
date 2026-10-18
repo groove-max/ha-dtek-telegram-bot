@@ -9,9 +9,9 @@ from features.upcoming_outage import UpcomingOutageFeature
 from features.voltage import VoltageFeature
 
 ALL_FEATURES = [
+    GroupChangeFeature,
     ScheduleChangeFeature,
     EmergencyFeature,
-    GroupChangeFeature,
     VoltageFeature,
     PowerPresenceFeature,
     UpcomingOutageFeature,

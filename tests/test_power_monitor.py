@@ -18,7 +18,11 @@ class DummyHA:
         self._states = states
 
     async def get_state(self, entity_id: str) -> dict[str, str] | None:
-        return self._states.get(entity_id)
+        state = self._states.get(entity_id)
+        if state is None:
+            return None
+        from datetime import datetime, timezone
+        return {"last_updated": datetime.now(timezone.utc).isoformat(), **state}
 
 
 class DummyState:
@@ -37,7 +41,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
         unavailable_as_missing: bool = True,
     ) -> SimpleNamespace:
         return SimpleNamespace(
-            entity_prefix="doroga_liustdorfska_56v",
+            entity_prefix="vulytsia_prykladna_12a",
             power=SimpleNamespace(
                 enabled=True,
                 mode=mode,
@@ -65,7 +69,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
             ha=DummyHA(
                 {
                     "sensor.v_main": {"state": "223.45"},
-                    "binary_sensor.doroga_liustdorfska_56v_power": {"state": "off"},
+                    "binary_sensor.vulytsia_prykladna_12a_power": {"state": "off"},
                 }
             ),
             state=DummyState(),
@@ -101,7 +105,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["present_phase_count"], 2)
         self.assertEqual(snapshot["missing_phases"], ["L2"])
 
-    async def test_loss_plus_voltage_off_when_all_configured_phases_disappear(self) -> None:
+    async def test_loss_plus_voltage_unknown_when_one_phase_has_no_measurement(self) -> None:
         monitor = PowerMonitor(
             config=self._build_config(
                 mode="loss_plus_voltage",
@@ -113,7 +117,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
                     "sensor.solar2mqtt_ac_in_frequenz": {"state": "0"},
                     "sensor.v_l1": {"state": "0"},
                     "sensor.v_l2": {"state": "unavailable"},
-                    "binary_sensor.doroga_liustdorfska_56v_power": {"state": "on"},
+                    "binary_sensor.vulytsia_prykladna_12a_power": {"state": "on"},
                 }
             ),
             state=DummyState(),
@@ -121,7 +125,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
 
         detected = await monitor.detect_current_power()
 
-        self.assertEqual(detected, "off")
+        self.assertEqual(detected, "unknown")
 
     async def test_loss_plus_voltage_partial_even_if_loss_entity_triggered(self) -> None:
         monitor = PowerMonitor(
@@ -158,7 +162,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
                 {
                     "sensor.solar2mqtt_ac_in_frequenz": {"state": "50"},
                     "sensor.v_main": {"state": "unavailable"},
-                    "binary_sensor.doroga_liustdorfska_56v_power": {"state": "on"},
+                    "binary_sensor.vulytsia_prykladna_12a_power": {"state": "on"},
                 }
             ),
             state=DummyState(),
@@ -166,7 +170,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
 
         detected = await monitor.detect_current_power()
 
-        self.assertEqual(detected, "on")
+        self.assertEqual(detected, "unknown")
 
     async def test_legacy_primary_label_is_normalized_to_l1(self) -> None:
         config = self._build_config(
@@ -186,7 +190,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["phases"][0]["label"], "L1")
         self.assertEqual(snapshot["missing_phases"], ["L1"])
 
-    async def test_voltage_only_falls_back_to_dtek_when_all_phases_are_unknown_and_ignored(self) -> None:
+    async def test_voltage_only_unknown_without_fallback_when_all_phases_unknown(self) -> None:
         monitor = PowerMonitor(
             config=self._build_config(
                 mode="voltage_only",
@@ -197,7 +201,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
                 {
                     "sensor.v_l1": {"state": "unavailable"},
                     "sensor.v_l2": {"state": "unknown"},
-                    "binary_sensor.doroga_liustdorfska_56v_power": {"state": "on"},
+                    "binary_sensor.vulytsia_prykladna_12a_power": {"state": "on"},
                 }
             ),
             state=DummyState(),
@@ -206,7 +210,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
         detected = await monitor.detect_current_power()
         snapshot = await monitor.get_voltage_snapshot()
 
-        self.assertEqual(detected, "on")
+        self.assertEqual(detected, "unknown")
         self.assertIsNone(snapshot["house_state"])
         self.assertEqual(snapshot["unknown_phases"], ["L1", "L2"])
 
@@ -243,7 +247,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
             ),
             ha=DummyHA(
                 {
-                    "binary_sensor.doroga_liustdorfska_56v_power": {"state": "on"},
+                    "binary_sensor.vulytsia_prykladna_12a_power": {"state": "on"},
                 }
             ),
             state=DummyState(),
@@ -252,12 +256,12 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
         detected = await monitor.detect_current_power()
         snapshot = await monitor.get_voltage_snapshot()
 
-        self.assertEqual(detected, "on")
+        self.assertEqual(detected, "unknown")
         self.assertIsNone(snapshot["house_state"])
         self.assertEqual(snapshot["unknown_phases"], ["L1"])
         self.assertEqual(snapshot["missing_phases"], [])
 
-    async def test_loss_plus_voltage_stale_rest_miss_after_loss_is_off(self) -> None:
+    async def test_loss_plus_voltage_stale_rest_miss_is_still_unknown(self) -> None:
         class DummyStateWithLossReference:
             def get(self, prefix: str, key: str) -> str | None:
                 if key == "loss_stale_reference_at":
@@ -274,7 +278,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
             ha=DummyHA(
                 {
                     "sensor.solar2mqtt_ac_in_frequenz": {"state": "0"},
-                    "binary_sensor.doroga_liustdorfska_56v_power": {"state": "on"},
+                    "binary_sensor.vulytsia_prykladna_12a_power": {"state": "on"},
                 }
             ),
             state=DummyStateWithLossReference(),
@@ -286,10 +290,10 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
             stale_after_seconds=0,
         )
 
-        self.assertEqual(detected, "off")
-        self.assertEqual(snapshot["house_state"], "off")
-        self.assertEqual(snapshot["missing_phases"], ["L1"])
-        self.assertTrue(snapshot["phases"][0]["stale_after_loss"])
+        self.assertEqual(detected, "unknown")
+        self.assertIsNone(snapshot["house_state"])
+        self.assertEqual(snapshot["missing_phases"], [])
+        self.assertFalse(snapshot["phases"][0]["stale_after_loss"])
 
 
 if __name__ == "__main__":

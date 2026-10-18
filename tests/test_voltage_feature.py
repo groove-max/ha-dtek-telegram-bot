@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import sys
 import types
 import unittest
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
-
 
 HAS_RUNTIME_DEPS = find_spec("pydantic") is not None and find_spec("yaml") is not None
 
@@ -36,7 +36,9 @@ if "jinja2" not in sys.modules:
         def __init__(self, defaults: dict[str, str]) -> None:
             self._defaults = defaults
 
-        def get_source(self, environment: object, template: str) -> tuple[str, str | None, object]:
+        def get_source(
+            self, environment: object, template: str
+        ) -> tuple[str, str | None, object]:
             return self._defaults.get(template, ""), None, lambda: True
 
     class _DummyTemplate:
@@ -73,7 +75,12 @@ class DummyHA:
         self.states = states
 
     async def get_state(self, entity_id: str) -> dict[str, str] | None:
-        return self.states.get(entity_id)
+        state = self.states.get(entity_id)
+        if state is None:
+            return None
+        from datetime import datetime, timezone
+
+        return {"last_updated": datetime.now(timezone.utc).isoformat(), **state}
 
 
 class DummyTelegram:
@@ -104,7 +111,10 @@ class DummyTemplates:
         )
 
 
-@unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
+@unittest.skipUnless(
+    HAS_RUNTIME_DEPS,
+    "PyYAML and pydantic are not installed in the local test environment",
+)
 class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
     prefix = "demo_prefix"
     voltage_entity = "sensor.demo_voltage"
@@ -117,12 +127,19 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         hysteresis: float = 5.0,
         delay: float = 0.0,
     ) -> tuple[VoltageFeature, DummyHA, DummyTelegram, DummyState]:
-        ha = DummyHA({self.voltage_entity: {"state": "228.0"}})
+        ha = DummyHA(
+            {
+                self.voltage_entity: {
+                    "state": "228.0",
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                }
+            }
+        )
         telegram = DummyTelegram()
         state = DummyState()
         config = SimpleNamespace(
             entity_prefix=self.prefix,
-            display_name="Одеса • дорога Люстдорфська, 56В",
+            display_name="Одеса • вулиця Прикладна, 12А",
             telegram_chat_id="",
             voltage=SimpleNamespace(
                 enabled=True,
@@ -147,9 +164,16 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
     async def test_high_voltage_normalizes_only_after_hysteresis_margin(self) -> None:
         feature, ha, telegram, state = self._build_feature(high=250.0, hysteresis=5.0)
 
-        high_state = {"state": "250.3"}
+        high_state = {
+            "state": "250.3",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = high_state
-        await feature.on_state_change(self.voltage_entity, {"state": "249.0"}, high_state)
+        await feature.on_state_change(
+            self.voltage_entity,
+            {"state": "249.0", "last_updated": datetime.now(timezone.utc).isoformat()},
+            high_state,
+        )
         await asyncio.sleep(0.01)
 
         self.assertEqual(telegram.messages, ["voltage_high|voltage=250.3|phase=L1"])
@@ -159,7 +183,10 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
             "high",
         )
 
-        near_threshold = {"state": "249.1"}
+        near_threshold = {
+            "state": "249.1",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = near_threshold
         await feature.on_state_change(self.voltage_entity, high_state, near_threshold)
         await asyncio.sleep(0.01)
@@ -167,7 +194,10 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(telegram.messages), 1)
         self.assertTrue(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
 
-        recovered = {"state": "244.8"}
+        recovered = {
+            "state": "244.8",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = recovered
         await feature.on_state_change(self.voltage_entity, near_threshold, recovered)
 
@@ -183,22 +213,35 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
     async def test_low_voltage_normalizes_only_after_hysteresis_margin(self) -> None:
         feature, ha, telegram, state = self._build_feature(low=195.0, hysteresis=5.0)
 
-        low_state = {"state": "190.2"}
+        low_state = {
+            "state": "190.2",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = low_state
-        await feature.on_state_change(self.voltage_entity, {"state": "196.0"}, low_state)
+        await feature.on_state_change(
+            self.voltage_entity,
+            {"state": "196.0", "last_updated": datetime.now(timezone.utc).isoformat()},
+            low_state,
+        )
         await asyncio.sleep(0.01)
 
         self.assertEqual(telegram.messages, ["voltage_low|voltage=190.2|phase=L1"])
         self.assertTrue(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
 
-        near_threshold = {"state": "197.0"}
+        near_threshold = {
+            "state": "197.0",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = near_threshold
         await feature.on_state_change(self.voltage_entity, low_state, near_threshold)
 
         self.assertEqual(len(telegram.messages), 1)
         self.assertTrue(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
 
-        recovered = {"state": "200.2"}
+        recovered = {
+            "state": "200.2",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = recovered
         await feature.on_state_change(self.voltage_entity, near_threshold, recovered)
 
@@ -214,12 +257,22 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
     async def test_zero_hysteresis_keeps_legacy_normalization_behavior(self) -> None:
         feature, ha, telegram, _state = self._build_feature(high=250.0, hysteresis=0.0)
 
-        high_state = {"state": "250.5"}
+        high_state = {
+            "state": "250.5",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = high_state
-        await feature.on_state_change(self.voltage_entity, {"state": "249.0"}, high_state)
+        await feature.on_state_change(
+            self.voltage_entity,
+            {"state": "249.0", "last_updated": datetime.now(timezone.utc).isoformat()},
+            high_state,
+        )
         await asyncio.sleep(0.01)
 
-        recovered = {"state": "249.9"}
+        recovered = {
+            "state": "249.9",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = recovered
         await feature.on_state_change(self.voltage_entity, high_state, recovered)
 
@@ -237,16 +290,22 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
             hysteresis=5.0,
         )
 
-        missing_state = {"state": "0.0"}
+        missing_state = {
+            "state": "0.0",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = missing_state
         await feature.on_state_change(
             self.voltage_entity,
-            {"state": "224.0"},
+            {"state": "224.0", "last_updated": datetime.now(timezone.utc).isoformat()},
             missing_state,
         )
         await asyncio.sleep(0.01)
 
-        recovered_state = {"state": "224.9"}
+        recovered_state = {
+            "state": "224.9",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = recovered_state
         await feature.on_state_change(
             self.voltage_entity,
@@ -257,22 +316,30 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(telegram.messages, [])
         self.assertFalse(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
 
-    async def test_voltage_below_presence_threshold_clears_active_alert_silently(self) -> None:
+    async def test_voltage_below_presence_threshold_clears_active_alert_silently(
+        self,
+    ) -> None:
         feature, ha, telegram, state = self._build_feature(
             low=195.0,
             hysteresis=5.0,
         )
 
-        low_state = {"state": "190.0"}
+        low_state = {
+            "state": "190.0",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = low_state
         await feature.on_state_change(
             self.voltage_entity,
-            {"state": "224.0"},
+            {"state": "224.0", "last_updated": datetime.now(timezone.utc).isoformat()},
             low_state,
         )
         await asyncio.sleep(0.01)
 
-        missing_state = {"state": "0.0"}
+        missing_state = {
+            "state": "0.0",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = missing_state
         await feature.on_state_change(
             self.voltage_entity,
@@ -280,7 +347,10 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
             missing_state,
         )
 
-        recovered_state = {"state": "224.9"}
+        recovered_state = {
+            "state": "224.9",
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
         ha.states[self.voltage_entity] = recovered_state
         await feature.on_state_change(
             self.voltage_entity,

@@ -6,6 +6,8 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
+from schedule_notifications import notification_lock, acknowledge_schedule
+from groups import state_groups, canonical_groups
 from outage_calendar import build_schedule_lines, extract_calendar_events
 from utils import now_kyiv
 
@@ -41,36 +43,68 @@ class GroupChangeFeature(Feature):
     async def on_state_change(
         self, entity_id: str, old_state: dict[str, Any], new_state: dict[str, Any]
     ) -> None:
-        old_val = self.get_state_value(old_state)
-        new_val = self.get_state_value(new_state)
+        async with notification_lock(self.state, self.config.entity_prefix):
+            await self._handle_state_change(entity_id, old_state, new_state)
 
-        if new_val in ("unavailable", "unknown", ""):
+    async def _handle_state_change(
+        self, entity_id: str, old_state: dict[str, Any], new_state: dict[str, Any]
+    ) -> None:
+        groups = state_groups(new_state)
+        if not groups:
+            self.state_set("groups_available", False)
             return
-        if old_val in ("unavailable", "unknown", ""):
-            # First valid value — just store it
-            self.state_set("current_group", new_val)
+        self.state_set("groups_available", True)
+        previous = self.state_get("notified_groups")
+        if previous is None:
+            previous = canonical_groups(
+                self.state_get("current_group", "")
+            ) or state_groups(old_state)
+        if previous:
+            self.state_set("notified_groups", previous)
+        self.state_set("current_groups", groups)
+        selected = getattr(self.config, "selected_group", "")
+        display = selected if selected in groups else ", ".join(groups)
+        self.state_set("current_group", display)
+        self.state_set("groups_snapshot", new_state)
+        if not previous:
+            self.state_set("notified_groups", groups)
             await self._notify_status_message()
             return
-        if old_val == new_val:
+        if previous == groups:
             return
-
-        self.log.info("Group changed: %s -> %s", old_val, new_val)
-        self.state_set("current_group", new_val)
-
-        events = await self._fetch_outage_events()
-        schedule_lines = build_schedule_lines(events)
-
+        # A failed calendar request must not turn into an empty-schedule claim.
+        events = await self.calendar_snapshot(self._fetch_outage_events)
+        if self.state_get("current_groups") != groups:
+            return
+        lines = build_schedule_lines(events, header_group=display, group_labels=self.schedule_display_labels())
+        start = now_kyiv().replace(hour=0, minute=0, second=0, microsecond=0)
+        complete = self.has_schedule_coverage(start, start + timedelta(days=2))
         text = self.render(
             "group_change",
-            old_group=old_val,
-            new_group=new_val,
-            schedule_lines=schedule_lines,
+            old_group=", ".join(previous),
+            new_group=display,
+            schedule_lines=lines,
+            schedule_complete=complete,
         )
-        await self.send_message(
-            text,
-            disable_notification=self.config.group_change.silent,
-        )
-        await self._notify_status_message()
+        if await self.send_message(
+            text, disable_notification=self.config.group_change.silent
+        ):
+            self.state_set("notified_groups", groups)
+            if lines or complete:
+                await acknowledge_schedule(self, events, lines)
+            else:
+                save = getattr(self.state, "save", None)
+                if save is not None:
+                    await save()
+            await self._notify_status_message()
+
+    async def on_tick(self) -> None:
+        for entity_id in self.entity_candidates("schedule_group"):
+            state = await self.ha.get_state(entity_id)
+            if state_groups(state):
+                await self.on_state_change(entity_id, {}, state)
+                return
+        self.state_set("groups_available", False)
 
     async def _fetch_outage_events(self) -> list[dict[str, Any]]:
         """Fetch outage calendar events for today and tomorrow."""
@@ -96,15 +130,7 @@ class GroupChangeFeature(Feature):
 
     async def on_start(self) -> None:
         """Store initial group value on startup."""
-        for entity_id in self.entity_candidates("schedule_group"):
-            state = await self.ha.get_state(entity_id)
-            if not state:
-                continue
-            val = self.get_state_value(state)
-            if val not in ("unavailable", "unknown", ""):
-                self.state_set("current_group", val)
-                self.log.info("Initial group: %s", val)
-                return
+        await self.on_tick()
 
     async def _notify_status_message(self) -> None:
         """Refresh the pinned status when the current group becomes available or changes."""

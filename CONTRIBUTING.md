@@ -1,71 +1,55 @@
-# Contributing
+# Contributing to DTEK Telegram Bot
 
-Thanks for contributing to DTEK Telegram Bot.
+**English** · [Українська](CONTRIBUTING.uk.md) · [User guide](README.md)
 
-This project is a Home Assistant add-on focused on practical Telegram notifications for electricity monitoring, built around `ha-dtek-monitor` and local Home Assistant sensors.
+Bug reports, fixes and documentation improvements are welcome in English or Ukrainian.
 
-## Before opening a PR
+## Choose the right repository
 
-1. Make sure the change belongs in this repository.
-2. If the issue is caused by missing or incorrect DTEK entities, check whether the problem actually belongs to `ha-dtek-monitor`.
-3. If the change affects user-visible behavior, update documentation and templates as needed.
+DTEK website parsing, regional address lookup and HA entities belong to [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor). Telegram delivery, message templates and local-sensor power detection belong to [DTEK Telegram Bot](https://github.com/groove-max/ha-dtek-telegram-bot).
 
-## Development expectations
+Before opening an issue, search existing issues and include versions, reproduction steps, expected/actual behavior and a short sanitized log. Do not publish bot tokens, HA tokens, exact private addresses or raw production journals. For vulnerabilities, use [Security](SECURITY.md).
 
-Keep changes consistent with the current project direction:
+## Run the checks
 
-- prefer pragmatic fixes over speculative abstractions
-- preserve existing user-facing behavior unless the change is intentional
-- keep Telegram message changes explicit and reviewable
-- keep power-detection logic testable
-- avoid regressions in ingress UI and import/export flows
-
-## Local validation
-
-Before opening a PR, run:
+From the repository root, with the indicated Python version installed:
 
 ```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt -c requirements.lock
+python -c "import aiogram, jinja2"
 python -m unittest discover -s tests -v
 python -m compileall rootfs/app tests
 ```
 
-If you touched:
+CI tests Python 3.12 and 3.13. Also build the shipped Dockerfile for runtime changes. Unit tests must use the real runtime dependencies, including Jinja rendering and aiogram error types.
 
-- GitHub Actions or YAML files: validate YAML syntax
-- Dockerfile or shell scripts: check linting locally if possible
-- ingress UI: test it in a running add-on, not only by static inspection
+For sensor changes, cover fresh, stale, unavailable and restored readings; both orders of independent/voltage events; repeated observations; reconnect/restart; and failed delivery. For schedule changes, cover multiple/hidden groups, changing snapshots, missing publication coverage and retry relevance. UI changes need an ingress smoke check.
 
-## Documentation
 
-If your change affects:
+For UI changes, run the isolated Chromium tests as well:
 
-- installation
-- configuration
-- power detection semantics
-- Telegram message behavior
-- import/export
-- release or repository setup
+```bash
+python -m pip install -r requirements-ui.txt
+python -m playwright install --with-deps chromium
+python -m unittest discover -s tests/browser -v
+```
 
-then update the relevant documentation:
+These tests serve the actual UI assets with a simulated API; they do not contact HA or Telegram. They cover delayed responses, concurrent edits, template drafts, keyboard controls and narrow layouts. CI runs them separately from the unit suite.
 
-- `README.md`
-- `README.uk.md`
-- `DOCS.md`
-- `CHANGELOG.md`
 
-## Pull requests
+## Test against a live installation
 
-Good PRs for this repository usually include:
+Use a separate HA/test destination and keep production notification delivery disabled during experiments. Never toggle electrical equipment as an incidental software test. Document which scenarios used fixtures and which were actually observed.
 
-- a clear problem statement
-- a narrowly scoped implementation
-- tests for runtime logic changes
-- a short explanation of tradeoffs if behavior changed
+## Documentation and pull requests
 
-## What not to do
+- Keep `README.md` and `README.uk.md` aligned; detailed guides also have `.uk.md` counterparts.
+- Keep the README focused on installing and using the project. Put contracts and implementation detail in the reference/contributor guides.
+- Validate relative links and YAML examples. Use fictional addresses and placeholder entity IDs.
+- Update the changelog for user-visible behavior changes; historical release entries stay in their original language.
+- Explain the problem, resulting behavior and meaningful checks. Preserve existing user settings and identifiers unless a documented migration is necessary.
+- Do not commit credentials, private diagnostics, caches, virtual environments or `graphify-out/` artifacts.
 
-- Do not bundle unrelated refactors with behavioral fixes.
-- Do not silently change Telegram message semantics.
-- Do not rely on DTEK-only assumptions if the add-on is explicitly combining DTEK and local power sensors.
-- Do not commit `__pycache__` or generated `.pyc` files.
-
+Contributions must be your own work or compatible with this project’s [license](LICENSE). Submit contributions under PolyForm Noncommercial 1.0.0 and preserve third-party notices.

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import tempfile
 import logging
 from contextlib import suppress
 from pathlib import Path
@@ -30,6 +32,8 @@ class StateStore:
             try:
                 with open(self._path, encoding="utf-8") as f:
                     self._data = json.load(f)
+                if not isinstance(self._data, dict) or not isinstance(self._data.get("addresses"), dict):
+                    raise ValueError("Invalid state schema")
                 logger.info("Loaded state from %s", self._path)
             except Exception:
                 logger.exception("Failed to load state, starting fresh")
@@ -74,8 +78,7 @@ class StateStore:
         async with self._lock:
             try:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._path, "w", encoding="utf-8") as f:
-                    json.dump(self._data, f, ensure_ascii=False, indent=2)
+                atomic_write(self._path, json.dumps(self._data, ensure_ascii=False, indent=2))
                 self._dirty = False
                 logger.debug("State saved to %s", self._path)
             except Exception:
@@ -88,3 +91,22 @@ class StateStore:
             with suppress(asyncio.CancelledError):
                 await self._save_task
         await self.save()
+
+
+def atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
