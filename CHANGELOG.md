@@ -2,15 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.4.0] - 2026-10-19
 
-- Add reusable Telegram bot profiles and per-address bot selection, verified tokens in private storage, independent workers/journals, and safe migration of the default bot’s status.
-- Add profile management with conflict detection, token rotation, guarded deletion and independent test chats. Template tests require an explicit test destination.
-- Cover multiple-bot routing, credentials, migration, failed delivery and browser drafts with regressions; document setup and backup behavior in English and Ukrainian.
+- Choose a different Telegram bot for each address, or share one bot profile between several addresses. Manage profiles in the new **Telegram bots** tab.
+- Keep existing addresses on the default bot and migrate its saved status and delivery history automatically. Bot profiles have independent workers, delivery journals and test destinations.
+- Verify tokens with Telegram before saving; keep additional tokens in private app storage and out of configuration exports. Protect concurrent edits, token changes and deletion of profiles that are still in use.
+- Send template tests only to the selected bot's explicit test chat. The production chat is never used as a fallback.
+- Document multi-bot setup, backups, DTEK Monitor 1.7.0 / 2.0.0b1 compatibility, building/account boundaries, group selection and beta upgrades in English and Ukrainian.
+- Add routing, migration, delivery and editor regression tests. Refresh Python setup in CI and align dependency lower bounds with the pinned runtime.
 
-- Explain compatibility with DTEK Monitor 2.0.0b1, building/account boundaries, independent group selection, schedule availability, beta upgrades and backup-based rollback in both user-guide languages.
-- Clarify multiple-address/chat setup; request the integration version and operator in bug reports.
-- Refresh Python setup in CI and align dependency lower bounds with versions already covered by the pinned runtime.
+**Upgrade:** Back up the app before updating. Existing addresses continue using the default bot; no new profiles are required. Use **Save and restart** after changing profiles or address assignments. Additional bot tokens are included in app backups, not in exported address YAML.
 
 ## [0.3.13] - 2026-10-17
 

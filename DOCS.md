@@ -7,7 +7,7 @@
 <a id="dtek-monitor"></a>
 ## Connect DTEK Monitor
 
-Bot **0.3.13** supports the public building entities from DTEK Monitor **1.7.0** and **2.0.0b1**. These projects have independent version numbers; the integration's beta does not require a beta bot. Both require HA **2026.3.0+**. Regional support comes from the integration: Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
+Bot **0.4.0** supports the public building entities from DTEK Monitor **1.7.0** and **2.0.0b1**. These projects have independent version numbers; the integration's beta does not require a beta bot. Both require HA **2026.3.0+**. Regional support comes from the integration: Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
 
 | Your setup | What to select in the bot |
 | --- | --- |

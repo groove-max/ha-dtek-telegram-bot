@@ -47,7 +47,7 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 
 Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a configured DTEK Monitor building address, a Telegram bot token and a target chat ID.
 
-**Bot 0.3.13 works with DTEK Monitor 1.7.0 and the optional 2.0.0b1 beta.** The two projects have independent version numbers. Updating the integration to 2.0 does not require a new bot version. [Compatibility and beta upgrade steps →](DOCS.md#dtek-monitor)
+**Bot 0.4.0 works with DTEK Monitor 1.7.0 and the optional 2.0.0b1 beta.** The two projects have independent version numbers. Updating the integration to 2.0 does not require a new bot version. [Compatibility and beta upgrade steps →](DOCS.md#dtek-monitor)
 
 With Monitor 2.0, you can add an address directly or use the building linked to an Odesa personal account. The bot uses that building's public entities. Cabinet login, account numbers, meter readings and reading reminders belong to the integration; this bot does not send or manage them. A private Telegram chat still receives building notifications.
 

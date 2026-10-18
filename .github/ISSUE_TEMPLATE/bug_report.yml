@@ -25,7 +25,7 @@ body:
     id: addon_version
     attributes:
       label: Add-on version
-      placeholder: "0.3.13"
+      placeholder: "0.4.0"
     validations:
       required: true
 
