@@ -3,16 +3,22 @@ name: Unit Tests
 
 "on":
   push:
-    tags-ignore:
-      - "v*"
+    branches:
+      - "**"
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        python: ["3.12", "3.13"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -20,13 +26,40 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
 
       - name: Install runtime dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt -c requirements.lock
 
       - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+        run: |
+          python - <<'PY'
+          import aiogram
+          import jinja2
+          import unittest
+          result = unittest.TextTestRunner(verbosity=2).run(
+              unittest.defaultTestLoader.discover("tests")
+          )
+          raise SystemExit(not result.wasSuccessful())
+          PY
 
       - name: Compile add-on sources
         run: python -m compileall rootfs/app tests
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies and Chromium
+        run: |
+          python -m pip install -r requirements.txt -c requirements.lock
+          python -m pip install -r requirements-ui.txt
+          python -m playwright install --with-deps chromium
+      - name: Test editor with delayed API responses and mobile layouts
+        run: python -m unittest discover -s tests/browser -v

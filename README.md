@@ -1,425 +1,133 @@
-# DTEK Telegram Bot
+# DTEK Telegram Bot for Home Assistant
 
-[![Open your Home Assistant instance and add this repository to the Add-on Store.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+**English** · [Українська](README.uk.md)
 
-[Українська версія README](README.uk.md)
+[![Add the app repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial-blue.svg)](LICENSE)
 
-Home Assistant add-on for Telegram notifications about electricity availability, DTEK outage updates, planned schedules, voltage quality, and live pinned status messages.
+Send **DTEK outage schedules and electricity alerts to Telegram** from Home Assistant. Keep yourself in a private chat, a building group or a channel informed with schedule changes, advance warnings and one updated pinned status message.
 
-This add-on is built to work together with [ha-dtek-monitor](https://github.com/groove-max/ha-dtek-monitor). The integration provides DTEK data for a selected address. The add-on then combines those DTEK entities with local Home Assistant sensors, such as voltage meters, frequency sensors, or phase sensors, to produce faster and more reliable notifications.
+This app uses [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) to obtain the address's DTEK data. Optional local voltage sensors can confirm actual power loss and restoration. Supported operators currently cover **Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city** through that integration.
 
-It is especially useful for apartment-building chats, local neighborhood groups, and any setup where many people need one shared Telegram status feed for a specific address.
+[Install](#installation) · [First setup](#setup) · [Choose power detection](#power-detection) · [Troubleshoot](#troubleshooting) · [Full guide](DOCS.md)
 
-## Important installation note
+<a id="features"></a>
+## What it does
 
-This project is a **Home Assistant add-on**, not a HACS integration.
+- Announces changes to outage schedules and address groups.
+- Warns before a planned outage; you choose how many minutes ahead.
+- Relays DTEK's outage reasons and estimated restoration times.
+- Detects power loss/restoration from suitable local sensors, with delays to filter short dips.
+- Supports one phase or multiple voltage sensors, including partial outages.
+- Optionally alerts on low/high voltage and recovery.
+- Updates a pinned status instead of filling the chat with status posts.
+- Provides a web editor for addresses, notifications, templates, previews and diagnostics.
 
-- Install **this add-on** from the Home Assistant **Add-on Store** by adding this GitHub repository as a **custom add-on repository**.
-- Install **ha-dtek-monitor** through **HACS** or manually as a custom integration.
+Example pinned message — illustrative address, readings and schedule:
 
-HACS does not install Home Assistant add-ons.
+```text
+🟢 Odesa • Example building
+🔵 Група GPV3.1
+✅ Електропостачання: норма
+🔌 🟢 L1: 230.0 В
+📅 Найближче планове:
+17.10 — 19:00–22:00
+🕒 Оновлено: 17.10.2026 18:00
+```
 
-## Why this add-on exists
+The built-in web editor and Telegram messages currently use Ukrainian. English documentation does not change the message language; edit the [message templates](DOCS.md#templates) to use your own wording.
 
-DTEK data alone is useful, but it is often not enough for operational notifications:
+<a id="requirements"></a>
+## Which project do I install?
 
-- DTEK may report an outage later than it happened physically.
-- DTEK may show that power is back while the house is still dark.
-- Planned schedules may exist even though the current state is actually normal.
-- Physical sensors in Home Assistant may know more about the real situation than the DTEK site does.
+| Project | Purpose | Installation |
+| --- | --- | --- |
+| [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) | Fetches DTEK data and creates HA sensors/calendars | HACS custom integration or manual copy |
+| **DTEK Telegram Bot** — this repository | Sends Telegram messages using those entities and optional local sensors | Home Assistant app repository, not HACS |
 
-This add-on solves that by combining both signal sources:
+Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a configured DTEK Monitor address, a Telegram bot token and a target chat ID. Install matching current releases of both projects.
 
-- `ha-dtek-monitor` for official DTEK status, outage windows, and schedule-group data
-- Local Home Assistant sensors for real power presence validation
-- Telegram delivery logic optimized for one shared bot in one shared chat
+Home Assistant now calls add-ons **apps**; older installations show **Add-ons** instead. HA Container does not include the app manager. See [Home Assistant's app requirements](https://www.home-assistant.io/apps).
 
-## Main capabilities
+<a id="installation"></a>
+## Install
 
-- Telegram notifications for factual DTEK outage start, end, reason changes, and ETA changes
-- Notifications about schedule changes and upcoming planned outages
-- Power detection based on DTEK only, voltage only, or fast loss trigger plus voltage confirmation
-- Single-phase and multi-phase topologies with `on / partial / off` house-state logic
-- Separate voltage-quality alerts for low, high, and normal voltage recovery
-- Optional phase-level notifications for partial outages
-- Live pinned status message with periodic refresh
-- Built-in ingress UI for configuration, diagnostics, template editing, preview, and import/export
-- Import/export of one address or the whole add-on configuration for migration between Home Assistant instances
+1. Install [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor#installation), add your address and verify its entities.
+2. Create a dedicated bot with [@BotFather](https://t.me/BotFather) using `/newbot`.
+3. Choose a destination: **just you** — open the bot and press **Start**; **group** — add the bot and allow messages; **channel** — add it as an administrator with posting/editing rights. Pinning in groups/channels requires the corresponding permission.
+4. Find the chat ID using the [Telegram setup guide](DOCS.md#telegram). A group/channel ID is usually a negative number; keep the minus sign.
+5. Open **Settings → Apps → Install app → ⋮ → Repositories**. On older versions: **Settings → Add-ons → Add-on Store → ⋮ → Repositories**.
+6. Add `https://github.com/groove-max/ha-dtek-telegram-bot` and install **DTEK Telegram Bot**. The button above opens the repository dialog for you.
+7. In the app's **Configuration** tab, enter `telegram_bot_token` and `telegram_chat_id`. Start the app and choose **Open web UI**.
 
-## Requirements
+You do not normally need to create a Home Assistant access token: the app uses Supervisor access automatically.
 
-- Home Assistant OS or Home Assistant Supervised
-- Home Assistant `2026.3.0` or newer
-- A working [ha-dtek-monitor](https://github.com/groove-max/ha-dtek-monitor) installation for the same address
-- A Telegram bot token from BotFather
-- A Telegram chat ID for the target group or channel
+<a id="setup"></a>
+## Configure your first address
 
-Recommended:
+For personal use, a conversation with the bot is enough: no group or channel is needed. Before enabling a shared feed, test in your private chat or a small test group.
 
-- Use a **dedicated Telegram bot token** for this add-on
-- Use one address per building or entrance if the local electrical topology differs
+1. In the web editor's **Налаштування** (Configure) tab, add an address from discovery. A new installation starts with an empty address list. Discovery selects the HA entity prefix; do not guess it from a street name.
+2. Set a recognizable display name. Leave the address's chat override empty to use the app's main chat.
+3. Leave **selected group** empty to follow all groups for the address. Only choose a specific group if you know it applies to your home.
+4. Enable the notifications you need. For a first setup without local sensors, start with DTEK schedule/group updates and a pinned status.
+5. If using local power detection, choose a mode from the table below and select the voltage entities.
+6. Validate, then click **Зберегти й перезапустити** (Save and restart). Saving alone does not apply settings to the running features.
+7. Check diagnostics. Preview a template, then use **Send test** to confirm the destination and bot permissions. This sends a real, labeled test message.
 
-## What the add-on reads from Home Assistant
+**Success looks like:** HA is connected, your address and group are recognized, the test appears in the intended chat, and the status message can be edited. Local power may correctly show `unknown` when no fresh measurement is available.
 
-The add-on is designed around the entities exposed by `ha-dtek-monitor`, including:
+For enforced test routing, set the app option `test_chat_id` to your private chat, test group or channel before starting. It overrides every destination, including address overrides and template tests. See [isolated testing](DOCS.md#testing).
 
-- `binary_sensor.<address_slug>_power`
-- `sensor.<address_slug>_outage_status`
-- `sensor.<address_slug>_outage_description`
-- `sensor.<address_slug>_outage_start`
-- `sensor.<address_slug>_outage_end`
-- `sensor.<address_slug>_schedule_group`
-- `sensor.<address_slug>_schedule_changed`
-- `calendar.<address_slug>_outage_schedule`
+<a id="power-detection"></a>
+## Choose how to detect power
 
-On top of that, you can attach your own local sensors:
+| Available equipment | Mode | What it can establish |
+| --- | --- | --- |
+| No local sensor | `dtek_only` | The outage state reported by DTEK, which may lag behind reality. |
+| One backed-up grid-input voltage sensor | `voltage_only` | Power loss from fresh low/zero voltage and recovery from fresh positive voltage. |
+| One sensor that switches off with the grid | `voltage_only` | Fresh voltage while available; disappearance means `unknown`, not a proven outage. |
+| Backed-up grid-loss sensor + voltage meter such as ATORCH | `loss_plus_voltage` | Independent confirmation when the voltage meter becomes unavailable or freezes. |
 
-- one voltage sensor for single-phase setups
-- two or three voltage sensors for multi-phase setups
-- a fast-loss trigger sensor, for example AC frequency from an inverter or meter
+**One sensor is enough** if it keeps measuring and reporting the **grid input**, including zero, during an outage. Its gateway/network and HA also need to remain online. An inverter's backed-up output voltage does not tell you whether the external grid is present.
 
-## Installation
+With two sensors on the same feed, an explicit fresh “grid absent” reading from the inverter plus an unavailable/frozen ATORCH confirms an outage after the configured delays. Either event may arrive first. If only ATORCH disappears while the inverter still reports grid present, the result is unknown local power rather than a false outage.
 
-### 1. Install DTEK Monitor first
+Sensor reporting time adds to notification latency. A sensor reporting once per minute cannot reliably provide an alert seconds after the physical event. Choose freshness limits and delays using actual measurements. [Examples, timing and transition rules →](DOCS.md#power)
 
-If you have not done it yet:
+Standalone telemetry-loss/recovery notices are **off by default** (`power.telemetry_notifications: false`). The pinned status still reflects missing data. Confirmed outage and recovery messages remain available.
 
-1. Install `ha-dtek-monitor`.
-2. Add the address you want to monitor.
-3. Confirm that DTEK entities appear in Home Assistant.
-
-### 2. Add this repository to the Add-on Store
-
-1. Open `Settings -> Add-ons -> Add-on Store`.
-2. Open the menu in the top-right corner.
-3. Choose `Repositories`.
-4. Add:
-
-   `https://github.com/groove-max/ha-dtek-telegram-bot`
-
-5. Close the dialog.
-
-### 3. Install the add-on
-
-1. Open `DTEK Telegram Bot`.
-2. Click `Install`.
-3. Wait for the build to finish.
-
-### 4. Fill in add-on options
-
-At minimum, set:
-
-- `telegram_bot_token`
-- `telegram_chat_id`
-
-Then start the add-on.
-
-### 5. Open the add-on UI
-
-After the add-on starts, open its ingress UI from the sidebar or from the add-on page.
-
-## First-time setup
-
-The ingress UI is the main place to configure the add-on.
-
-Typical first-run flow:
-
-1. Open the `Configure` tab.
-2. Add an address from discovery.
-3. Pick the `entity_prefix` that belongs to your `ha-dtek-monitor` address.
-4. Set the display name that should appear in Telegram.
-5. Choose the power detection mode.
-6. Add voltage sensors if you want local validation.
-7. Enable the notification features you need.
-8. Run `Validate`.
-9. Save the configuration.
-10. Restart the add-on if needed.
-
-## How power detection works
-
-The add-on can treat electricity presence as more than a simple `on/off` flag.
-
-### `dtek_only`
-
-Use only DTEK’s power entity.
-
-Best when:
-
-- you do not have local voltage sensors
-- you want the simplest possible setup
-
-Tradeoff:
-
-- DTEK can lag behind the real situation
-
-### `voltage_only`
-
-Use only the configured voltage topology.
-
-Best when:
-
-- you trust your local sensors more than DTEK
-- you want the house state to reflect the real electrical situation
-
-### `loss_plus_voltage`
-
-Use one fast-loss sensor as an early trigger, but confirm outage and restore through the configured voltage sensors.
-
-Best when:
-
-- you have a sensor that reacts immediately to loss of grid input
-- your voltage sensor may stop updating when power disappears
-- you want fast detection without trusting stale voltage samples
-
-## Single-phase and multi-phase logic
-
-The `Voltage and phases` section is the shared source of truth for voltage-aware logic.
-
-### Single-phase
-
-If you configure one voltage entity:
-
-- the house is either `on` or `off`
-- phase notifications do not matter
-- the status message shows one phase, usually `L1`
-
-### Multi-phase
-
-If you configure two or three voltage entities:
-
-- `on` means all configured phases are present
-- `partial` means at least one phase is missing but not all of them
-- `off` means all configured phases are missing
-
-This is useful for buildings with three-phase feed or split local distribution.
-
-## Unavailable sensor values
-
-Voltage sensors can behave differently when power disappears:
-
-- some sensors return `0`
-- some sensors return `unavailable`
-- some keep the last known value for a while
-
-The add-on lets you control this with the `Unavailable = missing phase` option.
-
-- If enabled, `unavailable` can contribute to `partial` or `off`
-- If disabled, `unavailable` is treated as unknown and does not automatically mean power loss
-
-For `loss_plus_voltage`, the add-on also protects against stale voltage values by waiting for a fresh sample during the confirmation window.
-
-## Notification features
-
-### DTEK outage updates
-
-These messages come from `ha-dtek-monitor` data:
-
-- outage started
-- outage ended
-- outage reason changed
-- outage ETA changed
-
-If DTEK changes multiple outage parameters at once, the add-on combines them into one update instead of sending separate messages.
-
-### Schedule changes
-
-When DTEK changes the planned schedule, the add-on can send the new schedule or tell you that planned outages are no longer expected.
-
-### Schedule group changes
-
-If the address changes schedule group, the add-on can notify the new group and show the current planned windows for it.
-
-### Upcoming planned outage warning
-
-The add-on can warn before the next planned outage window.
-
-You can choose whether it should trigger:
-
-- always
-- only while power is available
-- only while power is missing
-
-### Voltage alerts
-
-Separate voltage alerts are optional.
-
-They are useful when:
-
-- the power is technically available
-- but voltage quality is poor and equipment may behave badly
-
-The voltage section also supports a hysteresis margin for recovery notifications.
-
-- Low/high alerts still trigger at the configured threshold.
-- The `voltage_normal` recovery message is sent only after the value moves back past the threshold by the configured hysteresis margin.
-- This helps avoid repeated low/high/normal flapping when voltage oscillates close to the boundary.
-
-### Power-loss and restore messages
-
-These are the most important messages for most users.
-
-They can be based on:
-
-- DTEK only
-- voltage only
-- loss trigger plus voltage confirmation
-
-In multi-phase setups, the add-on can also send separate phase-loss and phase-restore messages.
-
-### Status message
-
-The status message is designed for shared chats.
-
-It can:
-
-- edit one pinned message continuously
-- or send new status messages instead
-
-The status shows:
-
-- current power state
-- current phase summary
-- latest outage reason and ETA if available
-- next planned outage if available
-- timestamp of the last refresh
-
-## Templates
-
-All Telegram messages are based on templates.
-
-The UI allows you to:
-
-- preview any template
-- edit and save an override
-- reset a template back to the built-in default
-- send a test message
-
-This is useful if you want a different style for:
-
-- apartment-building chats
-- local neighborhood chats
-- your own wording for outage reasons or status messages
-
-## Import and export
-
-The add-on supports two levels of portability:
-
-### Address export/import
-
-Use this when you want to copy only one monitored address from one Home Assistant instance to another.
-
-### Full configuration export/import
-
-Use this when you want to move the whole add-on draft configuration to another instance.
-
-The exported JSON does not need to be stored on the add-on device. It can be downloaded directly from the browser and then imported into another Home Assistant instance.
-
-Note:
-
-- the target Home Assistant instance must already have matching entities
-- the add-on will not create DTEK Monitor entities for you
-
-## Recommended deployment patterns
-
-### Apartment building chat
-
-Recommended:
-
-- one address
-- one shared group chat
-- `loss_plus_voltage`
-- pinned status message
-- DTEK emergency updates enabled
-- upcoming outage warnings enabled
-
-### Private house with one reliable voltage meter
-
-Recommended:
-
-- one address
-- one single-phase voltage entity
-- `voltage_only` or `loss_plus_voltage`
-- separate low/high voltage alerts if equipment is sensitive
-
-### Three-phase building
-
-Recommended:
-
-- two or three voltage entities with labels `L1`, `L2`, `L3`
-- `loss_plus_voltage`
-- phase notifications enabled
-- status message enabled to show partial outages clearly
-
+<a id="schedules"></a>
+## Schedules, groups and status
+
+- A schedule is a plan, not a measurement. DTEK emergency restrictions can override it.
+- Multiple address groups are kept separate. Selecting one does not prove that it is your apartment's group.
+- Operators that hide public group numbers are shown as **«Варіант 1», «Варіант 2»**. These are local labels, not official queue numbers.
+- Failed or inconsistent schedule checks pause schedule-related notifications. Saved display-only calendars cannot trigger alerts.
+- An unpublished date is not announced as “no outages.”
+- The default status mode edits one message. `send_new` is available if you intentionally want new status posts.
+
+<a id="troubleshooting"></a>
 ## Troubleshooting
 
-### The add-on does not send Telegram messages
+| Symptom | What to do |
+| --- | --- |
+| Cannot find the app | Add this repository to the HA app store, not HACS. Check the installation method and CPU architecture. |
+| Address is missing from discovery | Configure [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) first; check its entities and HA connection. |
+| No Telegram messages | Verify token, full chat ID and bot permissions; try a labeled template test and inspect the app log. |
+| Settings appear saved but behavior is unchanged | Use **Save and restart** and check the pending-restart indicator. |
+| Power is `unknown` | Inspect the sensor's availability, reporting time and configured maximum age. A stale number does not prove power. |
+| Status posts keep appearing | Check `delivery_mode`; use `pinned_edit` and ensure the bot can edit its own message. |
+| Group is listed twice in a custom message | Reset that template to the current default, or update the override. Overrides survive app upgrades. |
+| Schedule notices stopped | Check DTEK Monitor's connection/freshness diagnostics. Local power monitoring can continue independently. |
 
-Check:
+<a id="support"></a>
+## Guides and support
 
-- bot token is valid
-- chat ID is correct
-- the bot is a member of the target group/channel
-- the add-on log does not show Telegram rate-limit or permission errors
+- [Full user guide](DOCS.md): Telegram setup, configuration examples, sensor requirements, templates, backups and test routing.
+- [Report an issue](https://github.com/groove-max/ha-dtek-telegram-bot/issues): include versions, mode and sanitized diagnostics. English and Ukrainian are welcome.
+- [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor): report missing addresses or incorrect upstream entities there.
+- [Changelog](CHANGELOG.md) · [Releases](https://github.com/groove-max/ha-dtek-telegram-bot/releases).
+- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md).
 
-### DTEK Monitor entities are missing
-
-This add-on depends on `ha-dtek-monitor`.
-
-If those entities do not exist, the add-on cannot build DTEK-aware notifications for that address.
-
-### Power state looks wrong
-
-Review:
-
-- selected power mode
-- configured voltage entities
-- `present_above`
-- `Unavailable = missing phase`
-- `loss_entity` and `loss_state`
-
-Then compare the live values in the `Diagnostics` tab.
-
-### The status message is duplicated
-
-This usually means the previous status message could not be edited in Telegram.
-
-Use a dedicated bot token for this add-on when possible, and avoid sharing the same token with other systems that frequently edit or post messages.
-
-### DTEK says there is no outage, but the house is still dark
-
-This is an expected real-world scenario.
-
-In that case the add-on can still show:
-
-- `power_state = off`
-- local outage duration
-- `reason: unknown`
-- note that DTEK does not report an active outage
-
-## Limitations
-
-- The add-on cannot improve DTEK source data; it can only combine it with local Home Assistant signals.
-- If no local power sensor exists, DTEK lag is unavoidable.
-- If local sensors are unstable, bad topology choices can create false detections.
-- Telegram delivery still depends on Telegram API availability and rate limits.
-
-## Support
-
-- Repository: <https://github.com/groove-max/ha-dtek-telegram-bot>
-- DTEK Monitor dependency: <https://github.com/groove-max/ha-dtek-monitor>
-
-## Contributing
-
-Contributions are welcome, but this repository is optimized for practical Home Assistant operation rather than experimental feature sprawl.
-
-Before opening a PR:
-
-- read [CONTRIBUTING.md](CONTRIBUTING.md)
-- keep changes narrow and testable
-- update docs if user-visible behavior changes
-- include tests for power-detection or message-logic changes when possible
-
-## License
-
-[MIT](LICENSE)
+This is an independent community project, not an official DTEK or Telegram product. Licensed under [PolyForm Noncommercial 1.0.0](LICENSE). Noncommercial use, modification and redistribution are permitted under its terms; commercial use is not granted. This is source-available software, not an OSI open-source license. Earlier MIT releases retain their original terms. Dependencies keep their own licenses. See [NOTICE](NOTICE).

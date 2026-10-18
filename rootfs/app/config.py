@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
@@ -9,15 +10,25 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from state_store import atomic_write
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/data/config.yaml")
-CONFIG_PATH_HA = Path("/config/dtek_telegram_bot.yaml")  # accessible via File Editor / VS Code
+CONFIG_PATH_HA = Path("/homeassistant/dtek_telegram_bot.yaml")  # accessible via File Editor / VS Code
 DEFAULT_CONFIG_PATH = Path("/app/default_config.yaml")
 RUNTIME_CONFIG_KEYS = ("ha_token", "export_default_templates", "addresses")
+
+
+def runtime_config_revision(payload: dict | None = None) -> str:
+    """Identify the persisted draft independently of live/resolved entity names."""
+    if payload is None:
+        payload = load_runtime_config_payload()
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
 
 
 class VoltageEntityConfig(BaseModel):
@@ -56,8 +67,9 @@ class VoltageConfig(BaseModel):
     high: float = 245.0
     hysteresis: float = 5.0
     delay: int = 15
-    present_above: float = 50.0
-    unavailable_as_missing: bool = True
+    max_age_seconds: int = Field(default=600, gt=0)
+    present_above: float = Field(default=50.0, gt=0, allow_inf_nan=False)
+    unavailable_as_missing: bool = False  # Deprecated: availability never proves loss.
     silent: bool = False
 
     @model_validator(mode="before")
@@ -86,12 +98,22 @@ class PowerConfig(BaseModel):
     enabled: bool = False
     mode: str = "dtek_only"
     loss_entity: str = ""
+    loss_mqtt_topic: str = ""
     loss_state: str = "0"
     loss_delay: int = 30
     confirm_timeout: int = 15
     restore_delay: int = 10
     silent: bool = False
     phase_notifications: bool = True
+    telemetry_notifications: bool = False
+    telemetry_loss_delay: int = Field(default=20, ge=0)
+
+    @field_validator("loss_mqtt_topic")
+    @classmethod
+    def validate_loss_topic(cls, value: str) -> str:
+        if any(c in value for c in ("#", "+", "\x00")):
+            raise ValueError("power.loss_mqtt_topic must be an exact MQTT topic")
+        return value.strip()
 
     @field_validator("mode")
     @classmethod
@@ -181,6 +203,7 @@ class AddressConfig(BaseModel):
     entity_prefix: str
     display_name: str = ""
     telegram_chat_id: str = ""
+    selected_group: str = ""
 
     schedule_change: ScheduleChangeConfig = Field(default_factory=ScheduleChangeConfig)
     emergency: EmergencyConfig = Field(default_factory=EmergencyConfig)
@@ -271,6 +294,8 @@ class FullConfig(BaseModel):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     ha_token: str = ""
+    test_chat_id: str = ""
+    feedback_enabled: bool = False
 
     # From config.yaml
     export_default_templates: bool = False
@@ -288,6 +313,8 @@ def load_options() -> dict[str, Any]:
             options = json.load(f)
         data["telegram_bot_token"] = options.get("telegram_bot_token", "")
         data["telegram_chat_id"] = options.get("telegram_chat_id", "")
+        data["test_chat_id"] = options.get("test_chat_id", "")
+        data["feedback_enabled"] = options.get("feedback_enabled", False)
         logger.info("Loaded options.json")
     except Exception:
         logger.exception("Failed to load options.json")
@@ -388,14 +415,8 @@ def save_runtime_config_payload(payload: dict[str, Any], path: Path | None = Non
         "export_default_templates": bool(payload.get("export_default_templates", False)),
         "addresses": payload.get("addresses", []),
     }
-    with open(target, "w", encoding="utf-8") as f:
-        yaml.safe_dump(
-            normalized,
-            f,
-            sort_keys=False,
-            allow_unicode=True,
-            default_flow_style=False,
-        )
+    atomic_write(target, yaml.safe_dump(normalized, sort_keys=False, allow_unicode=True,
+                                        default_flow_style=False))
     logger.info("Saved runtime config to %s", target)
     return target
 
@@ -405,6 +426,10 @@ def _resolve_config_path() -> Path | None:
     if CONFIG_PATH_HA.exists():
         return CONFIG_PATH_HA
     if CONFIG_PATH.exists():
+        if CONFIG_PATH_HA.parent.exists():
+            # Preserve the original fallback; publish the complete existing file atomically.
+            atomic_write(CONFIG_PATH_HA, CONFIG_PATH.read_text(encoding="utf-8"))
+            return CONFIG_PATH_HA
         return CONFIG_PATH
     return None
 

@@ -75,17 +75,19 @@ class DummyHA:
         return self.states.get(entity_id)
 
     async def call_service(self, **kwargs: object) -> object:
-        return {}
+        return {"success": True, "result": {"response": {kwargs["entity_id"]: {"events": []}}}}
 
 
 class DummyTelegram:
     def __init__(self, *, edit_result: str) -> None:
         self.edit_result = edit_result
         self.sent_messages: list[str] = []
+        self.sent_kwargs: list[dict[str, object]] = []
         self.edit_calls = 0
 
     async def send_message(self, text: str, **kwargs: object) -> int | None:
         self.sent_messages.append(text)
+        self.sent_kwargs.append(dict(kwargs))
         return 44
 
     async def edit_message_result(self, message_id: int, text: str, **kwargs: object) -> str:
@@ -132,21 +134,25 @@ class DummyPowerMonitor:
 
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
 class StatusMessageFeatureTest(unittest.IsolatedAsyncioTestCase):
-    prefix = "doroga_liustdorfska_56v"
+    prefix = "vulytsia_prykladna_12a"
 
     def _build_feature(
         self,
         *,
         edit_result: str,
         states: dict[str, dict[str, str]] | None = None,
+        telegram_chat_id: str = "",
+        stored_chat_id: str = "",
     ) -> tuple[StatusMessageFeature, DummyTelegram, DummyState]:
         telegram = DummyTelegram(edit_result=edit_result)
         state = DummyState()
         state.set(self.prefix, "status_message_id", 33)
+        if stored_chat_id:
+            state.set(self.prefix, "status_message_chat_id", stored_chat_id)
         config = SimpleNamespace(
             entity_prefix=self.prefix,
-            display_name="Одеса • дорога Люстдорфська, 56В",
-            telegram_chat_id="",
+            display_name="Одеса • вулиця Прикладна, 12А",
+            telegram_chat_id=telegram_chat_id,
             status_message=SimpleNamespace(
                 enabled=True,
                 min_update_interval=0,
@@ -184,6 +190,24 @@ class StatusMessageFeatureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(telegram.edit_calls, 1)
         self.assertEqual(len(telegram.sent_messages), 1)
         self.assertEqual(state.get(self.prefix, "status_message_id"), 44)
+
+    async def test_chat_id_change_recreates_status_message_without_edit_attempt(self) -> None:
+        feature, telegram, state = self._build_feature(
+            edit_result="error",
+            telegram_chat_id="-100999888777",
+            stored_chat_id="-1001234567890",
+        )
+
+        await feature.on_start()
+
+        self.assertEqual(telegram.edit_calls, 0)
+        self.assertEqual(len(telegram.sent_messages), 1)
+        self.assertEqual(telegram.sent_kwargs[0]["chat_id"], "-100999888777")
+        self.assertEqual(state.get(self.prefix, "status_message_id"), 44)
+        self.assertEqual(
+            state.get(self.prefix, "status_message_chat_id"),
+            "-100999888777",
+        )
 
     async def test_status_message_uses_primary_schedule_group_when_state_is_missing(self) -> None:
         feature, telegram, state = self._build_feature(

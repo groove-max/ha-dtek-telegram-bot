@@ -74,7 +74,7 @@ class DummyHA:
         return self.states.get(entity_id)
 
     async def call_service(self, *args: object, **kwargs: object) -> dict[str, object]:
-        return {}
+        return {"success": True, "result": {"response": {kwargs["entity_id"]: {"events": []}}}}
 
 
 class DummyTelegram:
@@ -114,7 +114,7 @@ class DummyStatusMessage:
 
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
 class GroupChangeFeatureTest(unittest.IsolatedAsyncioTestCase):
-    prefix = "doroga_liustdorfska_56v"
+    prefix = "vulytsia_prykladna_12a"
 
     def _build_feature(
         self,
@@ -126,7 +126,7 @@ class GroupChangeFeatureTest(unittest.IsolatedAsyncioTestCase):
         status_message = DummyStatusMessage()
         config = SimpleNamespace(
             entity_prefix=self.prefix,
-            display_name="Одеса • дорога Люстдорфська, 56В",
+            display_name="Одеса • вулиця Прикладна, 12А",
             telegram_chat_id="",
             group_change=SimpleNamespace(enabled=True, silent=False),
         )
@@ -178,6 +178,7 @@ class GroupChangeFeatureTest(unittest.IsolatedAsyncioTestCase):
     async def test_group_change_notification_refreshes_status_message(self) -> None:
         feature, telegram, state, status_message = self._build_feature()
         state.set(self.prefix, "current_group", "5")
+        feature.ha.states[feature.entity("schedule_group")] = {"state": "6"}
 
         await feature.on_state_change(
             f"sensor.{self.prefix}_primary_schedule_group",

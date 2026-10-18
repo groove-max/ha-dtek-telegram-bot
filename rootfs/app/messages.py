@@ -4,16 +4,18 @@ DEFAULT_TEMPLATES: dict[str, str] = {
     # ── Feature 1: Schedule Change ──
     "schedule_change": """\
 ⚡️ {{ display_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 🔄 Оновлення графіка ВІДКЛЮЧЕНЬ:
 
-⛔ Коли за графіком НЕ буде світла:
+{% if groups|default([])|length > 1 and not selected_group %}{% if groups_public|default(true) %}ℹ️ Адреса має кілька груп. Графіки наведені окремо; група вашої квартири потребує уточнення.{% else %}ℹ️ Адреса має кілька варіантів графіка. Вони наведені окремо; відповідність вашій квартирі потребує уточнення.{% endif %}
+
+{% endif %}⛔ Коли за графіком НЕ буде світла:
 {% for line in schedule_lines %}{{ line }}
 {% endfor %}
 ⚠️ ВАЖЛИВО: при АВАРІЙНИХ відключеннях графіки можуть НЕ діяти.""",
     "schedule_empty": """\
 ⚡️ {{ display_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 🔄 Оновлення графіка ВІДКЛЮЧЕНЬ:
 
 ✅ Відключення за графіком не плануються.
@@ -45,37 +47,51 @@ DEFAULT_TEMPLATES: dict[str, str] = {
     "group_change": """\
 ⚡️ {{ display_name }}
 
-🔄 Група графіку змінена: {{ old_group }} → {{ new_group }}
+{% if groups_public|default(true) %}🔄 Група графіку змінена: {{ old_group }} → {{ new_group }}
+{% else %}🔄 Оновлено прив’язку адреси до графіка.
+{% endif %}
 {% if schedule_lines %}
-⛔ Графік відключень для нової групи:
+⛔ Графік відключень{% if groups_public|default(true) %} для нової групи{% endif %}:
 {% for line in schedule_lines %}{{ line }}
 {% endfor %}
 ⚠️ При аварійних відключеннях графіки можуть не діяти.
-{% else %}
+{% elif schedule_complete|default(false) %}
 ✅ Відключення за графіком не плануються.
 {% endif %}""",
     # ── Feature 4: Voltage Quality ──
     "voltage_low": """\
 ⚡️ {{ display_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 
 🟡 Низька напруга {% if phase_label %}на фазі {{ phase_label }}{% else %}в мережі{% endif %}: {{ voltage | round(1) }} В
 🔧 Можливі перезапуски техніки / нестабільна робота.
 🕒 {{ timestamp }}""",
     "voltage_high": """\
 ⚡️ {{ display_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 
 🟠 Завищена напруга {% if phase_label %}на фазі {{ phase_label }}{% else %}в мережі{% endif %}: {{ voltage | round(1) }} В
 🔧 Ризик для чутливої техніки.
 🕒 {{ timestamp }}""",
     "voltage_normal": """\
 ⚡️ {{ display_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 
 ✅ Напруга {% if phase_label %}на фазі {{ phase_label }} {% endif %}в нормі: {{ voltage | round(1) }} В
 🕒 {{ timestamp }}""",
     # ── Feature 5: Power Presence ──
+    "power_telemetry_lost": """⚡️ {{ display_name }}
+
+❔ Немає достовірних даних про живлення.
+Датчик недоступний або дані застаріли. Можливе відключення світла чи збій зв’язку; відключення не підтверджено.
+🕒 {{ timestamp }}""",
+    "power_telemetry_restored": """⚡️ {{ display_name }}
+
+✅ Дані про живлення знову надходять.
+{% if house_state == 'off' %}⛔ Підтверджено відсутність напруги.{% elif house_state == 'partial' %}🟠 Напруга є принаймні на частині фаз.{% else %}⚡ Напруга є.{% endif %}
+
+ℹ️ Сам факт відключення під час втрати даних невідомий.
+🕒 {{ timestamp }}""",
     "power_lost": """\
 ⚡️ {{ display_name }}
 
@@ -110,7 +126,7 @@ DEFAULT_TEMPLATES: dict[str, str] = {
     # ── Feature 6: Upcoming Outage Warning ──
     "upcoming_outage": """\
 ⚡️ {{ display_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 
 ⏳ Можливе планове відключення за графіком (через {{ minutes }} хв).
 ⛔ Від: {{ start }}
@@ -119,7 +135,7 @@ DEFAULT_TEMPLATES: dict[str, str] = {
     # ── Feature 7: Status Message ──
     "status_on": """\
 🟢 {{ short_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 {% if voltage is not none or phases %}
 ✅ Електропостачання: норма
 {% if phases %}
@@ -129,12 +145,13 @@ DEFAULT_TEMPLATES: dict[str, str] = {
 {% endif %}
 {% endif %}
 {% if next_outage %}
-📅 Найближче планове: {{ next_outage }}
+📅 Найближче планове:
+{{ next_outage }}
 {% endif %}
 🕒 Оновлено: {{ timestamp }}""",
     "status_partial": """\
 🟠 {{ short_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 
 ⚠️ Електропостачання: частково наявне
 {% if phases %}
@@ -147,12 +164,13 @@ DEFAULT_TEMPLATES: dict[str, str] = {
 ❔ Невизначені фази: {{ unknown_phases | join(", ") }}
 {% endif %}
 {% if next_outage %}
-📅 Найближче планове: {{ next_outage }}
+📅 Найближче планове:
+{{ next_outage }}
 {% endif %}
 🕒 Оновлено: {{ timestamp }}""",
     "status_off": """\
 🔴 {{ short_name }}
-🔵 Група {{ group }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
 
 ⛔ Електропостачання: відсутнє{{ (" " ~ outage_duration) if outage_duration else "" }}
 {% if outage_description or outage_type %}

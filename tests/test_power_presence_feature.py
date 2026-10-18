@@ -105,9 +105,9 @@ class DummyTemplates:
 
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
 class PowerPresenceFeatureTest(unittest.IsolatedAsyncioTestCase):
-    prefix = "doroga_liustdorfska_56v"
+    prefix = "vulytsia_prykladna_12a"
     loss_entity = "sensor.solar2mqtt_ac_in_frequenz"
-    voltage_entity = "sensor.atorch_smart_energy_meter_at2pl_voltage"
+    voltage_entity = "sensor.example_grid_voltage"
 
     def _build_feature(
         self,
@@ -129,7 +129,7 @@ class PowerPresenceFeatureTest(unittest.IsolatedAsyncioTestCase):
         state = DummyState()
         config = SimpleNamespace(
             entity_prefix=self.prefix,
-            display_name="Одеса • дорога Люстдорфська, 56В",
+            display_name="Одеса • вулиця Прикладна, 12А",
             telegram_chat_id="",
             power=SimpleNamespace(
                 enabled=True,
@@ -221,7 +221,7 @@ class PowerPresenceFeatureTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.03)
         await feature.on_tick()
 
-        self.assertEqual(state.get(self.prefix, "power_state"), "on")
+        self.assertEqual(state.get(self.prefix, "power_state"), "unknown")
         self.assertEqual(telegram.messages, [])
 
 
