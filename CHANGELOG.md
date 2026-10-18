@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Explain compatibility with DTEK Monitor 2.0.0b1, building/account boundaries, independent group selection, schedule availability, beta upgrades and backup-based rollback in both user-guide languages.
+- Clarify multiple-address/chat setup and the current one-token-per-instance limit; request the integration version and operator in bug reports.
+- Refresh Python setup in CI and align dependency lower bounds with versions already covered by the pinned runtime.
+
 ## [0.3.13] - 2026-10-17
 
 - Preserve configuration and per-template drafts during refresh, validation, previews and delayed saves; reject conflicting saves from another tab.
