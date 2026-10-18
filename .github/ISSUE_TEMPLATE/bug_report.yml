@@ -34,8 +34,8 @@ body:
     attributes:
       label: DTEK Monitor integration version
       description: >-
-        Include the beta suffix if present. If you cannot install the integration
-        yet, enter "not installed".
+        Include the beta suffix if present. If the integration is not installed,
+        enter "not installed".
       placeholder: "2.0.0b1 or 1.7.0"
     validations:
       required: true
@@ -129,9 +129,10 @@ body:
     attributes:
       label: Relevant Home Assistant entity states
       description: >-
-        Include the relevant DTEK Monitor entities and local sensors. For
-        schedule issues, include connection diagnostics and Schedule availability
-        if present in your integration version. Remove private details.
+        Include the relevant DTEK Monitor entities and local sensors.
+        For schedule issues, include connection diagnostics and Schedule
+        availability if present in your integration version. Remove private
+        details.
       render: yaml
 
   - type: textarea
