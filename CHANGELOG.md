@@ -4,8 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Add reusable Telegram bot profiles and per-address bot selection, verified tokens in private storage, independent workers/journals, and safe migration of the default bot’s status.
+- Add profile management with conflict detection, token rotation, guarded deletion and independent test chats. Template tests require an explicit test destination.
+- Cover multiple-bot routing, credentials, migration, failed delivery and browser drafts with regressions; document setup and backup behavior in English and Ukrainian.
+
 - Explain compatibility with DTEK Monitor 2.0.0b1, building/account boundaries, independent group selection, schedule availability, beta upgrades and backup-based rollback in both user-guide languages.
-- Clarify multiple-address/chat setup and the current one-token-per-instance limit; request the integration version and operator in bug reports.
+- Clarify multiple-address/chat setup; request the integration version and operator in bug reports.
 - Refresh Python setup in CI and align dependency lower bounds with versions already covered by the pinned runtime.
 
 ## [0.3.13] - 2026-10-17

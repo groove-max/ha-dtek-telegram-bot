@@ -7,7 +7,6 @@ import logging
 import math
 import signal
 import sys
-from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -31,9 +30,8 @@ from groups import state_groups, select_events, presentation_context, display_la
 from messages import DEFAULT_TEMPLATES
 from outage_calendar import build_schedule_lines, extract_calendar_events, next_planned_outage, format_next_outage
 from power_monitor import PowerMonitor
-from delivery_journal import DeliveryJournal
-from state_store import StateStore
-import hashlib
+from bot_profiles import BotProfileStore, default_profile, validate_destinations
+from bot_runtime import BotRuntime
 from telegram_service import TelegramService
 from template_engine import TemplateEngine
 from ui_server import UIServer
@@ -85,14 +83,10 @@ class Orchestrator:
     def __init__(self, config: FullConfig) -> None:
         self.config = config
         self.ha = HAClient(ha_token=config.ha_token)
-        identity = config.telegram_bot_token.split(":", 1)[0]
-        namespace = hashlib.sha256(f"{identity}:{config.test_chat_id}".encode()).hexdigest()[:16]
-        data_dir = Path("/data") / (f"test-{namespace}" if config.test_chat_id else "production")
-        self._journal_path = data_dir / "telegram.sqlite"
-        self.tg = TelegramService(config.telegram_bot_token, config.telegram_chat_id,
-            test_chat_id=config.test_chat_id)
-        self._feedback_lock_path = Path("/data") / f"feedback-{identity}.lock"
-        self.state = StateStore(data_dir / "state.json") if config.test_chat_id else StateStore()
+        self.bot_profiles = BotProfileStore()
+        self.bots = BotRuntime(config, self.bot_profiles)
+        self.tg = self.bots.clients.get("default")  # Legacy default profile alias.
+        self.state = self.bots.state
         self.templates = TemplateEngine()
         self.features: list[Feature] = []
         self._features_by_entity: dict[str, list[Feature]] = {}
@@ -107,6 +101,10 @@ class Orchestrator:
     def _init_features(self) -> None:
         """Instantiate enabled features for each address and wire dependencies."""
         for addr in self.config.addresses:
+            telegram = self.bots.service(addr)
+            if telegram is None or not self.bots.chat(addr):
+                logger.warning("No Telegram destination for %s; address paused", addr.entity_prefix)
+                continue
             # Create PowerMonitor for this address
             power_monitor = PowerMonitor(
                 config=addr,
@@ -121,7 +119,7 @@ class Orchestrator:
                 feature = feature_cls(
                     address_config=addr,
                     ha_client=self.ha,
-                    telegram=self.tg,
+                    telegram=telegram,
                     state_store=self.state,
                     templates=self.templates,
                 )
@@ -175,39 +173,33 @@ class Orchestrator:
         old_val = old_state.get("state", "")
         new_val = new_state.get("state", "")
         logger.info("State changed: %s: %s -> %s", entity_id, old_val, new_val)
-        for feature in self._features_by_entity.get(entity_id, []):
-            try:
-                await feature.on_state_change(entity_id, old_state, new_state)
-            except Exception:
-                logger.exception(
-                    "Error in %s.on_state_change for %s",
-                    feature.name,
-                    entity_id,
-                )
+        await self._enqueue_features(
+            "on_state_change", self._features_by_entity.get(entity_id, []),
+            (entity_id, old_state, new_state),
+        )
+
+    async def _enqueue_features(self, method, features, args=()):
+        by_bot = {}
+        for feature in features:
+            by_bot.setdefault(feature.config.telegram_bot_id, []).append(feature)
+        await asyncio.gather(*(
+            self.bots.enqueue(profile_id, method, selected, args)
+            for profile_id, selected in by_bot.items()
+        ))
 
     async def _tick_loop(self) -> None:
-        """Run periodic ticks for features that need them."""
+        """Each bot handles ticks independently of other bots' Telegram requests."""
         while self._running:
             await asyncio.sleep(TICK_INTERVAL)
-            if not self.ha.is_connected:
-                continue
-            for feature in self.features:
-                try:
-                    await feature.on_tick()
-                except Exception:
-                    logger.exception("Error in %s.on_tick", feature.name)
-            await self.tg.retry_pending(self.state)
+            if self.ha.is_connected:
+                await self._enqueue_features("on_tick", self.features)
 
     async def run(self) -> None:
         """Main run loop."""
         self._running = True
         self._run_task = asyncio.current_task()
 
-        # Load persistent state
-        self.state.load()
-        self.tg.journal = DeliveryJournal(self._journal_path)
-        if self.config.feedback_enabled:
-            await self.tg.start_feedback(self._feedback_lock_path)
+        await self.bots.start()
 
         # Export default templates if configured
         if self.config.export_default_templates:
@@ -239,11 +231,7 @@ class Orchestrator:
         # Resolve display names from HA device registry
         await self._resolve_display_names()
 
-        for feature in self.features:
-            try:
-                await feature.on_start()
-            except Exception:
-                logger.exception("Error in %s.on_start", feature.name)
+        await self._enqueue_features("on_start", self.features)
 
         logger.info("DTEK Telegram Bot started successfully")
 
@@ -308,6 +296,8 @@ class Orchestrator:
                 options={
                     "telegram_bot_token": self.config.telegram_bot_token,
                     "telegram_chat_id": self.config.telegram_chat_id,
+                    "test_chat_id": self.config.test_chat_id,
+                    "feedback_enabled": self.config.feedback_enabled,
                 },
             )
         except Exception:
@@ -337,6 +327,7 @@ class Orchestrator:
         if self._tick_task and not self._tick_task.done():
             self._tick_task.cancel()
             await asyncio.gather(self._tick_task, return_exceptions=True)
+        await self.bots.stop_workers()
         for feature in self.features:
             try:
                 await feature.on_stop()
@@ -346,7 +337,7 @@ class Orchestrator:
         if self._ha_task:
             self._ha_task.cancel()
         await self.state.flush()
-        await self.tg.close()
+        await self.bots.close()
         tasks = [
             task
             for task in (self._ha_task, self._tick_task)
@@ -376,10 +367,11 @@ class Orchestrator:
                 "feature_count": len(self.features),
             },
             "global": {
-                "default_chat_id": self.tg.default_chat_id,
-                "has_telegram_token": bool(self.config.telegram_bot_token),
+                "default_chat_id": (self.config.test_chat_id or self.config.telegram_chat_id),
+                "has_telegram_token": bool(self.bots.clients),
                 "address_count": len(self.config.addresses),
             },
+            "bots": self.bots.public(),
             "addresses": addresses,
         }
 
@@ -416,7 +408,9 @@ class Orchestrator:
         return {
             "entity_prefix": addr.entity_prefix,
             "display_name": addr.display_name or addr.entity_prefix,
-            "chat_id": self.tg.resolve_chat_id(addr.telegram_chat_id),
+            "chat_id": self.bots.chat(addr),
+            "telegram_bot_id": addr.telegram_bot_id,
+            "bot_name": (self.bots.profiles.get(addr.telegram_bot_id).name if addr.telegram_bot_id in self.bots.profiles else addr.telegram_bot_id),
             "power_mode": addr.power.mode if addr.power.enabled else "disabled",
             "enabled_features": [feature.name for feature in features],
             "watched_entities": watched_entities,
@@ -430,6 +424,7 @@ class Orchestrator:
         """Return an expanded diagnostics snapshot for the UI."""
         overview = await self.get_overview()
         return {
+            "bots": self.bots.public(),
             "runtime": overview["runtime"],
             "global": overview["global"],
             "configured_addresses": [
@@ -777,6 +772,7 @@ class Orchestrator:
     ) -> dict[str, Any]:
         """Render a template preview for a draft address config."""
         address = self._get_address_by_index(config, address_index)
+        profile = self._profile_for(address)
         details = self.templates.get_template_details(template_name)
         context = await self._build_template_context(address, template_name)
         rendered = (
@@ -795,7 +791,8 @@ class Orchestrator:
                 "index": address_index,
                 "entity_prefix": address.entity_prefix,
                 "display_name": address.display_name or address.entity_prefix,
-                "chat_id": address.telegram_chat_id or self.config.telegram_chat_id,
+                "chat_id": (profile.test_chat_id if profile.test_mode else "") or address.telegram_chat_id or profile.chat_id,
+                "telegram_bot_id": address.telegram_bot_id,
             },
             "context": context,
             "rendered": rendered,
@@ -816,14 +813,17 @@ class Orchestrator:
             address_index=address_index,
             source_override=source_override,
         )
-        chat_id = self.tg.resolve_chat_id(preview["address"]["chat_id"])
+        address = self._get_address_by_index(config, address_index)
+        profile = self._profile_for(address)
+        if not profile.test_chat_id:
+            raise ValueError("Вкажіть тестовий чат для обраного бота. Тест у робочий чат не надсилається.")
+        chat_id = profile.test_chat_id
         text = f"🧪 Тест шаблону: {template_name}\n\n{preview['rendered']}"
-        message_id = await self.tg.send_message(
-            text,
-            chat_id=chat_id,
-            disable_notification=True,
-            context={"feature": "template_test", "template": template_name, "preview": preview["context"]},
-        )
+        service = TelegramService(profile.token, profile.chat_id, test_chat_id=chat_id)
+        try:
+            message_id = await service.send_message(text, disable_notification=True)
+        finally:
+            await service.close()
         preview["sent"] = {
             "ok": message_id is not None,
             "chat_id": chat_id,
@@ -1227,6 +1227,34 @@ class Orchestrator:
         single_voltage = phases[0]["voltage"] if len(phases) == 1 else None
         return single_voltage, phases
 
+    def _profile_for(self, address):
+        profiles = {"default": default_profile(self.config), **self.bot_profiles.read()}
+        profile = profiles.get(address.telegram_bot_id)
+        if not profile or not profile.token:
+            raise ValueError("Бота для цієї адреси не налаштовано.")
+        return profile
+
+    def validate_destinations(self, config):
+        validate_destinations(config, self.bot_profiles)
+
+    def get_bot_profiles(self):
+        snapshot = self.bot_profiles.snapshot(self.config)
+        snapshot["restart_required"] = (
+            self.bot_profiles.read() != {k: v for k, v in self.bots.profiles.items() if k != "default"}
+        )
+        snapshot["runtime"] = self.bots.public()
+        return snapshot
+
+    async def save_bot_profile(self, payload):
+        profile = await self.bot_profiles.save(payload, self.config)
+        return {"profile": profile.public(), **self.get_bot_profiles()}
+
+    def delete_bot_profile(self, payload):
+        saved = self._get_editor_runtime_config()
+        referenced = {a.telegram_bot_id for a in [*self.config.addresses, *saved.addresses]}
+        self.bot_profiles.delete(str(payload.get("id", "")), str(payload.get("expected_revision", "")), referenced)
+        return self.get_bot_profiles()
+
     async def get_editor_config(self) -> dict[str, Any]:
         """Return the editable runtime config payload for the ingress editor."""
         from config import runtime_config_revision
@@ -1237,12 +1265,13 @@ class Orchestrator:
             "revision": runtime_config_revision(stored),
             "restart_required": build_runtime_config_payload(editor_config) != build_runtime_config_payload(self.config),
             "test_chat_id": self.config.test_chat_id,
+            "bots": self.get_bot_profiles(),
             "config_path": str(get_runtime_config_path()),
             "config": build_runtime_config_payload(editor_config),
             "preview": await self.preview_runtime_config(editor_config),
             "options": {
-                "default_chat_id": self.tg.default_chat_id,
-                "has_telegram_token": bool(self.config.telegram_bot_token),
+                "default_chat_id": (self.config.test_chat_id or self.config.telegram_chat_id),
+                "has_telegram_token": bool(self.bots.clients),
             },
         }
 
@@ -1251,15 +1280,6 @@ async def main() -> None:
     """Entry point."""
     logger.info("Loading configuration...")
     config = load_config()
-
-    has_chat_target = bool(config.telegram_chat_id) or any(
-        addr.telegram_chat_id for addr in config.addresses
-    )
-    if not config.telegram_bot_token or not has_chat_target:
-        logger.error(
-            "telegram_bot_token and at least one telegram_chat_id must be configured"
-        )
-        sys.exit(1)
 
     if not config.addresses:
         logger.info("No addresses configured yet. Add an address in the web editor.")

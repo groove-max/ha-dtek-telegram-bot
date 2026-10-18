@@ -36,6 +36,8 @@ class TelegramService:
         journal: DeliveryJournal | None = None,
     ) -> None:
         self._bot = Bot(token=bot_token)
+        self.last_error = ""
+        self.allowed_routes: dict[str, str] | None = None
         self._default_chat_id = chat_id
         self._test_chat_id = test_chat_id
         self.journal = journal
@@ -76,6 +78,7 @@ class TelegramService:
                 else await self._call_with_retry(operation, action=action)
             )
         except Exception as exc:
+            self.last_error = type(exc).__name__
             # API rejection is definite. Network failure can occur after delivery;
             # do not automatically repeat an ambiguous send.
             status = (
@@ -89,9 +92,11 @@ class TelegramService:
                 and "message is not modified" in str(exc).lower()
             ):
                 status = "ok"
+                self.last_error = ""
             if row is not None:
                 self.journal.finish(row, status, {"error_type": type(exc).__name__})
             raise
+        self.last_error = ""
         if row is not None:
             payload = (
                 result.model_dump(mode="json", exclude_none=True)
@@ -289,6 +294,9 @@ class TelegramService:
                 continue
             recorded = context.get("state") or {}
             prefix = context.get("address", "")
+            if self.allowed_routes is not None and self.allowed_routes.get(prefix) != payload.get("chat"):
+                self.journal.finish_delivery(key, "superseded")
+                continue
             relevant = ("current_groups", "power_state")
             if context.get("feature") == "emergency":
                 relevant += (

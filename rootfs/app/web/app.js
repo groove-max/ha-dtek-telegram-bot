@@ -70,6 +70,10 @@ const state = {
   baseRevision: null,
   configBusy: false,
   templateBusy: false,
+  botBusy: false,
+  botDirty: false,
+  botEditingId: "",
+  botRevision: null,
   dashboardLoading: false,
   writeEpoch: 0,
   previewRequest: 0,
@@ -230,12 +234,14 @@ function restorePersistedUiState() {
 function updateBusyControls() {
   const unavailable = !state.configPayload;
   [validateButton, saveButton, saveRestartButton].forEach((button) => {
-    button.disabled = unavailable || state.configBusy;
+    button.disabled = unavailable || state.configBusy || state.botBusy;
   });
   [addAddressButton, importConfigButton, exportConfigButton, importAddressButton,
     document.getElementById("reload-config-button")].forEach((button) => {
-    button.disabled = unavailable || state.configBusy;
+    button.disabled = unavailable || state.configBusy || state.botBusy;
   });
+  document.getElementById("bot-fields").disabled = unavailable || state.configBusy || state.botBusy;
+  document.querySelectorAll("[data-edit-bot], [data-delete-bot]").forEach((button) => { button.disabled = state.configBusy || state.botBusy; });
   templatesContainer.querySelectorAll("[data-action]").forEach((button) => {
     const needsAddress = ["template-preview", "template-send-test"].includes(button.dataset.action);
     button.disabled = state.templateBusy || !state.templatesPayload ||
@@ -256,7 +262,8 @@ function updateEditorLiveParts() {
   const notices = document.getElementById("editor-notices");
   if (notices && state.configPayload) {
     const text = [];
-    if (state.configPayload.test_chat_id) text.push(`Тестовий режим: усі повідомлення → ${state.configPayload.test_chat_id}.`);
+    if (state.configPayload.test_chat_id) text.push(`Основний бот у тестовому режимі: повідомлення → ${state.configPayload.test_chat_id}.`);
+    if (state.configPayload.bots?.restart_required) text.push("Профілі ботів змінено. Збережіть налаштування та перезапустіть застосунок.");
     if (state.configPayload.restart_required) text.push("Збережені налаштування ще не застосовані. Потрібен перезапуск.");
     if (state.editorDirty && state.baseRevision && state.baseRevision !== state.configPayload.revision) {
       text.push("Збережені налаштування змінилися поза цією чернеткою. Ваш ввід збережено; перед збереженням узгодьте зміни.");
@@ -434,6 +441,7 @@ function createBlankAddress(prefill = {}) {
     entity_prefix: prefill.entity_prefix ?? "",
     display_name: prefill.display_name ?? prefill.friendly_name ?? "",
     telegram_chat_id: "",
+    telegram_bot_id: "default",
     selected_group: "",
     schedule_change: { enabled: true, silent: true },
     emergency: { enabled: true, silent: false },
@@ -523,6 +531,7 @@ function normalizeImportedAddressPayload(payload) {
   normalized.entity_prefix = String(normalized.entity_prefix || "").trim();
   normalized.display_name = String(normalized.display_name || "").trim();
   normalized.telegram_chat_id = String(normalized.telegram_chat_id || "").trim();
+  normalized.telegram_bot_id = String(normalized.telegram_bot_id || "default").trim();
   normalized.power.loss_entity = String(normalized.power?.loss_entity || "").trim();
   normalized.power.loss_state = String(normalized.power?.loss_state || "0").trim() || "0";
 
@@ -1006,6 +1015,10 @@ function renderAddresses() {
           </div>
           <div class="chip-row">${featureBadges || '<span class="badge neutral">без функцій</span>'}</div>
           <div class="meta-grid">
+            <div>
+              <p class="meta-label">Telegram-бот</p>
+              <p class="meta-value">${escapeHtml(address.bot_name || "Основний бот")}</p>
+            </div>
             <div>
               <p class="meta-label">Чат призначення</p>
               <p class="meta-value">${escapeHtml(address.chat_id || "не вказано")}</p>
@@ -1692,9 +1705,14 @@ function renderAddressEditor(address, index) {
             <input class="addr-display-name" type="text" value="${escapeHtml(address.display_name || "")}" placeholder="Назва для Telegram" />
           </label>
           <label class="field">
+            <span>Telegram-бот</span>
+            <select class="addr-bot-id">${botOptions(address.telegram_bot_id || "default")}</select>
+            <small>Додайте іншого бота на вкладці «Telegram-боти».</small>
+          </label>
+          <label class="field">
             <span>Чат ID</span>
             <input class="addr-chat-id" type="text" value="${escapeHtml(address.telegram_chat_id || "")}" placeholder="Окремий чат (необов'язково)" />
-            <small>Особистий чат, група або канал. Для особистого чату спочатку натисніть «Розпочати» у бота. Порожнє поле використовує основний чат.</small>
+            <small>Особистий чат, група або канал. Для особистого чату спочатку натисніть «Розпочати» у бота. Порожнє поле використовує чат обраного бота.</small>
           </label>
           <label class="field">
             <span>Обрана група (порожньо — всі окремо)</span>
@@ -2059,6 +2077,7 @@ function collectEditorConfig() {
       entity_prefix: form.querySelector(".addr-entity-prefix").value.trim(),
       display_name: form.querySelector(".addr-display-name").value.trim(),
       telegram_chat_id: form.querySelector(".addr-chat-id").value.trim(),
+      telegram_bot_id: form.querySelector(".addr-bot-id").value,
       selected_group: form.querySelector(".addr-selected-group").value.trim(),
       schedule_change: {
         enabled: form.querySelector(".feature-schedule-change").checked,
@@ -2321,7 +2340,7 @@ function applyPowerPreset(target) {
 }
 
 async function validateConfig() {
-  if (state.configBusy || !state.configPayload) return;
+  if (state.configBusy || state.botBusy || !state.configPayload) return;
   const config = collectEditorConfig();
   const revision = state.editorRevision;
   state.configBusy = true;
@@ -2346,7 +2365,7 @@ async function validateConfig() {
 }
 
 async function saveConfig({ restart }) {
-  if (state.configBusy || !state.configPayload) return;
+  if (state.configBusy || state.botBusy || !state.configPayload) return;
   const config = collectEditorConfig();
   const revision = state.editorRevision;
   state.configBusy = true;
@@ -2524,6 +2543,7 @@ function renderTemplates(force = false) {
         <div class="editor-toolbar">
           <button class="secondary-button" type="button" data-action="template-preview">Побудувати прев'ю</button>
           <button class="secondary-button" type="button" data-action="template-send-test">Надіслати тест</button>
+          <p class="helper-copy">Тест надсилається лише в тестовий чат бота, обраного для адреси. Робочий чат не використовується.</p>
           <button class="secondary-button" type="button" data-action="template-save">Зберегти шаблон</button>
           <button class="secondary-button" type="button" data-action="template-reload">Завантажити збережений текст</button>
           <button class="secondary-button" type="button" data-action="template-reset">Повернути стандартний</button>
@@ -2702,8 +2722,9 @@ async function loadDashboard({ background = false } = {}) {
     renderAddresses();
     renderDiscovery();
     renderDiagnostics();
-    if (epoch !== state.writeEpoch || state.configBusy || state.templateBusy) return;
+    if (epoch !== state.writeEpoch || state.configBusy || state.templateBusy || state.botBusy) return;
     state.configPayload = config;
+    renderBots();
     state.templatesPayload = templates;
 
     if ((!state.editorDirty && !editorContainer.contains(document.activeElement)) || !state.draftConfig) {
@@ -3026,11 +3047,121 @@ document.getElementById("reload-config-button").addEventListener("click", () => 
   void reloadConfig().catch((error) => setEditorStatus(`Помилка завантаження: ${error.message}`, "status-bad"));
 });
 window.addEventListener("beforeunload", (event) => {
-  if (state.editorDirty || Object.values(state.templateDrafts).some((draft) => draft.dirty)) {
+  if (state.editorDirty || state.botDirty || Object.values(state.templateDrafts).some((draft) => draft.dirty)) {
     event.preventDefault();
     event.returnValue = "";
   }
 });
+function botOptions(selected) {
+  const profiles = state.configPayload?.bots?.profiles || [{id: "default", name: "Основний бот"}];
+  const options = profiles.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === selected ? "selected" : ""}>${escapeHtml(p.name)}${p.username ? ` · @${escapeHtml(p.username)}` : ""}</option>`);
+  if (!profiles.some((p) => p.id === selected)) options.push(`<option value="${escapeHtml(selected)}" selected>Недоступний профіль: ${escapeHtml(selected)}</option>`);
+  return options.join("");
+}
+
+function botStatus(message, bad = false) {
+  const node = document.getElementById("bot-status");
+  node.textContent = message;
+  node.className = `status-message ${bad ? "status-bad" : "muted"}`;
+}
+
+function renderBots() {
+  const snapshot = state.configPayload?.bots;
+  if (!snapshot) return;
+  if (state.botRevision === null) state.botRevision = snapshot.revision;
+  const runtime = snapshot.runtime || [];
+  document.getElementById("bot-list").innerHTML = snapshot.profiles.map((p) => {
+    const active = runtime.find((item) => item.id === p.id);
+    const error = active?.error || active?.delivery_error || "";
+    return `<article class="editor-card"><h3>${escapeHtml(p.name)} ${p.username ? `· @${escapeHtml(p.username)}` : ""}</h3>
+      <p>Чат: ${escapeHtml(p.chat_id || "вказується в адресі")}${p.test_mode ? ` · Тестовий режим → ${escapeHtml(p.test_chat_id)}` : ""}</p>
+      ${error ? `<p class="status-bad">${escapeHtml(error)}</p>` : ""}
+      ${p.id === "default" ? '<p class="helper-copy">Налаштовується у Home Assistant → Застосунки → DTEK Telegram Bot → Конфігурація.</p>' :
+        `<div class="editor-toolbar"><button type="button" class="secondary-button" data-edit-bot="${escapeHtml(p.id)}">Редагувати</button><button type="button" class="secondary-button" data-delete-bot="${escapeHtml(p.id)}">Видалити</button></div>`}
+      </article>`;
+  }).join("");
+  document.querySelectorAll(".addr-bot-id").forEach((select) => {
+    if (select !== document.activeElement) select.innerHTML = botOptions(select.value);
+  });
+  document.querySelectorAll("[data-edit-bot], [data-delete-bot]").forEach((button) => { button.disabled = state.botBusy; });
+}
+
+function editBot(id = "") {
+  state.botEditingId = id;
+  state.botDirty = false;
+  state.botRevision = state.configPayload?.bots?.revision || "";
+  const profile = state.configPayload?.bots?.profiles.find((p) => p.id === id) || {};
+  document.getElementById("bot-form").reset();
+  document.getElementById("bot-name").value = profile.name || "";
+  document.getElementById("bot-chat").value = profile.chat_id || "";
+  document.getElementById("bot-test-chat").value = profile.test_chat_id || "";
+  document.getElementById("bot-test-mode").checked = Boolean(profile.test_mode);
+  document.getElementById("bot-feedback").checked = Boolean(profile.feedback_enabled);
+  document.getElementById("bot-form-title").textContent = id ? `Редагувати ${profile.name || id}` : "Додати бота";
+  document.getElementById("bot-name").focus();
+}
+
+function mayReplaceBotForm() {
+  return !state.botDirty ||
+    window.confirm("Замінити поточні поля профілю? Незбережені зміни буде втрачено.");
+}
+
+document.getElementById("bot-new").addEventListener("click", () => { if (mayReplaceBotForm()) editBot(); });
+document.getElementById("bot-reload").addEventListener("click", () => { if (mayReplaceBotForm()) editBot(state.botEditingId); });
+document.getElementById("bot-list").addEventListener("click", (event) => {
+  const edit = event.target.closest("[data-edit-bot]");
+  if (edit && mayReplaceBotForm()) editBot(edit.dataset.editBot);
+  const remove = event.target.closest("[data-delete-bot]");
+  if (remove && window.confirm("Видалити профіль бота? Адреси не повинні його використовувати.")) {
+    void saveBot(true, remove.dataset.deleteBot);
+  }
+});
+
+document.getElementById("bot-form").addEventListener("input", () => { state.botDirty = true; });
+document.getElementById("bot-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveBot(false);
+});
+
+async function saveBot(remove = false, id = state.botEditingId) {
+  if (state.botBusy || state.configBusy) return;
+  const payload = remove ? {id, expected_revision: state.configPayload?.bots?.revision} : {
+    id, expected_revision: state.botRevision,
+    name: document.getElementById("bot-name").value.trim(),
+    token: document.getElementById("bot-token").value.trim(),
+    chat_id: document.getElementById("bot-chat").value.trim(),
+    test_chat_id: document.getElementById("bot-test-chat").value.trim(),
+    test_mode: document.getElementById("bot-test-mode").checked,
+    feedback_enabled: document.getElementById("bot-feedback").checked,
+  };
+  state.botBusy = true;
+  state.writeEpoch += 1;
+  document.getElementById("bot-fields").disabled = true;
+  renderBots();
+  updateBusyControls();
+  botStatus(remove ? "Видалення…" : "Перевіряємо токен у Telegram…");
+  try {
+    const result = await fetchJson(remove ? "./api/bots/delete" : "./api/bots/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+    if (!Array.isArray(result.profiles) || !result.revision || (!remove && !result.profile?.id)) {
+      throw new Error("Неочікувана відповідь сервера. Поля профілю збережено у формі; оновіть список перед повтором.");
+    }
+    state.configPayload.bots = result;
+    if (!remove) editBot(result.profile.id);
+    else if (state.botEditingId === id) editBot();
+    botStatus("Збережено. Оберіть бота для адреси та натисніть «Зберегти і перезапустити».");
+  } catch (error) {
+    botStatus(error.message, true);
+  } finally {
+    // Credentials stay only in this form until a successful save or explicit reset.
+    payload.token = "";
+    state.botBusy = false;
+    state.writeEpoch += 1;
+    document.getElementById("bot-fields").disabled = false;
+    renderBots();
+    updateBusyControls();
+  }
+}
+
 updateBusyControls();
 restorePersistedUiState();
 setActiveTab(state.activeTab);

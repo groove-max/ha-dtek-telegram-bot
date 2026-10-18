@@ -24,6 +24,7 @@
 
       <nav class="tab-bar" id="tab-bar">
         <button class="tab-button active" type="button" data-tab="configure">Налаштування</button>
+        <button class="tab-button" type="button" data-tab="bots">Telegram-боти</button>
         <button class="tab-button" type="button" data-tab="templates">Шаблони</button>
         <button class="tab-button" type="button" data-tab="runtime">Поточний стан</button>
         <button class="tab-button" type="button" data-tab="discovery">Пошук</button>
@@ -71,6 +72,45 @@
             <div id="editor-container" class="stack"></div>
             <input id="config-import-input" type="file" accept="application/json,.json" class="visually-hidden-input" />
             <input id="address-import-input" type="file" accept="application/json,.json" class="visually-hidden-input" />
+          </section>
+        </section>
+
+        <section id="panel-bots" class="tab-panel hidden">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Telegram-боти</h2>
+              <p>Основний бот використовує токен із налаштувань застосунку Home Assistant.
+                Додаткового бота додайте тут, а потім оберіть для адреси. Один бот може обслуговувати кілька адрес.</p>
+            </div>
+            <div id="bot-list" class="stack"></div>
+            <p id="bot-status" class="status-message muted" role="status" aria-live="polite"></p>
+            <form id="bot-form" autocomplete="off">
+              <fieldset id="bot-fields" class="editor-card">
+                <legend id="bot-form-title">Додати бота</legend>
+                <div class="field-grid">
+                  <label class="field"><span>Назва для списку</span>
+                    <input id="bot-name" type="text" maxlength="80" required /></label>
+                  <label class="field"><span>Токен від @BotFather</span>
+                    <input id="bot-token" type="password" autocomplete="new-password" />
+                    <small>При редагуванні залиште порожнім, щоб зберегти токен. Він не повертається у браузер і не потрапляє в експорт.</small></label>
+                  <label class="field"><span>Чат за замовчуванням</span>
+                    <input id="bot-chat" type="text" />
+                    <small>Особистий чат, група або канал. Можна перевизначити для адреси.</small></label>
+                  <label class="field"><span>Тестовий чат</span>
+                    <input id="bot-test-chat" type="text" />
+                    <small>Кнопка «Надіслати тест» використовує тільки цей чат.</small></label>
+                </div>
+                <label class="toggle"><input id="bot-test-mode" type="checkbox" /><span>Тестовий режим: усі повідомлення цього бота надсилати в тестовий чат</span></label>
+                <label class="toggle"><input id="bot-feedback" type="checkbox" /><span>Зберігати вхідні повідомлення тестового чату для діагностики (лише в тестовому режимі)</span></label>
+                <div class="editor-toolbar">
+                  <button class="primary-button" type="submit">Перевірити токен і зберегти бота</button>
+                  <button id="bot-new" class="secondary-button" type="button">Новий профіль</button>
+                  <button id="bot-reload" class="secondary-button" type="button">Завантажити профіль знову</button>
+                </div>
+              </fieldset>
+            </form>
+            <p class="helper-copy">Профілі зберігаються окремо від адрес. Після зміни профілю оберіть «Зберегти і перезапустити» на вкладці «Налаштування».
+              Токен у незбереженій формі не відновлюється після закриття сторінки.</p>
           </section>
         </section>
 

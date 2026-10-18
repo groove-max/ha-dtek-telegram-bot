@@ -17,3 +17,4 @@
 **/secrets.yaml
 **/graphify-out/
 **/.review-artifacts/
+**/telegram_bots.json

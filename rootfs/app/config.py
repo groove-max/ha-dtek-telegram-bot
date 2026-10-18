@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 from state_store import atomic_write
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -203,6 +203,7 @@ class AddressConfig(BaseModel):
     entity_prefix: str
     display_name: str = ""
     telegram_chat_id: str = ""
+    telegram_bot_id: str = "default"
     selected_group: str = ""
 
     schedule_change: ScheduleChangeConfig = Field(default_factory=ScheduleChangeConfig)
@@ -212,6 +213,11 @@ class AddressConfig(BaseModel):
     power: PowerConfig = Field(default_factory=PowerConfig)
     upcoming_outage: UpcomingOutageConfig = Field(default_factory=UpcomingOutageConfig)
     status_message: StatusMessageConfig = Field(default_factory=StatusMessageConfig)
+
+    @field_validator("telegram_bot_id")
+    @classmethod
+    def normalize_bot_id(cls, value: str) -> str:
+        return value.strip() or "default"
 
     @model_validator(mode="before")
     @classmethod
@@ -290,16 +296,25 @@ class AddressConfig(BaseModel):
 class FullConfig(BaseModel):
     """Complete add-on configuration."""
 
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     # From options.json
-    telegram_bot_token: str = ""
+    telegram_bot_token: str = Field(default="", repr=False)
     telegram_chat_id: str = ""
-    ha_token: str = ""
+    ha_token: str = Field(default="", repr=False)
     test_chat_id: str = ""
     feedback_enabled: bool = False
 
     # From config.yaml
     export_default_templates: bool = False
     addresses: list[AddressConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_addresses(self) -> "FullConfig":
+        prefixes = [address.entity_prefix for address in self.addresses]
+        if len(prefixes) != len(set(prefixes)):
+            raise ValueError("Each entity_prefix must appear only once")
+        return self
 
 
 def load_options() -> dict[str, Any]:

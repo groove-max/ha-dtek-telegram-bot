@@ -77,9 +77,9 @@ If you do not need pinning, turn off `status_message.pin` or the entire `status_
 Each address has one destination; automatic subscriptions for arbitrary users and selecting individual forum topics are not currently implemented. If a group upgrades to a supergroup and its ID changes, update the configured ID and restart the app.
 
 <a id="destinations"></a>
-### Multiple addresses, chats and bot instances
+### Multiple addresses, chats and bots
 
-One installation can monitor several buildings and send each one's updates to a different chat. Set the main `telegram_chat_id` in the app Configuration tab, then use an address's `telegram_chat_id` override when it needs another destination. The same bot must be allowed to send to every destination.
+One installation can monitor several buildings with one or several Telegram bots. Existing addresses keep the **Default bot**, using the token and chat in the HA app Configuration tab. Every address selects one bot profile; an empty address chat uses that profile’s default chat. Each selected bot needs permission to send to its destination.
 
 For example, this runtime configuration follows all groups for two buildings. The first uses the main chat; the second uses its own group. Replace the fictional entity prefixes through discovery and the example chat ID with your own:
 
@@ -94,9 +94,21 @@ addresses:
     telegram_chat_id: "-1001234567890"
 ```
 
-**Current limits:** one bot token per installation and one destination per address. Per-address tokens and multiple delivery profiles for the same address are not implemented. Do not duplicate an `entity_prefix` to simulate separate subscriptions: its stored state and notification coordination are shared.
+To use another bot:
 
-A separate instance can be useful for another Telegram bot identity or an isolated development environment. On the same HA, such installations must also use separate runtime configuration files; changing only the app name or slug leaves `/homeassistant/dtek_telegram_bot.yaml` shared. The standard app does not provide an instance manager. For ordinary testing, use [test routing](#testing) and stop any other instance using the same token.
+1. Create it with @BotFather and add it to the intended group/channel, or press **Start** in a personal conversation.
+2. Open the app’s **Telegram bots** tab. Enter a label, token and default chat ID. You can instead set the chat separately for each address.
+3. Choose **Verify token and save bot**. The app calls Telegram `getMe` and displays the bot’s `@username`; this check does not send a message or verify chat permissions.
+4. In **Settings**, choose that bot for an address. Use **Save and restart** to apply both profile and address changes.
+5. For an optional delivery check, enter a **Test chat** in the profile and use **Templates → Send test**. The button sends only to that bot’s test chat. A missing or inaccessible test destination never falls back to a working group.
+
+One profile can serve several addresses. Adding the same bot twice is rejected to avoid competing update collectors. A new token for the **same** bot can replace the stored token; a different bot needs a new profile. Leave the token blank while editing to keep it. Profiles in use by saved or running addresses cannot be deleted: first change those addresses, save and restart.
+
+The runtime YAML stores only `telegram_bot_id` (`default` or the ID shown in the exported address), not additional bot tokens. Imports retain this reference: add the corresponding bot on the destination HA or choose another profile before saving. Missing profiles pause their addresses; they never silently switch to the default bot.
+
+Clients, delivery journals and incoming-update collectors are separate for each bot. A Telegram error or rate limit for one bot does not stop the other bot workers. Status message IDs and notification acknowledgements are scoped to bot, chat, test/production mode and address. Switching bot or chat creates a new status; the old message stays in the old chat and can be removed manually. Rotating a token for the same bot preserves its status. The first upgrade imports the existing default bot’s state and journal automatically; keep a private backup before updating.
+
+**Current limits:** one bot and destination per address. Fan-out to several recipients, forum topics and user-managed subscriptions are not implemented. Do not duplicate an `entity_prefix` to simulate subscriptions; validation rejects duplicates. Separate development installations still need separate runtime YAML files to avoid sharing `/homeassistant/dtek_telegram_bot.yaml`.
 
 ### Find the chat ID
 
@@ -139,20 +151,23 @@ An existing webhook conflicts with `getUpdates`; do not remove another service's
 <a id="configuration"></a>
 ## Where settings live
 
-There are two configuration layers:
+Settings are divided by purpose:
 
 | Location | Settings |
 | --- | --- |
 | HA app **Configuration** tab | `telegram_bot_token`, `telegram_chat_id`, optional `test_chat_id`, `feedback_enabled` (default `false`). Restart after changing them. |
-| App web editor | Addresses, power/voltage rules, notifications and template controls. Use **Save and restart** for address/runtime changes. |
+| App web editor | Addresses, bot selection, power/voltage rules, notifications and templates. Use **Save and restart** for runtime changes. |
+| **Telegram bots** tab | Additional bot profiles, default/test chats and optional feedback. **Verify token and save bot** stores the profile; restart applies it to notifications. |
 
 The editor stores runtime settings in `dtek_telegram_bot.yaml` in HA's configuration directory. Inside this app, its path is `/homeassistant/dtek_telegram_bot.yaml`; the same file may appear as `/config/dtek_telegram_bot.yaml` in an HA file editor. `/data/config.yaml` is a fallback; an existing fallback is copied when the preferred file is first available. Do not maintain conflicting copies.
 
-`ha_token` is an optional runtime fallback for HA authentication. Leave it empty in a normal Supervisor installation. Full configuration exports can contain this token and private address information; inspect them before sharing.
+`ha_token` is an optional runtime fallback for HA authentication. Leave it empty in a normal Supervisor installation. The editor’s JSON export omits the fallback HA token and all Telegram tokens, but includes addresses and chat IDs. Raw runtime YAML can contain the HA token. Inspect files before sharing.
 
 ### Editing safely
 
 Background refresh updates live data without replacing fields you are editing. **Validate** checks the current draft and shows a snapshot; it does not save it. **Save** writes settings; **Save and restart** also applies them to the running app. If you keep typing during a save, those later edits remain unsaved.
+
+Bot tokens stay only in the current form until submission and are never returned by the API or stored in browser draft storage. A background refresh preserves this form; closing/reloading the page discards unsaved profile fields. Profile saves also reject concurrent edits; use **Reload profile** to load the saved values before retrying.
 
 Configuration and individual template drafts survive page reloads in the same browser tab when session storage is available. Closing the tab can remove them; export important configuration drafts before closing it. Template drafts remain separate when you switch templates or addresses. Preview uses the current text without saving it.
 
@@ -164,7 +179,8 @@ If another tab or a file edit changes the saved version, saving reports a confli
 | --- | --- |
 | `entity_prefix` | Common portion of the address's entity IDs. Use discovery; it is not necessarily the street name. |
 | `display_name` | Friendly text in messages; empty lets the app resolve it from HA. |
-| `telegram_chat_id` | Optional per-address destination; empty uses the main chat. Test routing overrides both. |
+| `telegram_bot_id` | Bot profile: `default` keeps the existing Supervisor token; use the editor to select an additional bot. |
+| `telegram_chat_id` | Optional destination; empty uses the selected bot’s default chat. That bot’s test mode overrides both. |
 | `selected_group` | Empty follows all address groups. Select only a known applicable group. |
 
 Example: for `sensor.dtek_krem_0123456789abcdef_outage_status`, the prefix is `dtek_krem_0123456789abcdef`. If a saved selected group disappears from the address, schedule processing waits for a valid selection rather than guessing.
@@ -293,7 +309,7 @@ Schedules and local readings remain separate. During a DTEK failure, actual powe
 <a id="templates"></a>
 ## Change message wording
 
-Open **Templates**, choose a template, preview it, edit and save an override. Reset removes the override and restores the built-in text. Sending a test publishes a real message to the configured destination.
+Open **Templates**, choose a template, preview it, edit and save an override. Reset removes the override and restores the built-in text. Sending a test publishes a real message only to the selected bot’s test chat. Configure it first; the button never uses the production chat as a fallback.
 
 Templates use Jinja. Available context is shown in the editor and depends on the message. For group presentation, `group`, `groups`, `selected_group`, `old_group`, `new_group` already respect hidden labels; `groups_public` indicates whether public group numbers exist.
 
@@ -305,10 +321,11 @@ Overrides are stored in `/data/templates/*.j2` and survive updates. Consequently
 ## Test without posting to the main chat
 
 1. Choose a test destination: press **Start** in a private conversation, or add the bot to a test group/channel with the required permissions.
-2. Set the app option `test_chat_id`. Restart before testing.
-3. All sends, edits, pins and unpins now use that chat, including address overrides and UI tests. Only message IDs owned by the test journal can be edited/pinned.
-4. Optionally enable `feedback_enabled` to collect new posts visible to the bot from that test chat. Use one collector per token; a webhook prevents this collector from starting.
-5. Stop any production instance using the same bot while testing. Test state is isolated in `/data/test-<identity>/`.
+2. For the **Default bot**, set the Supervisor option `test_chat_id` and restart. This redirects all of that bot’s notifications to the test chat, preserving the existing behavior.
+3. For an additional bot, set **Test chat** in its profile. **Send test** uses it immediately after the profile is saved. To redirect all notifications, also enable **Test mode**, then save and restart. Other bot profiles keep their own destinations.
+4. In test mode, all sends, edits, pins and unpins use the test chat; only message IDs owned by its journal can be modified. Test mode requires a nonempty test chat.
+5. Optional **Collect feedback** (`feedback_enabled`) records new posts visible to the bot in its test chat. It requires test mode, one collector per token and no webhook. Failure to start feedback is reported under **Telegram bots** without stopping other bots.
+6. Stop any other instance using the same token. Journals are isolated under `/data/bots/<bot-id>/<mode>/telegram.sqlite`; address state is stored in separate route namespaces in `/data/state.json`.
 
 Incoming feedback follows Telegram permissions/privacy. In a channel without a linked discussion, use administrator posts rather than expecting user replies. The collector does not import arbitrary old chat history.
 
@@ -321,9 +338,9 @@ Explicit temporary send failures may be retried within a bounded window after re
 
 - Back up the app data and HA configuration, including `dtek_telegram_bot.yaml` and template overrides.
 - Read the [changelog](CHANGELOG.md), update the app, then verify the active configuration and destination.
-- To move addresses, export/import them or the configuration draft in the editor. This does not create the corresponding HA entities or move Supervisor options; configure the token/chat separately and remap entity IDs.
-- Before leaving test mode, stop the test instance, clear `test_chat_id`, check the intended main destination and restart. Production resumes its own saved state; do not copy test message IDs or queued notifications into it.
+- To move addresses, export/import them or the configuration draft in the editor. This does not create HA entities or transfer any bot credentials. Configure the default token/chat separately, recreate additional profiles, check each address’s bot selection and remap entity IDs.
+- Before leaving test mode, stop the test instance, clear `test_chat_id` for the default bot or disable **Test mode** for an additional profile, check its production destination and restart. Production resumes its own saved state; do not copy test message IDs or queued notifications into it.
 
-The app stores Telegram credentials in Supervisor-managed options and may store a fallback HA token in runtime YAML. Include these only in private backups. If a token is exposed, replace it through the service that issued it.
+The default Telegram token stays in Supervisor-managed options. Additional tokens are stored unencrypted in the app’s private `/data/telegram_bots.json` file with owner-only permissions (0600); they are not included in the editor’s JSON exports or diagnostics. App backups contain this private file. A fallback HA token may also be present in runtime YAML. Include these only in private backups. If a token is exposed, replace it through the service that issued it.
 
 For unresolved problems, use the [troubleshooting table](README.md#troubleshooting), then open an issue with versions, mode, reporting cadence and sanitized relevant logs. Development details are in [Contributing](CONTRIBUTING.md).

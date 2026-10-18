@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import aiohttp
 from aiohttp import web
 from pydantic import ValidationError
+from bot_profiles import ProfileConflict
 
 from config import (
     build_runtime_config_payload,
@@ -61,6 +62,9 @@ class UIServer:
         self._app.router.add_get("/api/discovery", self._discovery)
         self._app.router.add_get("/api/diagnostics", self._diagnostics)
         self._app.router.add_get("/api/templates", self._templates)
+        self._app.router.add_get("/api/bots", self._bots)
+        self._app.router.add_post("/api/bots/save", self._save_bot)
+        self._app.router.add_post("/api/bots/delete", self._delete_bot)
         self._app.router.add_post("/api/config/validate", self._validate_config)
         self._app.router.add_post("/api/config/save", self._save_config)
         self._app.router.add_post("/api/templates/preview", self._preview_template)
@@ -114,6 +118,25 @@ class UIServer:
     async def _templates(self, request: web.Request) -> web.Response:
         return web.json_response(self._orchestrator.get_templates_snapshot())
 
+    async def _bots(self, request: web.Request) -> web.Response:
+        return web.json_response(self._orchestrator.get_bot_profiles(), headers={"Cache-Control": "no-store"})
+
+    async def _save_bot(self, request: web.Request) -> web.Response:
+        body = await self._read_json_body(request)
+        try:
+            result = await self._orchestrator.save_bot_profile(body)
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=409 if isinstance(exc, ProfileConflict) else 400)
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+    async def _delete_bot(self, request: web.Request) -> web.Response:
+        body = await self._read_json_body(request)
+        try:
+            result = self._orchestrator.delete_bot_profile(body)
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=409 if isinstance(exc, ProfileConflict) else 400)
+        return web.json_response(result)
+
     async def _validate_config(self, request: web.Request) -> web.Response:
         payload = await self._read_config_payload(request)
         try:
@@ -121,11 +144,14 @@ class UIServer:
                 payload,
                 options=self._validation_options(),
             )
+            self._orchestrator.validate_destinations(validated)
         except ValidationError as exc:
             return web.json_response(
-                {"ok": False, "errors": exc.errors(include_context=False)},
+                {"ok": False, "errors": exc.errors(include_context=False, include_input=False)},
                 status=400,
             )
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=400)
 
         return web.json_response(
             {
@@ -145,11 +171,14 @@ class UIServer:
                 payload,
                 options=self._validation_options(),
             )
+            self._orchestrator.validate_destinations(validated)
         except ValidationError as exc:
             return web.json_response(
-                {"ok": False, "errors": exc.errors(include_context=False)},
+                {"ok": False, "errors": exc.errors(include_context=False, include_input=False)},
                 status=400,
             )
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=400)
 
         normalized = build_runtime_config_payload(validated)
         conflict = self._config_conflict(body)
@@ -161,6 +190,10 @@ class UIServer:
         conflict = self._config_conflict(body)
         if conflict is not None:
             return conflict
+        try:
+            self._orchestrator.validate_destinations(validated)
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=400)
         target = save_runtime_config_payload(normalized)
         if restart:
             asyncio.create_task(self._delayed_restart())
@@ -201,7 +234,7 @@ class UIServer:
             )
         except ValidationError as exc:
             return web.json_response(
-                {"ok": False, "errors": exc.errors(include_context=False)}, status=400
+                {"ok": False, "errors": exc.errors(include_context=False, include_input=False)}, status=400
             )
         except ValueError as exc:
             return web.json_response({"ok": False, "message": str(exc)}, status=400)
@@ -221,7 +254,7 @@ class UIServer:
             )
         except ValidationError as exc:
             return web.json_response(
-                {"ok": False, "errors": exc.errors(include_context=False)}, status=400
+                {"ok": False, "errors": exc.errors(include_context=False, include_input=False)}, status=400
             )
         except ValueError as exc:
             return web.json_response({"ok": False, "message": str(exc)}, status=400)
@@ -327,6 +360,8 @@ class UIServer:
         return {
             "telegram_bot_token": self._orchestrator.config.telegram_bot_token,
             "telegram_chat_id": self._orchestrator.config.telegram_chat_id,
+            "test_chat_id": self._orchestrator.config.test_chat_id,
+            "feedback_enabled": self._orchestrator.config.feedback_enabled,
         }
 
     @staticmethod

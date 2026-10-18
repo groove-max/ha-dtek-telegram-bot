@@ -44,6 +44,11 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
                 ).model_dump(),
             ],
         }
+        self.bot_profiles = {
+            "revision": "bots-1", "restart_required": False,
+            "profiles": [{"id": "default", "name": "Основний бот", "chat_id": "123456789"}],
+            "runtime": [],
+        }
         self.revision = 1
         self.templates = [
             {"name": name, "source": text, "group": "Живлення", "origin": "default"}
@@ -73,6 +78,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
     def config_payload(self):
         return {
             "config": copy.deepcopy(self.config),
+            "bots": copy.deepcopy(self.bot_profiles),
             "revision": str(self.revision),
             "options": {"default_chat_id": "123456789"},
             "config_path": "/data/config.yaml",
@@ -146,6 +152,17 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             }
         elif endpoint == "diagnostics":
             payload = {"connected": True}
+        elif endpoint == "bots/save":
+            profile = {k: v for k, v in body.items() if k not in ("token", "expected_revision")}
+            profile.update(id=body.get("id") or "bot_654321", username="demo_bot")
+            self.bot_profiles["profiles"] = [p for p in self.bot_profiles["profiles"] if p["id"] != profile["id"]] + [profile]
+            self.bot_profiles["revision"] = "bots-2"
+            self.bot_profiles["restart_required"] = True
+            payload = {**copy.deepcopy(self.bot_profiles), "profile": profile}
+        elif endpoint == "bots/delete":
+            self.bot_profiles["profiles"] = [p for p in self.bot_profiles["profiles"] if p["id"] != body["id"]]
+            self.bot_profiles["revision"] = "bots-3"
+            payload = copy.deepcopy(self.bot_profiles)
         elif endpoint in ("config/save", "config/validate"):
             if endpoint.endswith("/save"):
                 self.config = copy.deepcopy(body["config"])
@@ -193,6 +210,66 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
 
     async def templates_tab(self):
         await self.page.locator('[data-tab="templates"]').click()
+
+    async def test_bot_token_and_address_draft_survive_background_refresh(self):
+        await self.page.locator(".addr-display-name").first.fill("Draft address")
+        await self.page.locator('[data-tab="bots"]').click()
+        await self.page.locator("#bot-name").fill("Building bot")
+        await self.page.locator("#bot-token").fill("654321:PRIVATE_TEST_TOKEN")
+        await self.page.clock.run_for(15001)
+        await self.refresh()
+        await expect(self.page.locator("#bot-token")).to_have_value("654321:PRIVATE_TEST_TOKEN")
+        await expect(self.page.locator("#bot-name")).to_have_value("Building bot")
+        stored = await self.page.evaluate("JSON.stringify({...sessionStorage, ...localStorage})")
+        self.assertNotIn("PRIVATE_TEST_TOKEN", stored)
+        await self.page.locator('[data-tab="configure"]').click()
+        await expect(self.page.locator(".addr-display-name").first).to_have_value("Draft address")
+
+    async def test_add_bot_select_for_address_save_and_export_without_token(self):
+        await self.page.locator('[data-tab="bots"]').click()
+        await self.page.locator("#bot-name").fill("Building bot")
+        await self.page.locator("#bot-token").fill("654321:PRIVATE_TEST_TOKEN")
+        await self.page.locator("#bot-chat").fill("-10002")
+        await self.page.locator('#bot-form button[type="submit"]').click()
+        await expect(self.page.locator("#bot-status")).to_contain_text("Збережено")
+        await expect(self.page.locator("#bot-token")).to_have_value("")
+        await expect(self.page.locator("#bot-list")).to_contain_text("@demo_bot")
+        await self.page.locator('[data-tab="configure"]').click()
+        await self.page.locator(".addr-bot-id").first.select_option("bot_654321")
+        await self.refresh()
+        await expect(self.page.locator(".addr-bot-id").first).to_have_value("bot_654321")
+        await self.page.locator("#save-button").click()
+        await expect(self.page.locator("#editor-status")).to_contain_text("Конфіг збережено")
+        self.assertEqual(self.config["addresses"][0]["telegram_bot_id"], "bot_654321")
+        self.assertNotIn("PRIVATE_TEST_TOKEN", json.dumps(self.config))
+        async with self.page.expect_download() as info:
+            await self.page.locator("#export-config-button").click()
+        download = await info.value
+        exported = Path(await download.path()).read_text()
+        self.assertNotIn("PRIVATE_TEST_TOKEN", exported)
+        self.assertIn("bot_654321", exported)
+
+    async def test_failed_profile_save_keeps_input_and_allows_retry(self):
+        self.failures["bots/save"] = 409
+        await self.page.locator('[data-tab="bots"]').click()
+        await self.page.locator("#bot-name").fill("Building bot")
+        await self.page.locator("#bot-token").fill("654321:PRIVATE_TEST_TOKEN")
+        await self.page.locator('#bot-form button[type="submit"]').click()
+        await expect(self.page.locator("#bot-status")).to_contain_text("Конфлікт")
+        await self.refresh()
+        await expect(self.page.locator("#bot-token")).to_have_value("654321:PRIVATE_TEST_TOKEN")
+        await expect(self.page.locator("#bot-name")).to_be_enabled()
+
+    async def test_unknown_imported_profile_stays_selected_without_default_fallback(self):
+        self.config["addresses"][0]["telegram_bot_id"] = "bot_missing"
+        await self.refresh()
+        await expect(self.page.locator(".addr-bot-id").first).to_have_value("bot_missing")
+        await expect(self.page.locator(".addr-bot-id").first).to_contain_text("Недоступний профіль")
+
+    async def test_bot_form_fits_mobile_without_overflow(self):
+        await self.page.set_viewport_size({"width": 360, "height": 800})
+        await self.page.locator('[data-tab="bots"]').click()
+        self.assertTrue(await self.page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"))
 
     async def test_validate_and_refresh_keep_dirty_draft_after_page_reload(self):
         field = self.page.locator(".addr-display-name").first

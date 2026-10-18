@@ -51,7 +51,7 @@ Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarc
 
 With Monitor 2.0, you can add an address directly or use the building linked to an Odesa personal account. The bot uses that building's public entities. Cabinet login, account numbers, meter readings and reading reminders belong to the integration; this bot does not send or manage them. A private Telegram chat still receives building notifications.
 
-**Several addresses or chats? Use one installation.** Each address has its own notifications, sensors, group selection and optional chat override. All messages use one Telegram bot token. Separate Telegram bot identities require separate instances; see [addresses, chats and instances](DOCS.md#destinations).
+**Several addresses, chats or bots? Use one installation.** Each address has its own notifications, sensors, group selection and Telegram bot profile. Keep the default bot or add another token once in **Telegram bots** and reuse that profile for several addresses. See [addresses, chats and bots](DOCS.md#destinations).
 
 Home Assistant now calls add-ons **apps**; older installations show **Add-ons** instead. HA Container does not include the app manager. See [Home Assistant's app requirements](https://www.home-assistant.io/apps).
 
