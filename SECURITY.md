@@ -1,33 +1,11 @@
-# Security Policy
+# Security policy
 
-## Supported versions
+**English** · [Українська](SECURITY.uk.md) · [README](README.md)
 
-Only the latest public version of this repository is considered supported for security-related fixes.
+Use the latest published release when reporting a security issue and include the affected version. Previous releases may need an upgrade to receive a fix.
 
-## Reporting a vulnerability
+If this repository's **Security → Advisories** page has **Report a vulnerability**, use that private form. If private reporting is not enabled, open an issue asking for a private contact method **without exploit details, secrets or private infrastructure information**. Do not post a vulnerability reproduction publicly while arranging disclosure.
 
-If you believe you found a security issue, please do not open a public issue with exploit details.
+Relevant reports include credential disclosure, unauthorized access and unsafe file/template handling. Incorrect upstream outage data is a normal bug report unless it exposes a separate security issue.
 
-Instead:
-
-1. Contact the maintainer through GitHub security reporting if available for the repository.
-2. If that is not available yet, open a minimal public issue only if the problem cannot expose secrets, tokens, or private infrastructure details.
-
-## Scope
-
-Relevant security topics for this project include:
-
-- leaking Telegram bot tokens
-- unsafe file/template handling
-- ingress UI exposure beyond the intended Home Assistant environment
-- path traversal or arbitrary file write/read through template or import/export features
-- unsafe handling of Home Assistant auth tokens
-
-## Out of scope
-
-The following are usually not security issues in this repository by themselves:
-
-- incorrect DTEK outage data from the upstream provider
-- false-positive or false-negative electricity detection caused by bad sensor choices
-- Telegram delivery delays caused by Telegram API rate limiting
-
+Remove tokens, addresses and private chat content from shared diagnostics. If a credential has already leaked, revoke/replace it through its issuer; deleting the public text alone does not revoke it.

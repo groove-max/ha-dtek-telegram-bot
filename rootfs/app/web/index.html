@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DTEK Bot</title>
-    <link rel="stylesheet" href="./styles.css?v=20260413-1910" />
+    <link rel="stylesheet" href="./styles.css?v=20261017-ui" />
   </head>
   <body>
     <div class="page-shell">
@@ -36,9 +36,8 @@
             <div class="panel-head">
               <h2>Редактор</h2>
               <p>
-                Редагуйте runtime-конфіг, обирайте сенсори зі списків,
-                перевіряйте його проти живого стану HA і потім зберігайте або
-                перезапускайте add-on.
+                Додайте адресу, оберіть датчики й перевірте налаштування.
+                Зміни застосовуються після збереження та перезапуску.
               </p>
             </div>
             <div class="editor-toolbar">
@@ -57,6 +56,9 @@
               <button id="validate-button" class="secondary-button" type="button">
                 Перевірити
               </button>
+              <button id="reload-config-button" class="secondary-button" type="button">
+                Завантажити збережене
+              </button>
               <button id="save-button" class="secondary-button" type="button">
                 Зберегти конфіг
               </button>
@@ -64,7 +66,8 @@
                 Зберегти і перезапустити
               </button>
             </div>
-            <p id="editor-status" class="status-message muted">Редактор завантажується…</p>
+            <p id="editor-status" class="status-message muted" role="status" aria-live="polite">Редактор завантажується…</p>
+            <p id="editor-notices" class="status-message status-warn" role="status"></p>
             <div id="editor-container" class="stack"></div>
             <input id="config-import-input" type="file" accept="application/json,.json" class="visually-hidden-input" />
             <input id="address-import-input" type="file" accept="application/json,.json" class="visually-hidden-input" />
@@ -77,10 +80,11 @@
               <h2>Шаблони</h2>
               <p>
                 Перевіряйте, перевизначайте та тестуйте Telegram-повідомлення на
-                основі поточного draft-конфіга без перескладання add-on.
+                основі поточних налаштувань. Чернетки шаблонів зберігаються
+                окремо та не губляться при перемиканні.
               </p>
             </div>
-            <p id="template-status" class="status-message muted">Шаблони завантажуються…</p>
+            <p id="template-status" class="status-message muted" role="status" aria-live="polite">Шаблони завантажуються…</p>
             <div id="templates-container"></div>
           </section>
         </section>
@@ -120,6 +124,6 @@
       </main>
     </div>
 
-    <script type="module" src="./app.js?v=20260413-1910"></script>
+    <script type="module" src="./app.js?v=20261017-ui"></script>
   </body>
 </html>

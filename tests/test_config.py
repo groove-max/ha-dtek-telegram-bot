@@ -20,8 +20,34 @@ if HAS_RUNTIME_DEPS:
     )
 
 
-@unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
+@unittest.skipUnless(
+    HAS_RUNTIME_DEPS,
+    "PyYAML and pydantic are not installed in the local test environment",
+)
 class ConfigValidationTest(unittest.TestCase):
+    def test_telemetry_notices_default_to_disabled(self):
+        self.assertFalse(PowerConfig().telemetry_notifications)
+
+    def test_single_voltage_sensor_needs_no_loss_sensor_or_quality_alerts(self):
+        cfg = AddressConfig(
+            entity_prefix="demo",
+            power={"enabled": True, "mode": "voltage_only"},
+            voltage={"enabled": False, "entities": [{"entity": "sensor.grid_voltage"}]},
+        )
+        self.assertEqual(cfg.power.loss_entity, "")
+        self.assertEqual(cfg.power.loss_mqtt_topic, "")
+        self.assertFalse(cfg.voltage.enabled)
+        self.assertEqual(len(cfg.voltage.entities), 1)
+
+    def test_power_telemetry_delay_must_be_non_negative(self):
+        with self.assertRaises(ValidationError):
+            PowerConfig(telemetry_loss_delay=-1)
+
+    def test_presence_threshold_must_be_finite_and_positive(self):
+        for value in [0, -1, float("nan"), float("inf")]:
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                VoltageConfig(present_above=value)
+
     def test_voltage_delay_must_be_non_negative(self) -> None:
         with self.assertRaises(ValidationError):
             VoltageConfig(delay=-1)

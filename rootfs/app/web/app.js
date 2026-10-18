@@ -25,7 +25,7 @@ const REFRESH_INTERVAL_MS = 15000;
 const MAX_QUICK_PICKS = 8;
 const CONFIG_EXPORT_SCHEMA = "dtek-telegram-bot/config-export-v1";
 const ADDRESS_EXPORT_SCHEMA = "dtek-telegram-bot/address-export-v1";
-const UI_STORAGE_PREFIX = "dtek-telegram-bot-ui";
+const UI_STORAGE_PREFIX = `dtek-telegram-bot-ui:${new URL(".", window.location.href).pathname}`;
 const ACTIVE_TAB_STORAGE_KEY = `${UI_STORAGE_PREFIX}:active-tab`;
 const EDITOR_DRAFT_STORAGE_KEY = `${UI_STORAGE_PREFIX}:editor-draft`;
 const TEMPLATE_DRAFT_STORAGE_KEY = `${UI_STORAGE_PREFIX}:template-draft`;
@@ -36,6 +36,7 @@ const TONE_LABELS = {
   neutral: "інфо",
 };
 const HOUSE_STATE_META = {
+  unknown: { label: "стан невідомий", tone: "neutral" },
   on: { label: "є світло", tone: "good" },
   partial: { label: "частково", tone: "warn" },
   off: { label: "нема світла", tone: "bad" },
@@ -47,11 +48,11 @@ const POWER_MODE_META = {
   },
   voltage_only: {
     label: "Лише напруга",
-    copy: "Будинок визначається тільки за топологією секції напруги. Те, чи рахуються unavailable/unknown як відсутність фази, задається окремо в секції «Напруга та фази».",
+    copy: "Достатньо одного датчика напруги на вході мережі. Для підтвердження відключення датчик і зв’язок мають працювати від резервного живлення та передавати 0 В. Зникнення або застарілі дані дають невідомий стан у статусі; окремі сповіщення про дані вмикаються за бажанням.",
   },
   loss_plus_voltage: {
     label: "Швидка втрата + напруга",
-    copy: "Використовує швидкий сенсор втрати як тригер, але підтверджує повний outage і відновлення тільки через загальну топологію секції напруги та її політику unavailable.",
+    copy: "Додатковий датчик на тій самій лінії має працювати при відключенні та явно повідомляти про втрату мережі. Після підтвердження він дозволяє відхилити стару напругу. Відновлення потребує свіжої напруги; недоступність датчика сама по собі не підтверджує відключення.",
   },
 };
 
@@ -64,6 +65,16 @@ const state = {
   templatesPayload: null,
   draftConfig: null,
   editorDirty: false,
+  editorRevision: 0,
+  validatedPreview: null,
+  baseRevision: null,
+  configBusy: false,
+  templateBusy: false,
+  dashboardLoading: false,
+  writeEpoch: 0,
+  previewRequest: 0,
+  templateDrafts: {},
+  templateBaseSource: "",
   editorStatus: {
     message: "Редактор завантажується…",
     tone: "muted",
@@ -74,6 +85,7 @@ const state = {
   },
   templateSelection: {
     addressIndex: 0,
+    addressPrefix: "",
     templateName: "",
   },
   templateSourceDraft: "",
@@ -146,14 +158,27 @@ function persistEditorDraftSnapshot(config = null) {
   }
   state.draftConfig = cloneJson(draft);
   writeSessionJson(EDITOR_DRAFT_STORAGE_KEY, state.draftConfig);
+  writeSessionValue(`${EDITOR_DRAFT_STORAGE_KEY}:revision`, state.baseRevision);
 }
 
 function clearEditorDraftSnapshot() {
   removeSessionValue(EDITOR_DRAFT_STORAGE_KEY);
+  removeSessionValue(`${EDITOR_DRAFT_STORAGE_KEY}:revision`);
+}
+
+function rememberTemplateDraft() {
+  if (state.templateSourceName) {
+    state.templateDrafts[state.templateSourceName] = {
+      source: state.templateSourceDraft, dirty: state.templateSourceDirty,
+      baseSource: state.templateBaseSource,
+    };
+  }
 }
 
 function persistTemplateDraftSnapshot() {
+  rememberTemplateDraft();
   writeSessionJson(TEMPLATE_DRAFT_STORAGE_KEY, {
+    drafts: state.templateDrafts,
     templateSelection: { ...state.templateSelection },
     templateSourceDraft: state.templateSourceDraft,
     templateSourceDirty: state.templateSourceDirty,
@@ -170,6 +195,7 @@ function restorePersistedUiState() {
   const savedDraft = readSessionJson(EDITOR_DRAFT_STORAGE_KEY);
   if (isPlainObject(savedDraft)) {
     state.draftConfig = savedDraft;
+    state.baseRevision = readSessionValue(`${EDITOR_DRAFT_STORAGE_KEY}:revision`);
     state.editorDirty = true;
     state.editorStatus = {
       message: "Чернетку відновлено після перезавантаження сторінки.",
@@ -179,16 +205,19 @@ function restorePersistedUiState() {
 
   const savedTemplateDraft = readSessionJson(TEMPLATE_DRAFT_STORAGE_KEY);
   if (isPlainObject(savedTemplateDraft)) {
+    state.templateDrafts = savedTemplateDraft.drafts || {};
     const savedSelection = isPlainObject(savedTemplateDraft.templateSelection)
       ? savedTemplateDraft.templateSelection
       : {};
     state.templateSelection = {
       addressIndex: Number.parseInt(savedSelection.addressIndex, 10) || 0,
+      addressPrefix: String(savedSelection.addressPrefix || ""),
       templateName: String(savedSelection.templateName || ""),
     };
     state.templateSourceDraft = String(savedTemplateDraft.templateSourceDraft || "");
     state.templateSourceDirty = Boolean(savedTemplateDraft.templateSourceDirty);
     state.templateSourceName = String(savedTemplateDraft.templateSourceName || "");
+    state.templateBaseSource = state.templateDrafts[state.templateSourceName]?.baseSource ?? "";
     if (state.templateSourceDirty) {
       state.templateStatus = {
         message: "Чернетку шаблону відновлено після перезавантаження сторінки.",
@@ -198,11 +227,88 @@ function restorePersistedUiState() {
   }
 }
 
-function shouldPauseBackgroundRefresh() {
-  return (
-    (state.activeTab === "configure" && state.editorDirty)
-    || (state.activeTab === "templates" && state.templateSourceDirty)
-  );
+function updateBusyControls() {
+  const unavailable = !state.configPayload;
+  [validateButton, saveButton, saveRestartButton].forEach((button) => {
+    button.disabled = unavailable || state.configBusy;
+  });
+  [addAddressButton, importConfigButton, exportConfigButton, importAddressButton,
+    document.getElementById("reload-config-button")].forEach((button) => {
+    button.disabled = unavailable || state.configBusy;
+  });
+  templatesContainer.querySelectorAll("[data-action]").forEach((button) => {
+    const needsAddress = ["template-preview", "template-send-test"].includes(button.dataset.action);
+    button.disabled = state.templateBusy || !state.templatesPayload ||
+      (needsAddress && !getDraftConfig().addresses?.length);
+  });
+}
+
+function markEditorChanged() {
+  state.editorDirty = true;
+  state.editorRevision += 1;
+  state.templatePreview = null;
+  updateTemplatePreview();
+  persistEditorDraftSnapshot();
+  updateEditorLiveParts();
+}
+
+function updateEditorLiveParts() {
+  const notices = document.getElementById("editor-notices");
+  if (notices && state.configPayload) {
+    const text = [];
+    if (state.configPayload.test_chat_id) text.push(`Тестовий режим: усі повідомлення → ${state.configPayload.test_chat_id}.`);
+    if (state.configPayload.restart_required) text.push("Збережені налаштування ще не застосовані. Потрібен перезапуск.");
+    if (state.editorDirty && state.baseRevision && state.baseRevision !== state.configPayload.revision) {
+      text.push("Збережені налаштування змінилися поза цією чернеткою. Ваш ввід збережено; перед збереженням узгодьте зміни.");
+    }
+    notices.textContent = text.join(" ");
+  }
+  const previewTime = document.getElementById("editor-preview-time");
+  if (previewTime) previewTime.textContent = previewDescription();
+  editorContainer.querySelectorAll(".address-editor-card").forEach((form, index) => {
+    const address = state.draftConfig?.addresses?.[index];
+    const preview = form.querySelector(".preview-card");
+    if (!address) return;
+    if (preview) preview.outerHTML = renderPowerPreview(address, index);
+    const guidance = form.querySelector(".draft-guidance");
+    if (guidance) guidance.outerHTML = renderDraftGuidance(address);
+    const modeGuidance = form.querySelector(".power-mode-guidance");
+    if (modeGuidance) modeGuidance.innerHTML = renderModeGuidance(address);
+    form.querySelectorAll(".preset-button").forEach((button) => {
+      button.classList.toggle("active", Boolean(address.power?.enabled && button.dataset.preset === address.power.mode));
+    });
+  });
+  updateBusyControls();
+}
+
+function editorInteraction() {
+  const active = document.activeElement;
+  const fields = [...editorContainer.querySelectorAll("input, select, textarea")];
+  const focused = fields.includes(active) ? fields.indexOf(active) : -1;
+  return { focused, start: active?.selectionStart, end: active?.selectionEnd,
+    transient: [...editorContainer.querySelectorAll(".address-editor-card")].map((form) => ({
+      prefix: form.querySelector(".addr-entity-prefix").value,
+      entity: form.querySelector(".voltage-entity-select")?.value,
+      label: form.querySelector(".voltage-entity-label")?.value,
+    })) };
+}
+
+function restoreEditorInteraction(saved) {
+  editorContainer.querySelectorAll(".address-editor-card").forEach((form, index) => {
+    const old = saved.transient[index];
+    if (!old || old.prefix !== form.querySelector(".addr-entity-prefix").value) return;
+    for (const [selector, value] of [[".voltage-entity-select", old.entity], [".voltage-entity-label", old.label]]) {
+      const input = form.querySelector(selector);
+      if (input && value !== undefined) input.value = value;
+    }
+  });
+  const field = editorContainer.querySelectorAll("input, select, textarea")[saved.focused];
+  if (field) {
+    field.focus({ preventScroll: true });
+    if (saved.start !== null) {
+      try { field.setSelectionRange(saved.start, saved.end); } catch { /* Number/select controls. */ }
+    }
+  }
 }
 
 function getAddressUiKey(address, index) {
@@ -286,20 +392,41 @@ function setTemplateStatus(message, tone = "muted") {
 }
 
 function toNumber(value, fallback, parser = Number.parseFloat) {
-  const parsed = parser(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  // Keep incomplete/invalid input in the draft. Validation must explain it,
+  // never silently replace it with a default or truncate a decimal integer.
+  if (String(value).trim() === "") return "";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || (parser === Number.parseInt && !Number.isInteger(parsed))) return value;
+  return parsed;
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const details = data.errors
-      ? data.errors.map((error) => `${error.loc.join(".")}: ${error.msg}`).join("; ")
-      : data.message || response.statusText;
-    throw new Error(details);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error("Сервер повернув неочікувану відповідь. Чернетку збережено; перевірте з’єднання з HA.");
+    }
+    if (!response.ok || data?.ok === false) {
+      const details = Array.isArray(data?.errors)
+        ? data.errors.map((error) => `${error.loc.join(".")}: ${error.msg}`).join("; ")
+        : data?.message || response.statusText;
+      throw new Error(details);
+    }
+    if (!isPlainObject(data)) throw new Error("Некоректна відповідь сервера. Чернетку не змінено.");
+    return data;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Час очікування відповіді вичерпано. Чернетку збережено. Якщо ви зберігали налаштування, перевірте збережену версію перед повтором.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return data;
 }
 
 function createBlankAddress(prefill = {}) {
@@ -307,6 +434,7 @@ function createBlankAddress(prefill = {}) {
     entity_prefix: prefill.entity_prefix ?? "",
     display_name: prefill.display_name ?? prefill.friendly_name ?? "",
     telegram_chat_id: "",
+    selected_group: "",
     schedule_change: { enabled: true, silent: true },
     emergency: { enabled: true, silent: false },
     group_change: { enabled: true, silent: false },
@@ -314,7 +442,8 @@ function createBlankAddress(prefill = {}) {
       enabled: false,
       entities: [],
       present_above: 50,
-      unavailable_as_missing: true,
+      max_age_seconds: 600,
+      unavailable_as_missing: false,
       low: 195,
       high: 245,
       hysteresis: 5,
@@ -492,11 +621,17 @@ async function handleConfigImportFile(file) {
     return;
   }
 
+  const revision = state.editorRevision;
   let parsed;
   try {
     parsed = JSON.parse(await file.text());
   } catch (error) {
     setEditorStatus("Не вдалося прочитати JSON-файл конфігурації.", "status-bad");
+    return;
+  }
+
+  if (revision !== state.editorRevision || state.configBusy) {
+    setEditorStatus("Під час читання файлу чернетка змінилася. Повторіть імпорт; ваш ввід збережено.", "status-warn");
     return;
   }
 
@@ -520,11 +655,18 @@ async function handleAddressImportFile(file) {
     return;
   }
 
+  const revision = state.editorRevision;
+  const targetIndex = state.pendingAddressImportIndex;
   let parsed;
   try {
     parsed = JSON.parse(await file.text());
   } catch (error) {
     setEditorStatus("Не вдалося прочитати JSON-файл адреси.", "status-bad");
+    return;
+  }
+
+  if (revision !== state.editorRevision || state.configBusy) {
+    setEditorStatus("Під час читання файлу чернетка змінилася. Повторіть імпорт; ваш ввід збережено.", "status-warn");
     return;
   }
 
@@ -537,7 +679,6 @@ async function handleAddressImportFile(file) {
   }
 
   const config = getDraftConfig();
-  const targetIndex = state.pendingAddressImportIndex;
   const duplicateIndex = config.addresses.findIndex(
     (address) => address.entity_prefix === importedAddress.entity_prefix,
   );
@@ -620,7 +761,7 @@ function appendEntityLine(text, entity, label = "") {
 }
 
 function getDraftConfig() {
-  if (editorContainer.querySelector(".address-editor-card")) {
+  if (document.getElementById("cfg-ha-token")) {
     return collectEditorConfig();
   }
   return state.draftConfig || state.configPayload?.config || { ha_token: "", export_default_templates: false, addresses: [] };
@@ -757,7 +898,9 @@ function renderEntityOptions(items, selectedValue = "", placeholder = "Обер�
 }
 
 function setActiveTab(tab) {
+  const changed = state.activeTab !== tab;
   state.activeTab = tab;
+  if (changed && tab === "templates" && state.templatesPayload) renderTemplates(true);
   writeSessionValue(ACTIVE_TAB_STORAGE_KEY, tab);
   tabButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tab);
@@ -1019,7 +1162,6 @@ function getDraftGuidance(address) {
   const usesVoltageTopology =
     address.power?.enabled &&
     ["voltage_only", "loss_plus_voltage"].includes(address.power.mode);
-  const treatsUnavailableAsMissing = address.voltage?.unavailable_as_missing !== false;
 
   if (!address.entity_prefix) {
     errors.push("Для роботи профілю потрібно вказати entity_prefix.");
@@ -1060,11 +1202,8 @@ function getDraftGuidance(address) {
     if (usesVoltageTopology && !address.voltage?.enabled) {
       hints.push("Окремі сповіщення про якість напруги вимкнені, але вибрані сенсори все одно використовуються для визначення наявності живлення.");
     }
-    if (usesVoltageTopology && treatsUnavailableAsMissing) {
-      hints.push("Unavailable/unknown для сенсорів напруги зараз рахуються як відсутня фаза. Якщо всі фази стануть unavailable, будинок може перейти в off.");
-    }
-    if (usesVoltageTopology && !treatsUnavailableAsMissing) {
-      hints.push("Unavailable/unknown для сенсорів напруги зараз ігноруються в power-логіці. Якщо вся топологія стане невизначеною, runtime fallback'иться на DTEK.");
+    if (usesVoltageTopology) {
+      hints.push("Втрата зв’язку або застарілі вимірювання не підтверджують відключення. Про них надходить окреме повідомлення після затримки.");
     }
   } else {
     hints.push("Сповіщення про наявність світла для цієї адреси вимкнені.");
@@ -1320,8 +1459,23 @@ function renderDraftGuidance(address) {
   `;
 }
 
+function currentEditorPreview() {
+  return state.editorDirty && state.validatedPreview?.revision === state.editorRevision
+    ? state.validatedPreview.preview : state.configPayload?.preview;
+}
+
+function previewDescription() {
+  const checked = state.editorDirty && state.validatedPreview?.revision === state.editorRevision;
+  const snapshot = currentEditorPreview();
+  const time = snapshot?.generated_at ? new Date(snapshot.generated_at).toLocaleTimeString(UI_LOCALE) : null;
+  if (checked) return `Знімок перевіреної чернетки${time ? ` о ${time}` : ""}. Для нових показань натисніть «Перевірити».`;
+  if (state.editorDirty) return "Показано стан збережених налаштувань. Перевірте чернетку, щоб побачити її результат.";
+  return time ? `Живий стан збережених налаштувань оновлено о ${time}.` : "Живий стан ще недоступний.";
+}
+
 function resolvePreview(address, index) {
-  const previews = state.configPayload?.preview?.addresses || [];
+  const snapshot = currentEditorPreview();
+  const previews = snapshot?.addresses || [];
   if (previews[index]?.entity_prefix === address.entity_prefix) {
     return previews[index];
   }
@@ -1389,7 +1543,7 @@ function renderPowerPreview(address, index) {
   const preview = resolvePreview(address, index);
   if (!preview) {
     return `
-      <div class="preview-card ${state.editorDirty ? "stale" : ""}">
+      <div class="preview-card ${state.editorDirty && state.validatedPreview?.revision !== state.editorRevision ? "stale" : ""}">
         <div class="preview-head">
           <h4>Живе прев'ю</h4>
           <span class="badge neutral">потрібна перевірка</span>
@@ -1425,11 +1579,11 @@ function renderPowerPreview(address, index) {
     `активно: ${voltageTopology.present_phase_count ?? 0}`,
     `відомо: ${voltageTopology.known_phase_count ?? 0}`,
     `поріг наявності: ${voltageTopology.present_above ?? "n/a"} В`,
-    `unavailable: ${voltageTopology.unavailable_as_missing === false ? "ігноруються" : "втрата фази"}`,
+    "недоступний сенсор: стан невідомий",
   ].join(" · ");
 
   return `
-    <div class="preview-card ${state.editorDirty ? "stale" : ""}">
+    <div class="preview-card ${state.editorDirty && state.validatedPreview?.revision !== state.editorRevision ? "stale" : ""}">
       <div class="preview-head">
         <h4>Живе прев'ю</h4>
         <div class="address-meta">
@@ -1477,7 +1631,7 @@ function renderPowerPreview(address, index) {
                 : "ні"
           }${snapshot.phase_label ? ` · ${snapshot.phase_label}` : ""}`,
       )}
-      <p class="preview-stale-note">Прев'ю оновлюється після перевірки, збереження або ручного оновлення.</p>
+      <p class="preview-stale-note">${escapeHtml(previewDescription())}</p>
     </div>
   `;
 }
@@ -1540,6 +1694,12 @@ function renderAddressEditor(address, index) {
           <label class="field">
             <span>Чат ID</span>
             <input class="addr-chat-id" type="text" value="${escapeHtml(address.telegram_chat_id || "")}" placeholder="Окремий чат (необов'язково)" />
+            <small>Особистий чат, група або канал. Для особистого чату спочатку натисніть «Розпочати» у бота. Порожнє поле використовує основний чат.</small>
+          </label>
+          <label class="field">
+            <span>Обрана група (порожньо — всі окремо)</span>
+            <input class="addr-selected-group" type="text" value="${escapeHtml(address.selected_group || "")}" placeholder="GPV5.1" />
+            <small>Якщо оператор не показує номери груп, залиште поле порожнім — бот покаже всі варіанти окремо.</small>
           </label>
         </div>
       </div>
@@ -1568,7 +1728,7 @@ function renderAddressEditor(address, index) {
         ) ? "collapsed" : ""}"
         data-panel-key="${escapeHtml(voltagePanelKey)}"
       >
-        <div class="subpanel-head" data-action="toggle-section">
+        <div class="subpanel-head" data-action="toggle-section" role="button" tabindex="0">
           <h4>Напруга та фази</h4>
         </div>
         <div class="subpanel-body">
@@ -1593,13 +1753,14 @@ function renderAddressEditor(address, index) {
               <span>Є живлення вище (В)</span>
               <input class="voltage-present-above" type="number" step="0.1" value="${escapeHtml(address.voltage?.present_above ?? 50)}" />
             </label>
-            <label class="toggle compact-field">
-              <input class="voltage-unavailable-as-missing" type="checkbox" ${address.voltage?.unavailable_as_missing !== false ? "checked" : ""} />
-              <span>Unavailable = відсутня фаза</span>
+            <label class="field">
+              <span>Максимальний вік вимірювання, с</span>
+              <input class="voltage-max-age" type="number" min="1" value="${escapeHtml(address.voltage?.max_age_seconds ?? 600)}" />
             </label>
+
           </div>
           <p class="helper-copy">
-            Якщо опцію ввімкнено, unavailable/unknown значення можуть рахуватися як пропала фаза і впливати на power/off. Якщо вимкнено, такі значення ігноруються в power-логіці, а при повністю невизначеній топології add-on fallback'иться на DTEK.
+            Недоступні, відновлені після перезапуску або застарілі показання означають невідомий стан. Виберіть максимальний вік з урахуванням реального інтервалу оновлення датчика.
           </p>
 
           <div class="helper-block">
@@ -1639,12 +1800,12 @@ function renderAddressEditor(address, index) {
         class="subpanel ${isPanelCollapsed(address, index, "power", !address.power?.enabled) ? "collapsed" : ""}"
         data-panel-key="${escapeHtml(powerPanelKey)}"
       >
-        <div class="subpanel-head" data-action="toggle-section">
+        <div class="subpanel-head" data-action="toggle-section" role="button" tabindex="0">
           <label class="toggle"><input class="power-enabled" type="checkbox" ${address.power?.enabled ? "checked" : ""} /><span>Визначення живлення</span></label>
         </div>
         <div class="subpanel-body">
           ${renderModePresetBar(address, index)}
-          ${renderModeGuidance(address)}
+          <div class="power-mode-guidance">${renderModeGuidance(address)}</div>
           ${powerHints}
 
           <div class="power-fields">
@@ -1659,16 +1820,24 @@ function renderAddressEditor(address, index) {
               </label>
             </div>
 
-            <div class="helper-block subtle voltage-mode-only power-voltage-policy">
+            <div class="helper-block subtle voltage-mode-only">
               <label class="toggle">
-                <input class="power-unavailable-as-missing" type="checkbox" ${address.voltage?.unavailable_as_missing !== false ? "checked" : ""} />
-                <span>Unavailable сенсор = відсутня фаза</span>
+                <input class="power-telemetry-notifications" type="checkbox" ${address.power?.telemetry_notifications === true ? "checked" : ""} />
+                <span>Повідомляти про втрату та повернення даних</span>
               </label>
-              <p class="helper-copy">
-                Це той самий параметр, що і в секції «Напруга та фази», але тут він показаний у контексті power-логіки. Якщо ввімкнено, unavailable/unknown можуть брати участь у переході будинку в off. Якщо вимкнено, вони ігноруються, а при повністю невизначеній topology add-on fallback'иться на DTEK.
-              </p>
+              <label class="field compact-field">
+                <span>Затримка попередження про втрату даних (с)</span>
+                <input class="power-telemetry-loss-delay" type="number" min="0" value="${escapeHtml(address.power?.telemetry_loss_delay ?? 20)}" />
+              </label>
+              <p class="helper-copy">Недоступність датчика не підтверджує відключення світла. Для швидкого підтвердження потрібен незалежний сенсор тієї самої лінії, доступний від резервного живлення.</p>
             </div>
 
+            <div class="power-sensor-group voltage-mode-only">
+              <label class="field compact-field">
+                <span>Підтвердження відсутності напруги (с)</span>
+                <input class="power-loss-delay" type="number" min="0" step="1" value="${escapeHtml(address.power?.loss_delay ?? 30)}" />
+              </label>
+            </div>
             <div class="power-sensor-group loss-plus-voltage-only">
               <p class="section-label">Сенсор втрати</p>
               <div class="inline-fields">
@@ -1682,14 +1851,16 @@ function renderAddressEditor(address, index) {
                     )}
                   </select>
                 </label>
+                <label class="field">
+                  <span>MQTT-топік живих даних (необов’язково)</span>
+                  <input class="power-loss-mqtt-topic" type="text" value="${escapeHtml(address.power?.loss_mqtt_topic || "")}" />
+                  <span class="helper-copy">Для MQTT-датчика: приймати підтвердження тільки з нових повідомлень, ігнорувати збережені retained значення.</span>
+                </label>
                 <label class="field compact-field">
                   <span>Стан втрати</span>
                   <input class="power-loss-state" type="text" value="${escapeHtml(address.power?.loss_state || "0")}" />
                 </label>
-                <label class="field compact-field">
-                  <span>Затримка (с)</span>
-                  <input class="power-loss-delay" type="number" step="1" value="${escapeHtml(address.power?.loss_delay ?? 30)}" />
-                </label>
+
               </div>
             </div>
 
@@ -1733,7 +1904,7 @@ function renderAddressEditor(address, index) {
         class="subpanel ${isPanelCollapsed(address, index, "advanced", true) ? "collapsed" : ""}"
         data-panel-key="${escapeHtml(advancedPanelKey)}"
       >
-        <div class="subpanel-head" data-action="toggle-section">
+        <div class="subpanel-head" data-action="toggle-section" role="button" tabindex="0">
           <h4>Додаткові параметри</h4>
         </div>
         <div class="subpanel-body">
@@ -1822,7 +1993,9 @@ function renderEditor(force = false) {
     editorContainer.innerHTML = '<p class="empty-state">Редактор ще не готовий.</p>';
     return;
   }
-  if (state.editorDirty && !force && editorContainer.children.length) {
+  if (!force && editorContainer.children.length &&
+      (state.editorDirty || editorContainer.contains(document.activeElement))) {
+    updateEditorLiveParts();
     editorStatus.className = `status-message ${state.editorStatus.tone}`;
     editorStatus.textContent = state.editorStatus.message;
     return;
@@ -1830,10 +2003,8 @@ function renderEditor(force = false) {
 
   const config = state.draftConfig || cloneJson(state.configPayload.config);
   const options = state.configPayload.options;
-  const previewTime = state.configPayload.preview?.generated_at
-    ? new Date(state.configPayload.preview.generated_at).toLocaleTimeString(UI_LOCALE)
-    : null;
-  const addresses = config.addresses.length ? config.addresses : [createBlankAddress()];
+  const addresses = config.addresses;
+  const interaction = editorInteraction();
 
   editorContainer.innerHTML = `
     <section class="editor-card">
@@ -1850,17 +2021,17 @@ function renderEditor(force = false) {
       <div class="field-grid">
         <label class="field field-wide">
           <span>Резервний HA token</span>
-          <input id="cfg-ha-token" type="text" value="${escapeHtml(config.ha_token || "")}" />
+          <input id="cfg-ha-token" type="password" autocomplete="off" value="${escapeHtml(config.ha_token || "")}" />
         </label>
       </div>
-      <p class="helper-copy">
-        Живе прев'ю ${previewTime ? `востаннє оновлено о ${escapeHtml(previewTime)}.` : "ще недоступне."}
-      </p>
+      <p id="editor-preview-time" class="helper-copy">${escapeHtml(previewDescription())}</p>
     </section>
-    ${addresses.map((address, index) => renderAddressEditor(address, index)).join("")}
+    ${addresses.map((address, index) => renderAddressEditor(address, index)).join("") || '<p class="empty-state">Адрес ще немає. Натисніть «Додати адресу» або виберіть її на вкладці «Пошук».</p>'}
   `;
 
   syncAllEditorVisibility();
+  restoreEditorInteraction(interaction);
+  updateEditorLiveParts();
   editorStatus.className = `status-message ${state.editorStatus.tone}`;
   editorStatus.textContent = state.editorStatus.message;
 }
@@ -1888,6 +2059,7 @@ function collectEditorConfig() {
       entity_prefix: form.querySelector(".addr-entity-prefix").value.trim(),
       display_name: form.querySelector(".addr-display-name").value.trim(),
       telegram_chat_id: form.querySelector(".addr-chat-id").value.trim(),
+      selected_group: form.querySelector(".addr-selected-group").value.trim(),
       schedule_change: {
         enabled: form.querySelector(".feature-schedule-change").checked,
         silent: form.querySelector(".schedule-silent").checked,
@@ -1903,11 +2075,9 @@ function collectEditorConfig() {
       voltage: {
         enabled: form.querySelector(".voltage-enabled").checked,
         entities: collectSelectedEntityItems(form, ".voltage-selected-entities .selected-entity-item"),
+        max_age_seconds: toNumber(form.querySelector(".voltage-max-age").value, 600),
         present_above: toNumber(form.querySelector(".voltage-present-above").value, 50),
-        unavailable_as_missing: (
-          form.querySelector(".power-unavailable-as-missing")
-          || form.querySelector(".voltage-unavailable-as-missing")
-        ).checked,
+        unavailable_as_missing: false,
         low: toNumber(form.querySelector(".voltage-low").value, 195),
         high: toNumber(form.querySelector(".voltage-high").value, 245),
         hysteresis: toNumber(form.querySelector(".voltage-hysteresis").value, 5),
@@ -1918,12 +2088,15 @@ function collectEditorConfig() {
         enabled: form.querySelector(".power-enabled").checked,
         mode: form.querySelector(".power-mode").value,
         loss_entity: form.querySelector(".power-loss-entity").value.trim(),
+        loss_mqtt_topic: form.querySelector(".power-loss-mqtt-topic").value.trim(),
         loss_state: form.querySelector(".power-loss-state").value.trim(),
         loss_delay: toNumber(form.querySelector(".power-loss-delay").value, 30, Number.parseInt),
         confirm_timeout: toNumber(form.querySelector(".power-confirm-timeout").value, 15, Number.parseInt),
         restore_delay: toNumber(form.querySelector(".power-restore-delay").value, 10, Number.parseInt),
         silent: form.querySelector(".power-silent").checked,
         phase_notifications: form.querySelector(".power-phase-notifications").checked,
+        telemetry_notifications: form.querySelector(".power-telemetry-notifications").checked,
+        telemetry_loss_delay: toNumber(form.querySelector(".power-telemetry-loss-delay").value, 20, Number.parseInt),
       },
       upcoming_outage: {
         enabled: form.querySelector(".feature-upcoming-enabled").checked,
@@ -1984,19 +2157,22 @@ function syncAddressFormVisibility(form) {
   });
 
   const voltagePanel = form.querySelector(".voltage-panel");
-  if (voltagePanel && (voltageEnabled || usesVoltageTopology || hasVoltageEntities)) {
+  if (voltagePanel && !Object.hasOwn(state.collapsedPanels, voltagePanel.dataset.panelKey) && (voltageEnabled || usesVoltageTopology || hasVoltageEntities)) {
     voltagePanel.classList.remove("collapsed");
     if (voltagePanel.dataset.panelKey) {
       rememberPanelState(voltagePanel.dataset.panelKey, false);
     }
   }
   const powerPanel = form.querySelector(".power-enabled")?.closest(".subpanel");
-  if (powerPanel && powerEnabled) {
+  if (powerPanel && powerEnabled && !Object.hasOwn(state.collapsedPanels, powerPanel.dataset.panelKey)) {
     powerPanel.classList.remove("collapsed");
     if (powerPanel.dataset.panelKey) {
       rememberPanelState(powerPanel.dataset.panelKey, false);
     }
   }
+  form.querySelectorAll(".subpanel").forEach((panel) => {
+    panel.querySelector(".subpanel-head")?.setAttribute("aria-expanded", String(!panel.classList.contains("collapsed")));
+  });
 }
 
 function syncAllEditorVisibility() {
@@ -2008,6 +2184,7 @@ function syncAllEditorVisibility() {
 function setDraftConfig(config, message, tone = "muted") {
   state.draftConfig = cloneJson(config);
   state.editorDirty = true;
+  state.editorRevision += 1;
   state.templatePreview = null;
   persistEditorDraftSnapshot(state.draftConfig);
   renderEditor(true);
@@ -2041,6 +2218,8 @@ function updateEntityCollection(target, operation) {
       return;
     }
 
+    if (entitySelect) entitySelect.value = "";
+    if (labelInput) labelInput.value = "";
     if (!collection.some((item) => item.entity === entityId)) {
       collection.push({ entity: entityId, label });
     }
@@ -2142,45 +2321,65 @@ function applyPowerPreset(target) {
 }
 
 async function validateConfig() {
+  if (state.configBusy || !state.configPayload) return;
   const config = collectEditorConfig();
-  const result = await fetchJson("./api/config/validate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ config }),
-  });
-  state.configPayload = { ...state.configPayload, config: result.config, preview: result.preview };
-  state.draftConfig = cloneJson(result.config);
-  state.editorDirty = false;
-  clearEditorDraftSnapshot();
-  renderEditor(true);
-  renderTemplates(true);
-  setEditorStatus("Конфіг валідний. Живе прев'ю оновлено з Home Assistant.", "status-good");
+  const revision = state.editorRevision;
+  state.configBusy = true;
+  updateBusyControls();
+  try {
+    const result = await fetchJson("./api/config/validate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config }),
+    });
+    if (revision !== state.editorRevision) {
+      setEditorStatus("Перевірено попередню версію. Нові зміни залишилися в чернетці; перевірте її ще раз.", "status-warn");
+      return;
+    }
+    // Validation is not a save. Keep the draft and its persisted revision.
+    state.validatedPreview = { revision, preview: result.preview };
+    updateEditorLiveParts();
+    setEditorStatus("Конфіг валідний. Прев'ю оновлено. Незбережені зміни залишаються у чернетці.", "status-good");
+  } finally {
+    state.configBusy = false;
+    updateBusyControls();
+  }
 }
 
 async function saveConfig({ restart }) {
+  if (state.configBusy || !state.configPayload) return;
   const config = collectEditorConfig();
-  const result = await fetchJson("./api/config/save", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ config, restart }),
-  });
-  state.configPayload = {
-    ...state.configPayload,
-    config: result.config,
-    preview: result.preview,
-  };
-  state.draftConfig = cloneJson(result.config);
-  state.editorDirty = false;
-  clearEditorDraftSnapshot();
-  renderEditor(true);
-  renderTemplates(true);
-  if (restart) {
-    setEditorStatus("Конфіг збережено. Перезапуск add-on уже запланований.", "status-warn");
-  } else {
-    setEditorStatus(
-      `Конфіг збережено в ${result.path}. Щоб застосувати зміни, add-on все ще треба перезапустити.`,
-      "status-good",
-    );
+  const revision = state.editorRevision;
+  state.configBusy = true;
+  state.writeEpoch += 1;
+  updateBusyControls();
+  try {
+    const result = await fetchJson("./api/config/save", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config, restart, expected_revision: state.baseRevision }),
+    });
+    if (!isPlainObject(result.config) || !Array.isArray(result.config.addresses) || !result.revision) {
+      throw new Error("Сервер не підтвердив збережену версію. Чернетку не змінено.");
+    }
+    state.configPayload = { ...state.configPayload, config: result.config,
+      preview: result.preview, revision: result.revision, restart_required: true };
+    state.baseRevision = result.revision;
+    if (revision === state.editorRevision) {
+      state.draftConfig = cloneJson(result.config);
+      state.editorDirty = false;
+      clearEditorDraftSnapshot();
+    } else {
+      persistEditorDraftSnapshot();
+    }
+    updateEditorLiveParts();
+    setEditorStatus(state.editorDirty
+      ? "Попередню версію збережено. Нові зміни залишаються незбереженими у чернетці."
+      : restart ? "Конфіг збережено. Перезапуск запланований."
+        : "Конфіг збережено. Для застосування натисніть «Зберегти і перезапустити».",
+      state.editorDirty || restart ? "status-warn" : "status-good");
+  } finally {
+    state.configBusy = false;
+    state.writeEpoch += 1;
+    updateBusyControls();
   }
 }
 
@@ -2197,30 +2396,35 @@ function ensureTemplateSelection() {
   if (!templates.some((item) => item.name === state.templateSelection.templateName) && templates.length) {
     state.templateSelection.templateName = templates[0].name;
   }
+  const addressIndex = config.addresses?.findIndex(
+    (address) => address.entity_prefix === state.templateSelection.addressPrefix,
+  ) ?? -1;
+  if (addressIndex >= 0) state.templateSelection.addressIndex = addressIndex;
   if (state.templateSelection.addressIndex >= (config.addresses?.length || 0)) {
     state.templateSelection.addressIndex = 0;
   }
+  state.templateSelection.addressPrefix = config.addresses?.[state.templateSelection.addressIndex]?.entity_prefix || "";
 }
 
 function getSelectedTemplateMeta() {
   return getTemplateList().find((item) => item.name === state.templateSelection.templateName) || null;
 }
 
-function syncTemplateSource(force = false) {
+function syncTemplateSource() {
+  rememberTemplateDraft();
   const meta = getSelectedTemplateMeta();
-  if (!meta) {
-    state.templateSourceDraft = "";
-    state.templateSourceDirty = false;
-    state.templateSourceName = "";
-    persistTemplateDraftSnapshot();
-    return;
-  }
-  if (force || !state.templateSourceDirty || state.templateSourceName !== meta.name) {
-    state.templateSourceDraft = meta.source || "";
-    state.templateSourceDirty = false;
-    state.templateSourceName = meta.name;
-  }
+  if (!meta) return;
+  const draft = state.templateDrafts[meta.name];
+  state.templateSourceDraft = draft?.dirty ? draft.source : meta.source || "";
+  state.templateSourceDirty = Boolean(draft?.dirty);
+  state.templateBaseSource = draft?.dirty ? draft.baseSource : meta.source || "";
+  state.templateSourceName = meta.name;
   persistTemplateDraftSnapshot();
+}
+
+function updateTemplatePreview() {
+  const panel = templatesContainer.querySelector(".side-stack");
+  if (panel) panel.innerHTML = renderTemplatePreviewPanel();
 }
 
 function renderTemplatePreviewPanel() {
@@ -2267,7 +2471,8 @@ function renderTemplates(force = false) {
     templatesContainer.innerHTML = '<p class="empty-state">Шаблони ще не готові.</p>';
     return;
   }
-  if (state.templateSourceDirty && !force && templatesContainer.children.length) {
+  if (!force && templatesContainer.children.length &&
+      (state.templateSourceDirty || templatesContainer.contains(document.activeElement))) {
     templateStatus.className = `status-message ${state.templateStatus.tone}`;
     templateStatus.textContent = state.templateStatus.message;
     return;
@@ -2275,7 +2480,7 @@ function renderTemplates(force = false) {
 
   const config = getDraftConfig();
   ensureTemplateSelection();
-  syncTemplateSource(force);
+  syncTemplateSource();
 
   const addresses = config.addresses || [];
   const selectedMeta = getSelectedTemplateMeta();
@@ -2320,6 +2525,7 @@ function renderTemplates(force = false) {
           <button class="secondary-button" type="button" data-action="template-preview">Побудувати прев'ю</button>
           <button class="secondary-button" type="button" data-action="template-send-test">Надіслати тест</button>
           <button class="secondary-button" type="button" data-action="template-save">Зберегти шаблон</button>
+          <button class="secondary-button" type="button" data-action="template-reload">Завантажити збережений текст</button>
           <button class="secondary-button" type="button" data-action="template-reset">Повернути стандартний</button>
         </div>
         <div class="template-meta-bar">
@@ -2349,84 +2555,131 @@ function renderTemplates(force = false) {
 
   templateStatus.className = `status-message ${state.templateStatus.tone}`;
   templateStatus.textContent = state.templateStatus.message;
+  updateBusyControls();
 }
 
 async function previewSelectedTemplate({ sendTest = false } = {}) {
+  if (state.templateBusy) return;
   const config = getDraftConfig();
   ensureTemplateSelection();
-  const body = {
-    config,
-    template_name: state.templateSelection.templateName,
-    address_index: state.templateSelection.addressIndex,
-    source_override: state.templateSourceDraft,
-  };
-  const url = sendTest ? "./api/templates/send-test" : "./api/templates/preview";
-  const result = await fetchJson(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  state.templatePreview = result.preview;
-  persistTemplateDraftSnapshot();
-  renderTemplates(true);
-  if (sendTest) {
-    const sent = result.preview.sent;
-    if (sent?.ok) {
-      setTemplateStatus(`Тестове повідомлення надіслано в ${sent.chat_id}.`, "status-good");
-    } else {
-      setTemplateStatus("Прев'ю побудовано, але надсилання в Telegram завершилося помилкою.", "status-bad");
+  const requestId = ++state.previewRequest;
+  const revision = state.editorRevision;
+  const body = { config, template_name: state.templateSelection.templateName,
+    address_index: state.templateSelection.addressIndex, source_override: state.templateSourceDraft };
+  state.templateBusy = true;
+  updateBusyControls();
+  try {
+    const result = await fetchJson(sendTest ? "./api/templates/send-test" : "./api/templates/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (requestId !== state.previewRequest || revision !== state.editorRevision ||
+        body.template_name !== state.templateSelection.templateName ||
+        body.address_index !== state.templateSelection.addressIndex ||
+        body.source_override !== state.templateSourceDraft) {
+      setTemplateStatus(sendTest ? "Тест оброблено для попередньої версії. Поточна чернетка не змінилася."
+        : "Чернетка змінилася під час перевірки. Побудуйте актуальне прев'ю ще раз.", "status-warn");
+      return;
     }
-  } else {
-    setTemplateStatus("Прев'ю шаблону оновлено з поточного draft-джерела.", "status-good");
-  }
+    state.templatePreview = result.preview;
+    updateTemplatePreview();
+    if (sendTest) {
+      const sent = result.preview.sent;
+      setTemplateStatus(sent?.ok ? `Тестове повідомлення надіслано в ${sent.chat_id}.`
+        : "Прев'ю побудовано, але надсилання завершилося помилкою.", sent?.ok ? "status-good" : "status-bad");
+    } else setTemplateStatus("Прев'ю оновлено. Текст чернетки не змінено.", "status-good");
+  } finally { state.templateBusy = false; updateBusyControls(); }
 }
 
-async function saveTemplateOverride() {
+async function writeTemplate(reset = false) {
+  if (state.templateBusy) return;
   ensureTemplateSelection();
-  const result = await fetchJson("./api/templates/save", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      template_name: state.templateSelection.templateName,
-      source: state.templateSourceDraft,
-    }),
-  });
-  await loadTemplatesSnapshot();
-  state.templateSourceDraft = result.template.source;
-  state.templateSourceDirty = false;
-  state.templateSourceName = result.template.name;
+  const name = state.templateSelection.templateName;
+  const source = state.templateSourceDraft;
+  if (reset && !window.confirm("Повернути стандартний шаблон? Незбережений текст цього шаблону буде замінено.")) return;
+  state.templateBusy = true;
+  state.writeEpoch += 1;
   persistTemplateDraftSnapshot();
-  renderTemplates(true);
-  setTemplateStatus(`Override для ${result.template.name} збережено.`, "status-good");
+  updateBusyControls();
+  try {
+    const result = await fetchJson(reset ? "./api/templates/reset" : "./api/templates/save", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template_name: name, source, expected_source: state.templateBaseSource }),
+    });
+    if (result.template?.name !== name || typeof result.template?.source !== "string") {
+      throw new Error("Сервер не підтвердив збережений текст. Чернетку не змінено.");
+    }
+    rememberTemplateDraft();
+    const draft = state.templateDrafts[name];
+    const changed = draft && draft.source !== source;
+    state.templateDrafts[name] = { source: changed ? draft.source : result.template.source,
+      dirty: Boolean(changed), baseSource: result.template.source };
+    const templates = getTemplateList();
+    const index = templates.findIndex((item) => item.name === name);
+    if (index >= 0) templates[index] = { ...templates[index], ...result.template };
+    // Forget the previous active snapshot before reading the acknowledged draft.
+    state.templateSourceName = "";
+    syncTemplateSource();
+    const textarea = document.getElementById("template-source");
+    if (textarea && textarea.value !== state.templateSourceDraft) textarea.value = state.templateSourceDraft;
+    state.templatePreview = null;
+    updateTemplatePreview();
+    setTemplateStatus(changed ? "Попередній текст збережено. Нові зміни залишилися у чернетці."
+      : `${name}: ${reset ? "стандартний шаблон відновлено" : "збережено"}.`, changed ? "status-warn" : "status-good");
+  } finally { state.templateBusy = false; state.writeEpoch += 1; updateBusyControls(); }
 }
 
-async function resetTemplateOverride() {
-  ensureTemplateSelection();
-  const result = await fetchJson("./api/templates/reset", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      template_name: state.templateSelection.templateName,
-    }),
-  });
-  await loadTemplatesSnapshot();
-  state.templateSourceDraft = result.template.source;
-  state.templateSourceDirty = false;
-  state.templateSourceName = result.template.name;
-  state.templatePreview = null;
-  persistTemplateDraftSnapshot();
-  renderTemplates(true);
-  setTemplateStatus(`Шаблон ${result.template.name} скинуто до вбудованого джерела.`, "status-good");
+async function reloadTemplate() {
+  if (state.templateBusy) return;
+  const name = state.templateSelection.templateName;
+  const requestId = state.previewRequest;
+  if (state.templateSourceDirty && !window.confirm("Відкинути чернетку цього шаблону й завантажити збережений текст?")) return;
+  state.templateBusy = true;
+  updateBusyControls();
+  try {
+    const payload = await fetchJson("./api/templates");
+    if (name !== state.templateSelection.templateName || requestId !== state.previewRequest) {
+      setTemplateStatus("Під час завантаження чернетка змінилася. Ваш ввід збережено.", "status-warn");
+      return;
+    }
+    state.templatesPayload = payload;
+    delete state.templateDrafts[name];
+    state.templateSourceName = "";
+    state.templatePreview = null;
+    renderTemplates(true);
+    setTemplateStatus("Збережений текст завантажено.", "muted");
+  } finally { state.templateBusy = false; updateBusyControls(); }
 }
 
-async function loadTemplatesSnapshot() {
-  state.templatesPayload = await fetchJson("./api/templates");
+async function reloadConfig() {
+  if (state.configBusy) return;
+  if (state.editorDirty && !window.confirm("Відкинути незбережені зміни конфігурації та завантажити збережені?")) return;
+  const revision = state.editorRevision;
+  state.configBusy = true;
+  state.writeEpoch += 1;
+  updateBusyControls();
+  try {
+    const payload = await fetchJson("./api/config");
+    if (revision !== state.editorRevision) {
+      setEditorStatus("Під час завантаження чернетка змінилася. Ваш ввід збережено.", "status-warn");
+      return;
+    }
+    state.configPayload = payload;
+    state.draftConfig = cloneJson(payload.config);
+    state.baseRevision = payload.revision;
+    state.editorDirty = false;
+    state.editorRevision += 1;
+    state.templatePreview = null;
+    clearEditorDraftSnapshot();
+    renderEditor(true);
+    renderTemplates(true);
+    setEditorStatus("Збережені налаштування завантажено.", "muted");
+  } finally { state.configBusy = false; state.writeEpoch += 1; updateBusyControls(); }
 }
 
 async function loadDashboard({ background = false } = {}) {
-  if (background && shouldPauseBackgroundRefresh()) {
-    return;
-  }
+  if (state.dashboardLoading) return;
+  state.dashboardLoading = true;
+  const epoch = state.writeEpoch;
 
   if (!background) {
     refreshButton.disabled = true;
@@ -2445,25 +2698,28 @@ async function loadDashboard({ background = false } = {}) {
     state.overview = overview;
     state.discovery = discovery;
     state.diagnostics = diagnostics;
-    state.configPayload = config;
-    state.templatesPayload = templates;
-
-    if (!state.editorDirty || !state.draftConfig) {
-      state.draftConfig = cloneJson(config.config);
-    }
-
-    const blockInteractiveRefresh = background && isInteractiveRefreshBlocked();
-
     renderStats();
     renderAddresses();
     renderDiscovery();
     renderDiagnostics();
+    if (epoch !== state.writeEpoch || state.configBusy || state.templateBusy) return;
+    state.configPayload = config;
+    state.templatesPayload = templates;
+
+    if ((!state.editorDirty && !editorContainer.contains(document.activeElement)) || !state.draftConfig) {
+      state.draftConfig = cloneJson(config.config);
+      state.baseRevision = config.revision;
+    }
+
+    const blockInteractiveRefresh = isInteractiveRefreshBlocked();
+
     if (!blockInteractiveRefresh || state.activeTab !== "configure") {
       renderEditor(false);
     }
     if (!blockInteractiveRefresh || state.activeTab !== "templates") {
       renderTemplates(false);
     }
+    updateEditorLiveParts();
     setActiveTab(state.activeTab);
 
     lastUpdated.textContent = `Оновлено о ${new Date().toLocaleTimeString(UI_LOCALE)}`;
@@ -2485,6 +2741,8 @@ async function loadDashboard({ background = false } = {}) {
     setEditorStatus(String(error), "status-bad");
     setTemplateStatus(String(error), "status-bad");
   } finally {
+    state.dashboardLoading = false;
+    updateBusyControls();
     if (!background) {
       refreshButton.disabled = false;
       refreshButton.textContent = "Оновити";
@@ -2581,20 +2839,8 @@ editorContainer.addEventListener("change", (event) => {
         displayNameInput.value = suggestedName;
       }
     }
-    if (target.classList.contains("voltage-unavailable-as-missing") || target.classList.contains("power-unavailable-as-missing")) {
-      const checked = target instanceof HTMLInputElement ? target.checked : false;
-      const voltageCheckbox = form.querySelector(".voltage-unavailable-as-missing");
-      const powerCheckbox = form.querySelector(".power-unavailable-as-missing");
-      if (voltageCheckbox instanceof HTMLInputElement) {
-        voltageCheckbox.checked = checked;
-      }
-      if (powerCheckbox instanceof HTMLInputElement) {
-        powerCheckbox.checked = checked;
-      }
-    }
-    state.editorDirty = true;
     syncAddressFormVisibility(form);
-    persistEditorDraftSnapshot();
+    markEditorChanged();
     setEditorStatus("Чернетку змінено. Запустіть перевірку, щоб оновити живе прев'ю.", "muted");
   }
 });
@@ -2605,8 +2851,7 @@ editorContainer.addEventListener("input", (event) => {
     return;
   }
   if (target.closest(".address-editor-card") || target.id === "cfg-ha-token") {
-    state.editorDirty = true;
-    persistEditorDraftSnapshot();
+    markEditorChanged();
   }
 });
 
@@ -2617,16 +2862,16 @@ templatesContainer.addEventListener("change", (event) => {
   }
   if (target.id === "template-address-select") {
     state.templateSelection.addressIndex = Number.parseInt(target.value, 10) || 0;
+    state.templateSelection.addressPrefix = getDraftConfig().addresses?.[state.templateSelection.addressIndex]?.entity_prefix || "";
     state.templatePreview = null;
     persistTemplateDraftSnapshot();
     renderTemplates(true);
     setTemplateStatus("Адресу шаблону змінено. Побудуйте прев'ю знову, щоб використати поточний draft-конфіг.", "muted");
   }
   if (target.id === "template-select") {
+    persistTemplateDraftSnapshot();
     state.templateSelection.templateName = target.value;
     state.templatePreview = null;
-    state.templateSourceDirty = false;
-    persistTemplateDraftSnapshot();
     renderTemplates(true);
     setTemplateStatus("Шаблон змінено. Відредагуйте джерело або побудуйте прев'ю.", "muted");
   }
@@ -2640,9 +2885,18 @@ templatesContainer.addEventListener("input", (event) => {
   if (target.id === "template-source") {
     state.templateSourceDraft = target.value;
     state.templateSourceDirty = true;
+    state.previewRequest += 1;
     state.templatePreview = null;
+    updateTemplatePreview();
     persistTemplateDraftSnapshot();
     setTemplateStatus("Джерело шаблону змінено. Побудуйте прев'ю, щоб рендерити поточний draft.", "muted");
+  }
+});
+
+editorContainer.addEventListener("keydown", (event) => {
+  if (["Enter", " "].includes(event.key) && event.target.matches('.subpanel-head[data-action="toggle-section"]')) {
+    event.preventDefault();
+    event.target.click();
   }
 });
 
@@ -2665,6 +2919,7 @@ document.addEventListener("click", (event) => {
     const subpanel = actionEl.closest(".subpanel");
     if (subpanel) {
       subpanel.classList.toggle("collapsed");
+      actionEl.setAttribute("aria-expanded", String(!subpanel.classList.contains("collapsed")));
       if (subpanel.dataset.panelKey) {
         rememberPanelState(
           subpanel.dataset.panelKey,
@@ -2691,6 +2946,10 @@ document.addEventListener("click", (event) => {
     applyPowerPreset(actionEl);
     return;
   }
+  if (action === "template-reload") {
+    void reloadTemplate().catch((error) => setTemplateStatus(`Помилка завантаження: ${error.message}`, "status-bad"));
+    return;
+  }
   if (action === "template-preview") {
     void previewSelectedTemplate().catch((error) => {
       setTemplateStatus(`Помилка прев'ю: ${error.message}`, "status-bad");
@@ -2704,13 +2963,13 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (action === "template-save") {
-    void saveTemplateOverride().catch((error) => {
+    void writeTemplate().catch((error) => {
       setTemplateStatus(`Помилка збереження: ${error.message}`, "status-bad");
     });
     return;
   }
   if (action === "template-reset") {
-    void resetTemplateOverride().catch((error) => {
+    void writeTemplate(true).catch((error) => {
       setTemplateStatus(`Помилка скидання: ${error.message}`, "status-bad");
     });
     return;
@@ -2720,6 +2979,7 @@ document.addEventListener("click", (event) => {
   const index = Number.parseInt(actionEl.dataset.index ?? "-1", 10);
 
   if (action === "remove-address" && index >= 0) {
+    if (!window.confirm("Видалити адресу з чернетки? Для застосування потрібно зберегти налаштування.")) return;
     config.addresses.splice(index, 1);
     setDraftConfig(config, "Адресу видалено з чернетки. Запустіть перевірку, щоб перебудувати прев'ю.", "muted");
     return;
@@ -2762,12 +3022,19 @@ document.addEventListener("click", (event) => {
   }
 });
 
+document.getElementById("reload-config-button").addEventListener("click", () => {
+  void reloadConfig().catch((error) => setEditorStatus(`Помилка завантаження: ${error.message}`, "status-bad"));
+});
+window.addEventListener("beforeunload", (event) => {
+  if (state.editorDirty || Object.values(state.templateDrafts).some((draft) => draft.dirty)) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+updateBusyControls();
 restorePersistedUiState();
 setActiveTab(state.activeTab);
 void loadDashboard();
 window.setInterval(() => {
-  if (shouldPauseBackgroundRefresh()) {
-    return;
-  }
   void loadDashboard({ background: true });
 }, REFRESH_INTERVAL_MS);

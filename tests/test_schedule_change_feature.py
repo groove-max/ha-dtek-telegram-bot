@@ -71,6 +71,9 @@ if HAS_RUNTIME_DEPS:
 
 
 class DummyHA:
+    async def get_state(self, entity_id):
+        return {"state": "GPV5.1"}
+
     async def call_service(self, *args: object, **kwargs: object) -> dict[str, object]:
         return {}
 
@@ -104,14 +107,14 @@ class DummyTemplates:
     HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment"
 )
 class ScheduleChangeFeatureTest(unittest.IsolatedAsyncioTestCase):
-    prefix = "doroga_liustdorfska_56v"
+    prefix = "vulytsia_prykladna_12a"
 
     def _build_feature(self) -> tuple[ScheduleChangeFeature, DummyTelegram, DummyState]:
         telegram = DummyTelegram()
         state = DummyState()
         config = SimpleNamespace(
             entity_prefix=self.prefix,
-            display_name="Одеса • дорога Люстдорфська, 56В",
+            display_name="Одеса • вулиця Прикладна, 12А",
             telegram_chat_id="",
             schedule_change=SimpleNamespace(enabled=True, silent=False),
         )

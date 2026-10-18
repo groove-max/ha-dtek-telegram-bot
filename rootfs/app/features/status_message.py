@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from groups import display_group
+
 import asyncio
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
-from outage_calendar import extract_calendar_events, next_planned_outage
-from utils import OUTAGE_TYPE_UA, TZ_KYIV, format_datetime, format_duration, now_kyiv
+from groups import select_events
+from outage_calendar import extract_calendar_events, format_next_outage
+from utils import OUTAGE_TYPE_UA, format_datetime, format_duration, now_kyiv
 
 if TYPE_CHECKING:
     from power_monitor import PowerMonitor
@@ -116,7 +119,7 @@ class StatusMessageFeature(Feature):
             house_state = (
                 await self._power_monitor.get_power_state()
                 if self._power_monitor
-                else "on"
+                else "unknown"
             )
             text = await self._build_status_text(house_state)
             delivery_mode = self.config.status_message.delivery_mode
@@ -132,13 +135,26 @@ class StatusMessageFeature(Feature):
                 )
                 updated = msg_id is not None
             else:
+                current_chat_id = self.effective_telegram_chat_id
                 msg_id = self.state_get("status_message_id")
+                stored_chat_id = str(self.state_get("status_message_chat_id", "") or "")
+
+                if msg_id and stored_chat_id and stored_chat_id != current_chat_id:
+                    self.log.info(
+                        "Status message chat changed: %s -> %s; recreating message",
+                        stored_chat_id,
+                        current_chat_id,
+                    )
+                    self.state_set("status_message_id", None)
+                    msg_id = None
 
                 if msg_id:
                     result = await self.edit_message_result(msg_id, text)
                     if result == "ok":
+                        self.state_set("status_message_chat_id", current_chat_id)
                         updated = True
                     elif result == "not_found":
+                        self.state_set("status_message_id", None)
                         msg_id = None
 
                 if not msg_id:
@@ -149,6 +165,7 @@ class StatusMessageFeature(Feature):
                     )
                     if msg_id:
                         self.state_set("status_message_id", msg_id)
+                        self.state_set("status_message_chat_id", current_chat_id)
                         updated = True
 
             if updated:
@@ -174,13 +191,19 @@ class StatusMessageFeature(Feature):
     async def _build_status_text(self, house_state: str) -> str:
         """Build the status message text."""
         short_name = self.config.display_name
+        try:
+            await self.read_groups()
+        except ValueError:
+            pass
         group = await self._resolve_current_group()
 
         if house_state == "on":
             return await self._build_on_text(short_name, group)
         if house_state == "partial":
             return await self._build_partial_text(short_name, group)
-        return await self._build_off_text(short_name, group)
+        if house_state == "off":
+            return await self._build_off_text(short_name, group)
+        return f"⚡️ {short_name}\n🔵 {display_group(group, self.state_get('groups_snapshot'))}\n❔ Стан живлення невідомий: немає актуальних вимірювань."
 
     async def _build_on_text(self, short_name: str, group: str) -> str:
         """Build status text when power is on."""
@@ -189,7 +212,10 @@ class StatusMessageFeature(Feature):
         if self._power_monitor:
             snapshot = await self._power_monitor.get_voltage_snapshot()
 
-        next_outage = await self._get_next_outage()
+        try:
+            next_outage = await self._get_next_outage()
+        except (ValueError, TimeoutError, ConnectionError):
+            next_outage = "Графік тимчасово недоступний"
 
         return self.render(
             "status_on",
@@ -206,7 +232,10 @@ class StatusMessageFeature(Feature):
         if self._power_monitor:
             snapshot = await self._power_monitor.get_voltage_snapshot()
 
-        next_outage = await self._get_next_outage()
+        try:
+            next_outage = await self._get_next_outage()
+        except (ValueError, TimeoutError, ConnectionError):
+            next_outage = "Графік тимчасово недоступний"
 
         return self.render(
             "status_partial",
@@ -316,11 +345,12 @@ class StatusMessageFeature(Feature):
             calendar_entity,
             exclude_emergency=True,
         )
-        upcoming = next_planned_outage(events, now=now)
-        if upcoming:
-            start_dt, end_dt = upcoming
-            s = start_dt.astimezone(TZ_KYIV)
-            e = end_dt.astimezone(TZ_KYIV)
-            return f"{s.strftime('%d.%m')} {s.strftime('%H:%M')}–{e.strftime('%H:%M')}"
-
-        return None
+        groups = self.state_get("current_groups", [])
+        if groups:
+            events = select_events(events, groups, getattr(self.config, "selected_group", ""))
+        return format_next_outage(
+            events,
+            header_group=await self._resolve_current_group(),
+            group_labels=self.schedule_display_labels(),
+            now=now,
+        )

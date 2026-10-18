@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from config import (
     build_runtime_config_payload,
+    runtime_config_revision,
     save_runtime_config_payload,
     validate_runtime_config_payload,
 )
@@ -122,7 +123,7 @@ class UIServer:
             )
         except ValidationError as exc:
             return web.json_response(
-                {"ok": False, "errors": exc.errors()},
+                {"ok": False, "errors": exc.errors(include_context=False)},
                 status=400,
             )
 
@@ -146,11 +147,20 @@ class UIServer:
             )
         except ValidationError as exc:
             return web.json_response(
-                {"ok": False, "errors": exc.errors()},
+                {"ok": False, "errors": exc.errors(include_context=False)},
                 status=400,
             )
 
         normalized = build_runtime_config_payload(validated)
+        conflict = self._config_conflict(body)
+        if conflict is not None:
+            return conflict
+        preview = await self._orchestrator.preview_runtime_config(validated)
+        # Recheck after preparing the preview. No await between this check and
+        # the atomic write, so concurrent HTTP saves cannot overwrite a revision.
+        conflict = self._config_conflict(body)
+        if conflict is not None:
+            return conflict
         target = save_runtime_config_payload(normalized)
         if restart:
             asyncio.create_task(self._delayed_restart())
@@ -159,15 +169,30 @@ class UIServer:
             {
                 "ok": True,
                 "config": normalized,
-                "preview": await self._orchestrator.preview_runtime_config(validated),
+                "revision": runtime_config_revision(normalized),
+                "preview": preview,
                 "path": str(target),
                 "restart_scheduled": restart,
             }
         )
 
+    @staticmethod
+    def _config_conflict(body: dict) -> web.Response | None:
+        if body.get("expected_revision") != runtime_config_revision():
+            return web.json_response(
+                {
+                    "ok": False,
+                    "message": "Налаштування вже змінено в іншій вкладці або файлі. Чернетку збережено у браузері. Експортуйте її або завантажте збережені налаштування перед повторною спробою.",
+                },
+                status=409,
+            )
+        return None
+
     async def _preview_template(self, request: web.Request) -> web.Response:
         try:
-            validated, template_name, address_index, source_override = await self._read_template_request(request)
+            validated, template_name, address_index, source_override = (
+                await self._read_template_request(request)
+            )
             preview = await self._orchestrator.preview_template(
                 validated,
                 template_name=template_name,
@@ -175,7 +200,9 @@ class UIServer:
                 source_override=source_override,
             )
         except ValidationError as exc:
-            return web.json_response({"ok": False, "errors": exc.errors()}, status=400)
+            return web.json_response(
+                {"ok": False, "errors": exc.errors(include_context=False)}, status=400
+            )
         except ValueError as exc:
             return web.json_response({"ok": False, "message": str(exc)}, status=400)
 
@@ -183,7 +210,9 @@ class UIServer:
 
     async def _send_template_test(self, request: web.Request) -> web.Response:
         try:
-            validated, template_name, address_index, source_override = await self._read_template_request(request)
+            validated, template_name, address_index, source_override = (
+                await self._read_template_request(request)
+            )
             result = await self._orchestrator.send_template_test(
                 validated,
                 template_name=template_name,
@@ -191,7 +220,9 @@ class UIServer:
                 source_override=source_override,
             )
         except ValidationError as exc:
-            return web.json_response({"ok": False, "errors": exc.errors()}, status=400)
+            return web.json_response(
+                {"ok": False, "errors": exc.errors(include_context=False)}, status=400
+            )
         except ValueError as exc:
             return web.json_response({"ok": False, "message": str(exc)}, status=400)
 
@@ -201,6 +232,9 @@ class UIServer:
         body = await self._read_json_body(request)
         template_name = str(body.get("template_name", "")).strip()
         source = str(body.get("source", ""))
+        conflict = self._template_conflict(template_name, body)
+        if conflict is not None:
+            return conflict
         try:
             details = self._orchestrator.save_template_override(template_name, source)
         except ValueError as exc:
@@ -210,11 +244,33 @@ class UIServer:
     async def _reset_template(self, request: web.Request) -> web.Response:
         body = await self._read_json_body(request)
         template_name = str(body.get("template_name", "")).strip()
+        conflict = self._template_conflict(template_name, body)
+        if conflict is not None:
+            return conflict
         try:
             details = self._orchestrator.reset_template_override(template_name)
         except ValueError as exc:
             return web.json_response({"ok": False, "message": str(exc)}, status=400)
         return web.json_response({"ok": True, "template": details})
+
+    def _template_conflict(self, name: str, body: dict) -> web.Response | None:
+        current = next(
+            (
+                item
+                for item in self._orchestrator.get_templates_snapshot()["templates"]
+                if item["name"] == name
+            ),
+            None,
+        )
+        if current is not None and body.get("expected_source") != current["source"]:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "message": "Шаблон уже змінено в іншій вкладці. Скопіюйте свою чернетку та завантажте збережений текст перед повторним збереженням.",
+                },
+                status=409,
+            )
+        return None
 
     async def _read_config_payload(self, request: web.Request) -> dict[str, object]:
         body = await self._read_json_body(request)
@@ -260,7 +316,9 @@ class UIServer:
     @staticmethod
     def _file_response(path: Path) -> web.FileResponse:
         response = web.FileResponse(path)
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
@@ -273,7 +331,9 @@ class UIServer:
 
     @staticmethod
     def _supervisor_token() -> str:
-        return os.environ.get("SUPERVISOR_TOKEN", "") or os.environ.get("HASSIO_TOKEN", "")
+        return os.environ.get("SUPERVISOR_TOKEN", "") or os.environ.get(
+            "HASSIO_TOKEN", ""
+        )
 
     async def _delayed_restart(self) -> None:
         await asyncio.sleep(0.75)
