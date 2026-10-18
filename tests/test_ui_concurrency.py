@@ -36,6 +36,7 @@ class UIConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.orchestrator = Mock(spec=Orchestrator)
         self.orchestrator.config = config.FullConfig()
         self.orchestrator.tg = Mock(default_chat_id="123456789")
+        self.orchestrator.bots = Mock(clients={})
         self.orchestrator.preview_runtime_config = AsyncMock(
             return_value={"addresses": []}
         )

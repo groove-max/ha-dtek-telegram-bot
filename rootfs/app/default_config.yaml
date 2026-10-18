@@ -1,6 +1,7 @@
 ---
 # DTEK Telegram Bot runtime settings.
-# Configure the bot token and destination in Home Assistant app options.
+# Default bot: configure its token and chat in Home Assistant app options.
+# Additional bots: add private profiles in the web editor Telegram bots tab.
 # Add your own address using discovery in the web editor, then save and restart.
 # Configuration examples and sensor requirements: DOCS.md / DOCS.uk.md.
 ha_token: ""

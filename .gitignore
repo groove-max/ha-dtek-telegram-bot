@@ -30,3 +30,6 @@ secrets.yaml
 
 # Original artwork is kept with local maintainer materials
 .assets/
+
+# Private Telegram profile credentials (runtime /data).
+telegram_bots.json
