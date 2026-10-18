@@ -1,0 +1,2 @@
+# Browser regression tests only; not installed in the add-on image.
+playwright==1.58.0

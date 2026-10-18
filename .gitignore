@@ -15,3 +15,18 @@ venv/
 *.swo
 *~
 
+# Local review, operator notes and generated graphs
+graphify-out/
+.review-artifacts/
+.local/
+docs/GITHUB_SETUP*.md
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.log
+options.json
+secrets.yaml
+
+# Original artwork is kept with local maintainer materials
+.assets/

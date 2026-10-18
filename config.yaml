@@ -1,6 +1,6 @@
 ---
 name: "DTEK Telegram Bot"
-version: "0.3.7"
+version: "0.3.13"
 slug: "dtek_telegram_bot"
 description: >-
   Telegram notifications for DTEK Monitor with local power validation
@@ -20,6 +20,10 @@ map:
 options:
   telegram_bot_token: ""
   telegram_chat_id: ""
+  test_chat_id: ""
+  feedback_enabled: false
 schema:
   telegram_bot_token: str
   telegram_chat_id: str
+  test_chat_id: str?
+  feedback_enabled: bool?
