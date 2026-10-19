@@ -33,12 +33,12 @@ All notable changes to this project will be documented in this file.
 - Add `receive_commands` so several HA servers can send through one Telegram token while only the cabinet server receives private commands; expose the switch in the editor and document shared-token setup.
 
 - Add personal profiles alongside existing building profiles, with an explicit private Telegram recipient, separate reading/reminder permissions and current cabinet groups only. Reuse schedule notifications and power detection without falling back to another building group.
-- Add private menus for status, today/tomorrow all-group PNG tables, manual or energy-sensor reading proposals, explicit confirmation and read-only result checks. Keep account setup/history in HA; reuse the integration's submission and calibration protections.
+- Add private menus for status, today/tomorrow all-group PNG tables, manual or energy-sensor reading proposals, explicit confirmation and read-only result checks. Keep account management and detailed dashboards in HA; reuse the integration's submission and calibration protections.
 - Send optional rate-limited private introductions with project links to unconfigured users. Share one update consumer with test feedback; retain cursors, reject stale/replayed commands and preserve an existing webhook.
 - Isolate profile state, prevent personal data from being routed to shared test chats, invalidate obsolete confirmations, and announce verified group changes even before publication without claiming an empty schedule.
 - Document setup, compatibility, authorization and behavior in English/Ukrainian; add backend, browser and image regression tests. Add Pillow and Cyrillic fonts for deterministic PNG rendering.
 
-**Compatibility:** Personal profiles and PNG menus require the DTEK Monitor 2.0.0-rc1. Existing building profiles remain compatible with 1.7.0/2.0.0b1. No personal profile, submission permission or reminder is enabled automatically; private introductions default to on and can be disabled. Save and restart to apply configuration.
+**Compatibility:** Personal profiles and PNG menus require DTEK Monitor 2.0.0-rc1. Existing building profiles remain compatible with 1.7.0/2.0.0b1. No personal profile, submission permission or reminder is enabled automatically; private introductions default to on and can be disabled. Save and restart to apply configuration.
 
 - Read history directly from DTEK even when HA has never submitted readings. Hide inactive records by default, retain warning statuses and add show-all/newer/older navigation. Keep submission result checks separate from official monthly settlement.
 - Use the integration's calibrated cumulative-energy proposal in the reading form, with observation time and explicit confirmation. Never silently drop unavailable source data or retry an uncertain submission.
