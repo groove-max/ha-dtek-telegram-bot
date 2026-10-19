@@ -7,7 +7,7 @@ import logging
 import math
 import signal
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from config import (
@@ -28,7 +28,7 @@ from features.status_message import StatusMessageFeature
 from ha_client import HAClient
 from groups import state_groups, select_events, presentation_context, display_labels
 from messages import DEFAULT_TEMPLATES
-from outage_calendar import build_schedule_lines, extract_calendar_events, next_planned_outage, format_next_outage
+from outage_calendar import build_schedule_lines, extract_calendar_events, upcoming_schedule_events, parse_event_time, format_next_outage, calendar_query_end
 from power_monitor import PowerMonitor
 from bot_profiles import BotProfileStore, default_profile, validate_destinations
 from bot_runtime import BotRuntime
@@ -884,12 +884,15 @@ class Orchestrator:
         return cls._template_entities(address, suffix)[0]
 
     async def _groups_for_address(self, address: AddressConfig) -> list[str]:
+        return state_groups(await self._group_state_for_address(address))
+
+    async def _group_state_for_address(self, address: AddressConfig) -> dict | None:
         if self.ha.is_connected:
             for entity in self._template_entities(address, "schedule_group"):
-                groups = state_groups(await self.ha.get_state(entity))
-                if groups:
-                    return groups
-        return []
+                state = await self.ha.get_state(entity)
+                if state_groups(state):
+                    return state
+        return None
 
     async def _current_group_for_address(self, address: AddressConfig) -> str:
         groups = await self._groups_for_address(address)
@@ -915,19 +918,27 @@ class Orchestrator:
         address: AddressConfig,
         *,
         exclude_emergency: bool = False,
+        group_state: dict | None = None,
     ) -> list[dict[str, Any]]:
         if not self.ha.is_connected or not address.entity_prefix:
             return []
         calendar_entity = self._template_entity(address, "outage_schedule")
         now = now_kyiv()
-        groups = await self._groups_for_address(address)
+        before = group_state or await self._group_state_for_address(address)
+        groups = state_groups(before)
+        def identity(state):
+            attrs = (state or {}).get("attributes", {})
+            return (state_groups(state), *(attrs.get(key) for key in (
+                "provider_id", "address_id", "schedule_snapshot_id", "schedule_notifications_ready"
+            )))
+        revision = identity(before)
         result = await self.ha.call_service(
             domain="calendar",
             service="get_events",
             entity_id=calendar_entity,
             data={
                 "start_date_time": now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(),
-                "end_date_time": (now + timedelta(days=2)).isoformat(),
+                "end_date_time": calendar_query_end(before, now).isoformat(),
             },
             return_response=True,
         )
@@ -937,8 +948,8 @@ class Orchestrator:
             exclude_emergency=exclude_emergency,
         )
 
-        if groups != await self._groups_for_address(address):
-            raise ValueError("Groups changed while fetching preview")
+        if revision != identity(await self._group_state_for_address(address)):
+            raise ValueError("Schedule changed while fetching preview")
         return select_events(events, groups, address.selected_group)
 
     async def _build_template_context(
@@ -976,6 +987,7 @@ class Orchestrator:
         if template_name in {"schedule_change", "schedule_empty", "group_change", "upcoming_outage", "status_on", "status_partial"}:
             events = await self._fetch_calendar_events_for_address(
                 address,
+                group_state=group_state,
                 exclude_emergency=template_name in {"schedule_change", "schedule_empty", "group_change", "status_on", "status_partial"},
             )
         else:
@@ -1055,22 +1067,28 @@ class Orchestrator:
                 phases=phases,
             )
         elif template_name == "upcoming_outage":
-            upcoming = next_planned_outage(events, now=now_kyiv())
+            upcoming = upcoming_schedule_events(
+                events, now=now_kyiv(), group_state=group_state,
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
+            )
             if upcoming:
-                start_dt, end_dt = upcoming
+                event = upcoming[0]
+                start_dt, end_dt = parse_event_time(event["start"]), parse_event_time(event["end"])
                 context.update(
                     minutes=max(
                         math.ceil((start_dt - now_kyiv()).total_seconds() / 60),
                         1,
                     ),
                     start=format_datetime(start_dt),
-                    end=format_datetime(end_dt),
+                    end=format_datetime(end_dt) if event["end_confirmed"] else "невідомо",
+                    end_confirmed=event["end_confirmed"],
                 )
             else:
                 context.update(
                     minutes=10,
                     start=timestamp,
                     end=timestamp,
+                    end_confirmed=True,
                 )
         elif template_name == "status_on":
             voltage, phases = self._coerce_status_preview_payload(
@@ -1081,7 +1099,9 @@ class Orchestrator:
                 detected_power=detected_power,
             )
             next_outage = format_next_outage(
-                events, header_group=group, group_labels=display_labels(group_state)
+                events, header_group=group, group_labels=display_labels(group_state),
+                group_state=group_state,
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
             )
             context.update(
                 short_name=display_name,
@@ -1108,7 +1128,9 @@ class Orchestrator:
                 if phase.get("available") is None
             ]
             next_outage = format_next_outage(
-                events, header_group=group, group_labels=display_labels(group_state)
+                events, header_group=group, group_labels=display_labels(group_state),
+                group_state=group_state,
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
             )
             context.update(
                 short_name=display_name,

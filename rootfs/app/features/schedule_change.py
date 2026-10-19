@@ -11,6 +11,7 @@ from groups import canonical_groups
 from schedule_notifications import (
     notification_lock,
     schedule_signature,
+    schedule_signature_matches,
     acknowledge_schedule,
 )
 from outage_calendar import build_schedule_lines, extract_calendar_events
@@ -58,6 +59,7 @@ class ScheduleChangeFeature(Feature):
         previous_groups = self.state_get("notified_groups")
         if previous_groups is None:
             previous_groups = canonical_groups(self.state_get("current_group", ""))
+        previous_snapshot = self.state_get("calendar_snapshot") or {}
         events = await self.calendar_snapshot(self._fetch_outage_events)
         if (
             getattr(getattr(self.config, "group_change", None), "enabled", False)
@@ -66,10 +68,12 @@ class ScheduleChangeFeature(Feature):
         ):
             return
         schedule_lines = self._build_schedule_lines(events)
-        signature = self._compute_signature(events)
+        now = now_kyiv()
+        signature = self._compute_signature(events, now=now)
 
         old_signature = self.state_get("schedule_signature", "")
-        if signature == old_signature:
+        if schedule_signature_matches(old_signature, events, previous_snapshot.get("events"), now=now):
+            self.state_set("schedule_signature", signature)
             self.log.debug("Schedule signature unchanged, skipping")
             return
 

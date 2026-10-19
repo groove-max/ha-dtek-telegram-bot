@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import re
 from typing import Any
 
 from groups import event_group
@@ -58,7 +59,126 @@ def extract_calendar_events(
             for event in events
             if str(event.get("description", "")).lower().split(";", 1)[0] != "emergency"
         ]
-    return sorted(events, key=lambda e: e.get("start", ""))
+    if any(parse_event_time(e["end"]).timestamp() <= parse_event_time(e["start"]).timestamp() for e in events):
+        raise ValueError("HA calendar interval is empty or reversed")
+    return sorted(events, key=lambda e: parse_event_time(e["start"]).timestamp())
+
+
+def normalize_calendar_events(events: list[dict]) -> list[dict]:
+    """Canonical intervals, independent of timezone notation and daily splitting.
+
+    Description retains the machine-readable group/type. Source, when supplied,
+    is also part of the identity; unrelated events never share a merged window.
+    """
+    buckets: dict[tuple[str, str], list[tuple[float, float, dict]]] = {}
+    for event in events:
+        start, end = parse_event_time(event.get("start")), parse_event_time(event.get("end"))
+        if start is None or end is None or start.timestamp() >= end.timestamp():
+            raise ValueError("Invalid calendar interval")
+        identity = (str(event.get("description", "")), str(event.get("source", "")))
+        buckets.setdefault(identity, []).append((start.timestamp(), end.timestamp(), event))
+    result = []
+    for intervals in buckets.values():
+        merged = []
+        for start, end, event in sorted(intervals, key=lambda item: item[:2]):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]), merged[-1][2])
+            else:
+                merged.append((start, end, event))
+        result.extend(
+            {**event, "start": datetime.fromtimestamp(start, TZ_KYIV).isoformat(),
+             "end": datetime.fromtimestamp(end, TZ_KYIV).isoformat()}
+            for start, end, event in merged
+        )
+    return sorted(result, key=lambda e: (parse_event_time(e["start"]).timestamp(),
+                                        parse_event_time(e["end"]).timestamp(), str(e.get("description", ""))))
+
+
+def warning_key(group: str, start: datetime) -> str:
+    """One warning for a group's start; end-time changes belong to schedule updates."""
+    return f"{group}:{start.astimezone(timezone.utc).isoformat()}"
+
+
+def canonical_warning_key(value: str) -> str | None:
+    """Read both the current start-only key and old group:start:end keys."""
+    if not isinstance(value, str):
+        return None
+    parts = re.split(r":(?=\d{4}-\d{2}-\d{2}T)", value, maxsplit=2)
+    if len(parts) not in (2, 3) or not parts[0]:
+        return None
+    start = parse_event_time(parts[1])
+    if start is None or (len(parts) == 3 and parse_event_time(parts[2]) is None):
+        return None
+    return warning_key(parts[0], start)
+
+
+def verified_coverage_end(group_state, groups, now, kind="outage"):
+    """Continuous common coverage; None means an older integration lacks metadata."""
+    attrs = (group_state or {}).get("attributes", {})
+    if attrs.get("schedule_notifications_ready", True) is not True:
+        raise ValueError("Schedule is unverified")
+    if "schedule_coverage" not in attrs:
+        return None
+    coverage = attrs["schedule_coverage"]
+    if not isinstance(coverage, list) or not groups:
+        raise ValueError("Schedule coverage is missing")
+    horizons = []
+    try:
+        for group in groups:
+            ranges = []
+            for part in coverage:
+                if part["group_id"] != group or part["kind"] != kind:
+                    continue
+                left, right = datetime.fromisoformat(part["start"]), datetime.fromisoformat(part["end"])
+                if left.tzinfo is None or right.tzinfo is None or left.timestamp() >= right.timestamp():
+                    raise ValueError("Invalid schedule coverage interval")
+                ranges.append((left.timestamp(), right.timestamp()))
+            cursor = now.timestamp()
+            for left, right in sorted(ranges):
+                if left > cursor:
+                    break
+                cursor = max(cursor, right)
+            horizons.append(cursor)
+    except (KeyError, TypeError, AttributeError) as err:
+        raise ValueError("Invalid schedule coverage") from err
+    return datetime.fromtimestamp(min(horizons), timezone.utc)
+
+
+def upcoming_schedule_events(events, *, now=None, group_state=None, groups=None):
+    """Future starts within coverage, with explicit confidence in their end times."""
+    now = now or now_kyiv()
+    events = normalize_calendar_events(events)
+    if groups is None:
+        groups = sorted({event_group(e) for e in events if event_group(e)})
+    horizon = verified_coverage_end(group_state, groups, now)
+    if horizon is not None and horizon.timestamp() <= now.timestamp():
+        raise ValueError("No verified schedule at the current time")
+    result = []
+    for event in events:
+        start, end = parse_event_time(event["start"]), parse_event_time(event["end"])
+        if start.timestamp() <= now.timestamp() or (horizon and start.timestamp() >= horizon.timestamp()):
+            continue
+        end_confirmed = horizon is None or end.timestamp() < horizon.timestamp()
+        if any(
+            event_group(other) == event_group(event)
+            and parse_event_time(other["start"]).timestamp() <= end.timestamp() < parse_event_time(other["end"]).timestamp()
+            for other in events
+        ):
+            end_confirmed = False
+        result.append({**event, "end_confirmed": end_confirmed})
+    return result
+
+
+def calendar_query_end(group_state, now):
+    """Fetch enough of HA's finite calendar to see continuations after midnight."""
+    bounds = [now.timestamp() + 2 * 86400]
+    coverage = (group_state or {}).get("attributes", {}).get("schedule_coverage", [])
+    if isinstance(coverage, list):
+        for part in coverage:
+            end = parse_event_time(part.get("end")) if isinstance(part, dict) else None
+            if end:
+                bounds.append(end.timestamp())
+    return datetime.fromtimestamp(min(max(bounds), now.timestamp() + 8 * 86400), timezone.utc)
 
 
 def build_schedule_lines(
@@ -145,14 +265,8 @@ def next_planned_outage(
     now: datetime | None = None,
 ) -> tuple[datetime, datetime] | None:
     """Return the next future planned outage event."""
-    current = now or now_kyiv()
-    for event in events:
-        start_dt = parse_event_time(event.get("start", ""))
-        end_dt = parse_event_time(event.get("end", ""))
-        if start_dt is None or end_dt is None:
-            continue
-        if start_dt > current:
-            return start_dt, end_dt
+    for event in upcoming_schedule_events(events, now=now):
+        return parse_event_time(event["start"]), parse_event_time(event["end"])
     return None
 
 
@@ -162,12 +276,16 @@ def format_next_outage(
     header_group: str = "",
     group_labels: dict[str, str] | None = None,
     now: datetime | None = None,
+    group_state: dict | None = None,
+    groups: list[str] | None = None,
 ) -> str | None:
     """Format status/preview identically, retaining only necessary group labels."""
-    upcoming = next_planned_outage(events, now=now)
-    if upcoming is None:
+    events = upcoming_schedule_events(events, now=now, group_state=group_state, groups=groups)
+    if not events:
         return None
-    start, end = upcoming
+    first = events[0]
+    start, end = parse_event_time(first["start"]), parse_event_time(first["end"])
+    confirmed = first["end_confirmed"]
     groups = sorted(
         {
             event_group(event)
@@ -175,6 +293,7 @@ def format_next_outage(
             if event_group(event)
             and parse_event_time(event.get("start")) == start
             and parse_event_time(event.get("end")) == end
+            and event["end_confirmed"] == confirmed
         }
     )
     lines = []
@@ -186,5 +305,8 @@ def format_next_outage(
         lines.append("🔵 " + ", ".join(labels))
     start, end = start.astimezone(TZ_KYIV), end.astimezone(TZ_KYIV)
     end_label = end.strftime("%H:%M" if start.date() == end.date() else "%d.%m %H:%M")
-    lines.append(f"{start:%d.%m} — {start:%H:%M}–{end_label}")
+    lines.append(
+        f"{start:%d.%m} — {start:%H:%M}–{end_label}"
+        if confirmed else f"{start:%d.%m} — від {start:%H:%M}; завершення невідоме"
+    )
     return "\n".join(lines)

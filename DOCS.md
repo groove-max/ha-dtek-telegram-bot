@@ -246,6 +246,8 @@ voltage:
 
 | Evidence | Result |
 | --- | --- |
+| Fresh low/zero voltage + fresh inverter grid-loss signal | Confirmed outage after the loss delay. |
+| Low/zero voltage, inverter reports grid present or has no trustworthy reading | Unknown local power; no outage/recovery pair when voltage returns. |
 | Fresh inverter grid-loss signal + unavailable/frozen older ATORCH reading | Confirmed outage after confirmation and loss delays. Either event can arrive first. |
 | Grid-loss signal + a new positive voltage after that signal | Contradiction: the trigger cannot override the fresh voltage. |
 | ATORCH unavailable, inverter still reports grid present | Unknown local power; no false outage. |
@@ -269,7 +271,7 @@ Values in the examples are starting points for a source reporting roughly once a
 | `power.telemetry_notifications` | `false` | Separate data-loss/recovery notices. Status still updates when off. |
 | `power.telemetry_loss_delay` | 20 s | Delay before an optional data-loss notice. |
 
-Fresh low/zero voltage can establish absence. Missing, malformed, negative, non-finite, restored or stale readings cannot do so on their own. A 5-second watchdog checks silent expiry. Unchanged but newly reported values remain usable; repeated samples do not restart debounce. Unknown or contradictory evidence interrupts a pending transition.
+Fresh low/zero voltage can establish absence on its own in `voltage_only`. In `loss_plus_voltage`, whole-house loss also requires a fresh independent grid-loss signal; the loss delay starts only once both sources agree. Missing, malformed, negative, non-finite, restored or stale readings cannot establish absence on their own. A 5-second watchdog checks silent expiry. Unchanged but newly reported values remain usable; repeated samples do not restart debounce. Unknown or contradictory evidence interrupts a pending transition.
 
 With the two-signal example, allow about 15 + 10 seconds after receiving the independent loss signal, plus processing/watchdog time. Add the device's reporting interval to estimate latency from a physical outage. Do not confuse the freshness limit with the outage-confirmation delay.
 
@@ -306,12 +308,39 @@ Voltage recovery uses hysteresis: after low/high voltage, the value must move ba
 
 Schedules and local readings remain separate. During a DTEK failure, actual power detection can continue; saved schedules cannot drive automatic schedule/group/upcoming warnings.
 
+An outage continuing across midnight is treated as one event. Splitting or joining
+its calendar records, translating its title, or changing the timezone notation
+does not trigger another schedule update. Comparisons keep groups separate and
+use the same two-day range shown in the schedule message.
+
+An advance warning is sent once per group and start time. A revised end time does
+not restart the countdown notification; it appears in the pinned status and in a
+schedule-change message when that feature is enabled. A changed start or a
+different group remains a separate warning. Updating or restarting the app keeps
+previous delivery acknowledgements, including uncertain Telegram outcomes.
+
+With integration versions that supply publication coverage, the bot searches only
+through the continuously verified range for the selected group(s). If an event
+ends at that boundary, the warning and pinned status show that its end is unknown.
+For example, today's schedule ending at midnight does not promise restoration at
+00:00. These are scheduled times, never measurements of actual electricity.
+Older integrations without coverage metadata retain their existing behavior.
+Native timestamp sensors and the separate repair calendar do not automatically
+enable new notifications; the bot continues to use the building's outage calendar.
+
 <a id="templates"></a>
 ## Change message wording
 
 Open **Templates**, choose a template, preview it, edit and save an override. Reset removes the override and restores the built-in text. Sending a test publishes a real message only to the selected bot’s test chat. Configure it first; the button never uses the production chat as a fallback.
 
 Templates use Jinja. Available context is shown in the editor and depends on the message. For group presentation, `group`, `groups`, `selected_group`, `old_group`, `new_group` already respect hidden labels; `groups_public` indicates whether public group numbers exist.
+
+For `upcoming_outage`, `end_confirmed` tells whether the published schedule confirms
+the end of that interval. When false, `end` contains `невідомо` instead of a
+timestamp, so existing overrides do not receive a misleading midnight time.
+The built-in template shows a separate unknown-end line. In an override, use
+`{% if end_confirmed %}` to choose your own wording. Preview uses the same rules
+as live warnings.
 
 Keep separate lines for the heading, interval and explanatory notes. Jinja's whitespace trimming removes a newline after a block tag such as `{% endif %}`; preview the **rendered** text for all branches. An explicit `{{ '\n' }}` can preserve a required break.
 

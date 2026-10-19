@@ -16,6 +16,7 @@ This app uses [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) to o
 
 - Announces changes to outage schedules and address groups.
 - Warns before a planned outage; you choose how many minutes ahead.
+- Handles outages across midnight without duplicate warnings and marks unverified end times as unknown when the integration supplies publication coverage.
 - Relays DTEK's outage reasons and estimated restoration times.
 - Detects power loss/restoration from suitable local sensors, with delays to filter short dips.
 - Supports one phase or multiple voltage sensors, including partial outages.
@@ -98,6 +99,8 @@ For enforced test routing, set the app option `test_chat_id` to your private cha
 **One sensor is enough** if it keeps measuring and reporting the **grid input**, including zero, during an outage. Its gateway/network and HA also need to remain online. An inverter's backed-up output voltage does not tell you whether the external grid is present.
 
 With two sensors on the same feed, an explicit fresh “grid absent” reading from the inverter plus an unavailable/frozen ATORCH confirms an outage after the configured delays. Either event may arrive first. If only ATORCH disappears while the inverter still reports grid present, the result is unknown local power rather than a false outage.
+
+In this paired mode, low/zero voltage also needs fresh confirmation from the independent grid-loss sensor. If the inverter reports grid present, or its reading cannot be trusted, a zero voltage reading gives `unknown`. Returning to normal voltage then does not generate a false “power restored” message.
 
 Sensor reporting time adds to notification latency. A sensor reporting once per minute cannot reliably provide an alert seconds after the physical event. Choose freshness limits and delays using actual measurements. [Examples, timing and transition rules →](DOCS.md#power)
 
