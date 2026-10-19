@@ -2,6 +2,8 @@
 
 **English** · [Українська](README.uk.md)
 
+> **0.5.0-rc1 — release candidate.** Personal cabinet features require **DTEK Monitor 2.0.0-rc1**. [Upgrade and rollback](docs/UPGRADING.md).
+
 [![Add the app repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial-blue.svg)](LICENSE)
 
@@ -48,9 +50,9 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 
 Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a configured DTEK Monitor building address, a Telegram bot token and a target chat ID.
 
-**Bot 0.4.0 works with DTEK Monitor 1.7.0 and the optional 2.0.0b1 beta.** The two projects have independent version numbers. Updating the integration to 2.0 does not require a new bot version. [Compatibility and beta upgrade steps →](DOCS.md#dtek-monitor)
+**Bot 0.5.0-rc1** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Install **Monitor 2.0.0-rc1** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
 
-With Monitor 2.0, you can add an address directly or use the building linked to an Odesa personal account. The bot uses that building's public entities. Cabinet login, account numbers, meter readings and reading reminders belong to the integration; this bot does not send or manage them. A private Telegram chat still receives building notifications.
+**Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for an assigned private user. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md).
 
 **Several addresses, chats or bots? Use one installation.** Each address has its own notifications, sensors, group selection and Telegram bot profile. Keep the default bot or add another token once in **Telegram bots** and reuse that profile for several addresses. See [addresses, chats and bots](DOCS.md#destinations).
 
@@ -59,50 +61,50 @@ Home Assistant now calls add-ons **apps**; older installations show **Add-ons** 
 <a id="installation"></a>
 ## Install
 
-1. Install [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor#installation), add your address and verify its entities.
-2. Create a dedicated bot with [@BotFather](https://t.me/BotFather) using `/newbot`.
-3. Choose a destination: **just you** — open the bot and press **Start**; **group** — add the bot and allow messages; **channel** — add it as an administrator with posting/editing rights. Pinning in groups/channels requires the corresponding permission.
-4. Find the chat ID using the [Telegram setup guide](DOCS.md#telegram). A group/channel ID is usually a negative number; keep the minus sign.
-5. Open **Settings → Apps → Install app → ⋮ → Repositories**. On older versions: **Settings → Add-ons → Add-on Store → ⋮ → Repositories**.
-6. Add `https://github.com/groove-max/ha-dtek-telegram-bot` and install **DTEK Telegram Bot**. The button above opens the repository dialog for you.
-7. In the app's **Configuration** tab, enter `telegram_bot_token` and `telegram_chat_id`. Start the app and choose **Open web UI**.
+1. Install [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor#installation). Add an address for building schedules, or connect your cabinet for personal mode.
+2. Create a bot with [@BotFather](https://t.me/BotFather), using `/newbot`. Keep its token.
+3. Open **Settings → Apps → Install app → ⋮ → Repositories**. Older versions call this **Add-ons → Add-on Store**.
+4. Add `https://github.com/groove-max/ha-dtek-telegram-bot` and install **DTEK Telegram Bot**. Check version **0.5.0-rc1**. This repository currently offers a release candidate; upgrade a stable installation deliberately.
+5. In **Configuration**, enter `telegram_bot_token`. You can leave `telegram_chat_id` empty for now and choose a recipient in the editor. Start the app and choose **Open web UI**.
+6. Open your bot in Telegram and send `/start`. For a group, add the bot and send `/start@your_bot_username`; for a channel, make it an administrator with posting/editing rights. Group/channel pinning needs the corresponding permission.
+7. Follow the wizard below. On the **Telegram** step, press **Оновити (Refresh)** to select yourself or a chat. [If the list is empty](DOCS.md#telegram).
 
 You do not normally need to create a Home Assistant access token: the app uses Supervisor access automatically.
 
 <a id="setup"></a>
-## Configure your first address
+## Configure your first profile
 
 For personal use, a conversation with the bot is enough: no group or channel is needed. Before enabling a shared feed, test in your private chat or a small test group.
 
-1. In the web editor's **Налаштування** (Configure) tab, add an address from discovery. A new installation starts with an empty address list. Discovery selects the HA entity prefix; do not guess it from a street name.
-2. Set a recognizable display name. Leave the address's chat override empty to use the app's main chat.
-3. Leave **selected group** empty to follow all groups for the building, especially in a shared residents' chat. For personal notifications, choose a confirmed apartment group if needed. This is independent of the personal group selected in Monitor 2.0.
-4. Enable the notifications you need. For a first setup without local sensors, start with DTEK schedule/group updates and a pinned status.
-5. If using local power detection, choose a mode from the table below and select the voltage entities.
-6. Validate, then click **Зберегти й перезапустити** (Save and restart). Saving alone does not apply settings to the running features.
-7. Check diagnostics. Preview a template, then use **Send test** to confirm the destination and bot permissions. This sends a real, labeled test message.
+1. In **Налаштування**, choose **Додати профіль** (Add profile). The wizard starts with **Графіки за адресою** (address schedules) or **Особистий кабінет** (personal cabinet). Address schedules can also be sent privately; they do not require a shared chat.
+2. Select your building or connected cabinet account and give the profile a recognizable name. Leave the building's group empty to follow every address group. Personal profiles use the cabinet's groups.
+3. Choose a bot and recipient. Select a discovered chat/user or enter its ID. A personal cabinet requires an explicitly selected private owner; discovery never grants access automatically.
+4. Enable the notifications you need. Power sensors are optional; choose them using the guide below. Voltage display/quality alerts are separate from power detection.
+5. Review the destination and notifications, then press **Застосувати** (Apply). This validates, saves and restarts the app. Notifications start after the restart.
+6. Check **Поточний стан** (Current status). Optional template previews and test sends are under **Інструменти → Шаблони**. A test sends a real labeled message to the configured test destination.
+
+Each profile has its own card; **Налаштувати** opens one editor at a time. Drafts survive refreshes and navigation. Import/export, standalone validation and saving without restart are under **Додаткові дії**. Technical metrics and fallback HA credentials are no longer part of the first setup.
 
 **Success looks like:** HA is connected, your address and group are recognized, the test appears in the intended chat, and the status message can be edited. Local power may correctly show `unknown` when no fresh measurement is available.
 
-For enforced test routing, set the app option `test_chat_id` to your private chat, test group or channel before starting. It overrides every destination, including address overrides and template tests. See [isolated testing](DOCS.md#testing).
+For enforced test routing, set the app option `test_chat_id` to your private chat, test group or channel before starting. For building profiles, it overrides the destination. Personal profiles and their template tests accept only the authorized private user as a test destination. See [isolated testing](DOCS.md#testing).
 
 <a id="power-detection"></a>
 ## Choose how to detect power
 
-| Available equipment | Mode | What it can establish |
+| Available equipment | Choose | What it can establish |
 | --- | --- | --- |
-| No local sensor | `dtek_only` | The outage state reported by DTEK, which may lag behind reality. |
-| One backed-up grid-input voltage sensor | `voltage_only` | Power loss from fresh low/zero voltage and recovery from fresh positive voltage. |
-| One sensor that switches off with the grid | `voltage_only` | Fresh voltage while available; disappearance means `unknown`, not a proven outage. |
-| Backed-up grid-loss sensor + voltage meter such as ATORCH | `loss_plus_voltage` | Independent confirmation when the voltage meter becomes unavailable or freezes. |
+| No local sensor | DTEK only | DTEK's reported state; not a physical measurement. |
+| A ready HA binary status | HA sensors → that binary sensor | Explicit presence/absence; choose whether `on` or `off` means grid present. |
+| One backed-up voltage or frequency sensor | HA sensors → that measurement | Fresh numeric readings establish presence/absence. |
+| Two independent voltage/frequency/status sources on the same feed | HA sensors + optional confirmation | Matching evidence establishes power; disagreement means unknown. |
+| Backed-up input sensor + meter that powers off with the grid | HA sensors + “switches off with the grid” confirmation | An explicit primary loss plus the previously observed secondary going silent can confirm loss after the grace period. |
 
-**One sensor is enough** if it keeps measuring and reporting the **grid input**, including zero, during an outage. Its gateway/network and HA also need to remain online. An inverter's backed-up output voltage does not tell you whether the external grid is present.
+The primary sensor, its connection and HA must keep working during an outage. Measure the **grid input**, not a backed-up inverter output. A lone mains-powered sensor disappearing cannot prove an outage.
 
-With two sensors on the same feed, an explicit fresh “grid absent” reading from the inverter plus an unavailable/frozen ATORCH confirms an outage after the configured delays. Either event may arrive first. If only ATORCH disappears while the inverter still reports grid present, the result is unknown local power rather than a false outage.
+Select voltage display and quality warnings separately. For example, an authoritative binary status can drive outage notifications while a different voltage meter supplies the displayed voltage. Two redundant sensors on one line are not two phases. Existing `voltage_only` / `loss_plus_voltage` configurations and their multiphase behavior remain supported without automatic conversion.
 
-In this paired mode, low/zero voltage also needs fresh confirmation from the independent grid-loss sensor. If the inverter reports grid present, or its reading cannot be trusted, a zero voltage reading gives `unknown`. Returning to normal voltage then does not generate a false “power restored” message.
-
-Sensor reporting time adds to notification latency. A sensor reporting once per minute cannot reliably provide an alert seconds after the physical event. Choose freshness limits and delays using actual measurements. [Examples, timing and transition rules →](DOCS.md#power)
+[Sensor setup, examples, freshness and transition rules →](docs/POWER.md)
 
 Standalone telemetry-loss/recovery notices are **off by default** (`power.telemetry_notifications: false`). The pinned status still reflects missing data. Confirmed outage and recovery messages remain available.
 
@@ -123,9 +125,11 @@ Standalone telemetry-loss/recovery notices are **off by default** (`power.teleme
 | --- | --- |
 | Cannot find the app | Add this repository to the HA app store, not HACS. Check the installation method and CPU architecture. |
 | Address is missing from discovery | Check the building's entities and HA connection. With Monitor 2.0, verify the account's building link; the account itself is not a bot address. [Connection guide](DOCS.md#dtek-monitor). |
-| Monitor 1.7.0 says “Current schedule coverage is missing” during setup | This known integration issue can prevent entity creation. Monitor 2.0.0b1 fixes it; see [beta upgrade and rollback](DOCS.md#monitor-upgrade). |
+| Monitor 1.7.0 says “Current schedule coverage is missing” during setup | This known integration issue can prevent entity creation. Monitor 2.0.0b1 fixes it; see [upgrade and rollback](DOCS.md#monitor-upgrade). |
+| Recipient list is empty | Check **Receive commands**, send a new `/start` after startup, then refresh. Only new Telegram updates are discoverable. [Recipient guide](docs/PERSONAL.md#detected-telegram-recipients). |
+| Personal menu or history is unavailable | Install both RC versions, select your account and private user, Apply, then send `/start`. Check that the cabinet is connected in HA. |
 | No Telegram messages | Verify token, full chat ID and bot permissions; try a labeled template test and inspect the app log. |
-| Settings appear saved but behavior is unchanged | Use **Save and restart** and check the pending-restart indicator. |
+| Settings appear saved but behavior is unchanged | Use **Apply (Застосувати)** and check the pending-restart indicator. |
 | Power is `unknown` | Inspect the sensor's availability, reporting time and configured maximum age. A stale number does not prove power. |
 | Status posts keep appearing | Check `delivery_mode`; use `pinned_edit` and ensure the bot can edit its own message. |
 | Group is listed twice in a custom message | Reset that template to the current default, or update the override. Overrides survive app upgrades. |

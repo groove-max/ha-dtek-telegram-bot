@@ -17,33 +17,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Verify tag matches add-on version
-        shell: bash
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          CONFIG_VERSION="$(
-            grep '^version:' config.yaml \
-              | sed -E 's/version:[[:space:]]*\"?([^"]+)\"?/\1/'
-          )"
-
-          if [[ -z "${CONFIG_VERSION}" ]]; then
-            echo "Failed to read version from config.yaml"
-            exit 1
-          fi
-
-          echo "Tag version:    ${TAG_VERSION}"
-          echo "Config version: ${CONFIG_VERSION}"
-
-          if [[ "${TAG_VERSION}" != "${CONFIG_VERSION}" ]]; then
-            echo "Tag version does not match config.yaml version"
-            exit 1
-          fi
-
-      - name: Verify changelog contains this version
-        shell: bash
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          grep -F "## [${TAG_VERSION}]" CHANGELOG.md
+      - name: Verify tag and reviewed release notes
+        id: release
+        run: python scripts/release.py "$GITHUB_REF_NAME"
+    outputs:
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      version: ${{ steps.release.outputs.version }}
 
   validation:
     needs: verify-version
@@ -67,8 +46,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Prepare reviewed release notes
+        run: >-
+          python scripts/release.py "$GITHUB_REF_NAME" --notes release-notes.md
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          generate_release_notes: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          name: DTEK Telegram Bot ${{ needs.verify-version.outputs.version }}
+          body_path: release-notes.md
+          prerelease: ${{ needs.verify-version.outputs.prerelease == 'true' }}
+          make_latest: >-
+            ${{ needs.verify-version.outputs.prerelease == 'true'
+                && 'false' || 'true' }}

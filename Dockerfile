@@ -17,7 +17,7 @@ LABEL io.hass.name="DTEK Telegram Bot" \
 WORKDIR /app
 
 # hadolint ignore=DL3018
-RUN apk add --no-cache python3 py3-pip py3-virtualenv
+RUN apk add --no-cache python3 py3-pip py3-virtualenv font-dejavu
 
 COPY requirements.txt requirements.lock LICENSE NOTICE /app/
 RUN python3 -m venv /opt/venv \

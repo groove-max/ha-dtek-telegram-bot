@@ -11,6 +11,7 @@ from config import AddressConfig
 from ha_client import HAClient
 from state_store import StateStore
 from utils import now_kyiv, parse_condition
+from power_sources import PowerSources
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,9 @@ class PowerMonitor:
         self._config = config
         self._ha = ha
         self._state = state
-        self._prefix = config.entity_prefix
+        self._prefix = getattr(config, "key", config.entity_prefix)
         self._loss_fresh_after = getattr(ha, "connected_at", None) or now_kyiv()
+        self.sources = PowerSources(config.power, ha)
 
     async def get_power_state(self, *, prefer_stored: bool = True) -> str:
         """Return current house state: on, partial, or off."""
@@ -52,6 +54,9 @@ class PowerMonitor:
 
         if mode == "dtek_only":
             return await self._detect_dtek_power()
+
+        if mode == "sources":
+            return (await self.sources.snapshot())["state"]
 
         if mode in ("voltage_only", "loss_plus_voltage"):
             loss_met = (
@@ -89,7 +94,7 @@ class PowerMonitor:
 
     async def _detect_dtek_power(self) -> str:
         """Detect power state from the DTEK binary sensor."""
-        entity_id = f"binary_sensor.{self._prefix}_power"
+        entity_id = f"binary_sensor.{self._config.entity_prefix}_power"
         state = await self._ha.get_state(entity_id)
         value = str((state or {}).get("state", ""))
         return value if value in ("on", "off") else "unknown"

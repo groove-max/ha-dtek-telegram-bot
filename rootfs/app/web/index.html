@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DTEK Bot</title>
-    <link rel="stylesheet" href="./styles.css?v=20261017-ui" />
+    <link rel="stylesheet" href="./styles.css?v=20261019-setup" />
   </head>
   <body>
     <div class="page-shell">
@@ -20,31 +20,36 @@
         </div>
       </header>
 
-      <section class="stats-grid" id="stats-grid"></section>
 
       <nav class="tab-bar" id="tab-bar">
         <button class="tab-button active" type="button" data-tab="configure">Налаштування</button>
         <button class="tab-button" type="button" data-tab="bots">Telegram-боти</button>
-        <button class="tab-button" type="button" data-tab="templates">Шаблони</button>
         <button class="tab-button" type="button" data-tab="runtime">Поточний стан</button>
+        <details class="nav-tools"><summary>Інструменти</summary>
+        <button class="tab-button" type="button" data-tab="templates">Шаблони</button>
         <button class="tab-button" type="button" data-tab="discovery">Пошук</button>
         <button class="tab-button" type="button" data-tab="diagnostics">Діагностика</button>
+        </details>
       </nav>
 
       <main class="tab-shell">
         <section id="panel-configure" class="tab-panel">
           <section class="panel">
             <div class="panel-head">
-              <h2>Редактор</h2>
+              <h2>Ваші профілі</h2>
               <p>
-                Додайте адресу, оберіть датчики й перевірте налаштування.
-                Зміни застосовуються після збереження та перезапуску.
+                Налаштуйте повідомлення для будинку або особистого кабінету.
+                Датчики живлення можна додати за бажанням.
               </p>
             </div>
             <div class="editor-toolbar">
               <button id="add-address-button" class="secondary-button" type="button">
-                Додати адресу
+                Додати профіль
               </button>
+              <button id="save-restart-button" class="primary-button" type="button" title="Перевірити, зберегти та перезапустити застосунок">
+                Застосувати
+              </button>
+              <details class="editor-tools"><summary>Додаткові дії</summary><div class="tool-actions">
               <button id="import-config-button" class="secondary-button" type="button">
                 Імпортувати конфіг
               </button>
@@ -63,9 +68,7 @@
               <button id="save-button" class="secondary-button" type="button">
                 Зберегти конфіг
               </button>
-              <button id="save-restart-button" class="primary-button" type="button">
-                Зберегти і перезапустити
-              </button>
+              </div></details>
             </div>
             <p id="editor-status" class="status-message muted" role="status" aria-live="polite">Редактор завантажується…</p>
             <p id="editor-notices" class="status-message status-warn" role="status"></p>
@@ -83,6 +86,7 @@
                 Додаткового бота додайте тут, а потім оберіть для адреси. Один бот може обслуговувати кілька адрес.</p>
             </div>
             <div id="bot-list" class="stack"></div>
+            <div id="bot-form-home">
             <p id="bot-status" class="status-message muted" role="status" aria-live="polite"></p>
             <form id="bot-form" autocomplete="off">
               <fieldset id="bot-fields" class="editor-card">
@@ -93,15 +97,21 @@
                   <label class="field"><span>Токен від @BotFather</span>
                     <input id="bot-token" type="password" autocomplete="new-password" />
                     <small>При редагуванні залиште порожнім, щоб зберегти токен. Він не повертається у браузер і не потрапляє в експорт.</small></label>
+                </div>
+                <details id="bot-extra" class="bot-extra"><summary>Додатково: чат за замовчуванням і тестування</summary>
+                <div class="field-grid">
                   <label class="field"><span>Чат за замовчуванням</span>
                     <input id="bot-chat" type="text" />
+                    <select class="recipient-picker" data-target="#bot-chat" aria-label="Виявлені чати бота"><option value="">Виявлені одержувачі після запуску бота</option></select>
                     <small>Особистий чат, група або канал. Можна перевизначити для адреси.</small></label>
                   <label class="field"><span>Тестовий чат</span>
                     <input id="bot-test-chat" type="text" />
+                    <select class="recipient-picker" data-target="#bot-test-chat" aria-label="Виявлені тестові чати"><option value="">Виявлені одержувачі після запуску бота</option></select>
                     <small>Кнопка «Надіслати тест» використовує тільки цей чат.</small></label>
                 </div>
                 <label class="toggle"><input id="bot-test-mode" type="checkbox" /><span>Тестовий режим: усі повідомлення цього бота надсилати в тестовий чат</span></label>
                 <label class="toggle"><input id="bot-feedback" type="checkbox" /><span>Зберігати вхідні повідомлення тестового чату для діагностики (лише в тестовому режимі)</span></label>
+                </details>
                 <div class="editor-toolbar">
                   <button class="primary-button" type="submit">Перевірити токен і зберегти бота</button>
                   <button id="bot-new" class="secondary-button" type="button">Новий профіль</button>
@@ -109,8 +119,10 @@
                 </div>
               </fieldset>
             </form>
-            <p class="helper-copy">Профілі зберігаються окремо від адрес. Після зміни профілю оберіть «Зберегти і перезапустити» на вкладці «Налаштування».
+            </div>
+            <p class="helper-copy">Профілі зберігаються окремо від адрес. Після зміни профілю оберіть «Застосувати» на вкладці «Налаштування».
               Токен у незбереженій формі не відновлюється після закриття сторінки.</p>
+            <p class="helper-copy">Виявлені одержувачі з’являються після запуску бота: напишіть йому /start; у групі — /start@ім’я_бота; у каналі — додайте бота адміністратором або опублікуйте новий допис. Потім натисніть «Оновити». Telegram не надає повного списку чатів. На сервері з вимкненим прийманням команд нові одержувачі не виявляються. Основному боту можна обрати одержувача в профілі адреси.</p>
           </section>
         </section>
 
@@ -130,10 +142,11 @@
         </section>
 
         <section id="panel-runtime" class="tab-panel hidden">
+          <section class="stats-grid" id="stats-grid"></section>
           <section class="panel">
             <div class="panel-head">
               <h2>Налаштовані адреси</h2>
-              <p>Поточні профілі, увімкнені функції та живі значення entity.</p>
+              <p>Поточні профілі, увімкнені функції та поточні показання датчиків.</p>
             </div>
             <div id="addresses-list" class="stack"></div>
           </section>
@@ -164,6 +177,11 @@
       </main>
     </div>
 
-    <script type="module" src="./app.js?v=20261017-ui"></script>
+    <script type="module" src="./app.js?v=20261019-setup"></script>
+    <dialog id="bot-dialog" aria-labelledby="bot-dialog-title">
+      <div class="panel-head"><h2 id="bot-dialog-title">Підключити Telegram-бота</h2><button id="bot-dialog-close" type="button" class="secondary-button">Повернутися до профілю</button></div>
+      <p class="helper-copy">Створіть бота в @BotFather та вставте токен. Після перевірки бот буде обраний для цього профілю. Для пошуку одержувачів запустіть збережені налаштування на кроці Telegram.</p>
+      <div class="bot-dialog-body"></div>
+    </dialog>
   </body>
 </html>

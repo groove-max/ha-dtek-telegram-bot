@@ -55,3 +55,11 @@ Use a separate HA/test destination and keep production notification delivery dis
 - Do not commit credentials, private diagnostics, caches, virtual environments or `graphify-out/` artifacts.
 
 Contributions must be your own work or compatible with this project’s [license](LICENSE). Submit contributions under PolyForm Noncommercial 1.0.0 and preserve third-party notices.
+
+
+Personal conversation tests use synthetic Telegram updates and mocked account operations. Do not submit real DTEK readings or send to working chats in automated tests. PNG tests require DejaVu Sans (`fonts-dejavu-core` on Debian/Ubuntu, `font-dejavu` in the runtime image). Keep cabinet authorization checks and irreversible confirmation tests when changing the conversation flow.
+
+
+## Release verification
+
+`python scripts/release.py v0.5.0-rc1` checks the tag, `config.yaml` and dated changelog notes. CI publishes only after tests, validation and amd64/aarch64 builds pass. Prereleases do not replace GitHub’s latest stable release.

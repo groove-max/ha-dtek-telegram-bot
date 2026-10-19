@@ -140,7 +140,7 @@ def parse_condition(condition_str: str, value: Any) -> bool:
     """
     condition_str = condition_str.strip()
 
-    if condition_str.lower() in ("unavailable", "unknown", "none"):
+    if condition_str.lower() in ("unavailable", "unknown", "none", "on", "off"):
         return str(value).lower() == condition_str.lower()
 
     match = _CONDITION_RE.match(condition_str)

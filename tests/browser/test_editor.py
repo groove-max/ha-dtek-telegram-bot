@@ -60,12 +60,25 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.failures = {}
         self.malformed = {}
         self.ticks = 0
+        self.candidates = []
+        self.accounts = []
         await self.context.route("**/*", self.route)
         await self.page.clock.install()
         await self.page.goto("http://dtek-ui.test/ingress/instance-a/")
         await expect(self.page.locator(".addr-display-name").first).to_have_value(
             "Будинок A"
         )
+        await self.page.locator('[data-action="edit-profile"]').first.click()
+        # Regression scenarios use the explicit expanded view; dedicated setup
+        # tests below exercise the default step-by-step experience.
+        await self.page.locator('[data-action="show-all"]').first.click()
+        await self.page.locator('.profile-actions > summary').first.click()
+        await self.page.locator('.power-compatibility').first.evaluate("el => el.open = true")
+        await self.page.locator("#bot-extra").evaluate("el => el.open = true")
+        # Existing regression scenarios exercise the optional tools too.
+        await self.page.locator('.editor-tools > summary').click()
+        await self.page.locator('.nav-tools > summary').click()
+        await self.page.locator('.global-settings > summary').click()
 
     async def asyncTearDown(self):
         for gate in self.gates.values():
@@ -138,8 +151,11 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         elif endpoint == "discovery":
             payload = {
                 "ha_connected": True,
-                "candidates": [],
+                "candidates": self.candidates,
+                "accounts": self.accounts,
                 "catalog": {
+                    "binary_power": [{"entity_id": "binary_sensor.city_grid", "friendly_name": "Міська мережа", "state": "on"}],
+                    "frequency_sensors": [{"entity_id": "sensor.grid_hz", "friendly_name": "Частота входу", "state": "50", "unit": "Hz"}],
                     "voltage_sensors": [
                         {
                             "entity_id": "sensor.demo_voltage",
@@ -159,6 +175,8 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             self.bot_profiles["revision"] = "bots-2"
             self.bot_profiles["restart_required"] = True
             payload = {**copy.deepcopy(self.bot_profiles), "profile": profile}
+        elif endpoint == "bots/activate":
+            payload = {"restart_scheduled": True}
         elif endpoint == "bots/delete":
             self.bot_profiles["profiles"] = [p for p in self.bot_profiles["profiles"] if p["id"] != body["id"]]
             self.bot_profiles["revision"] = "bots-3"
@@ -239,7 +257,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.refresh()
         await expect(self.page.locator(".addr-bot-id").first).to_have_value("bot_654321")
         await self.page.locator("#save-button").click()
-        await expect(self.page.locator("#editor-status")).to_contain_text("Конфіг збережено")
+        await expect(self.page.locator("#editor-status")).to_contain_text("Налаштування збережено")
         self.assertEqual(self.config["addresses"][0]["telegram_bot_id"], "bot_654321")
         self.assertNotIn("PRIVATE_TEST_TOKEN", json.dumps(self.config))
         async with self.page.expect_download() as info:
@@ -276,7 +294,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await field.fill("Моя чернетка")
         await self.page.locator("#validate-button").click()
         await expect(self.page.locator("#editor-status")).to_contain_text(
-            "Конфіг валідний"
+            "Налаштування перевірено"
         )
         ticks = self.ticks
         await self.page.clock.run_for(15001)
@@ -312,7 +330,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await expect(field).to_have_value("Після запиту")
         await self.page.locator("#save-button").click()
         await expect(self.page.locator("#editor-status")).to_contain_text(
-            "Конфіг збережено"
+            "Налаштування збережено"
         )
         saves = [body for endpoint, body in self.calls if endpoint == "config/save"]
         self.assertEqual([body["expected_revision"] for body in saves], ["1", "2"])
@@ -325,7 +343,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.page.locator(".addr-display-name").first.fill("Збережено")
         await self.page.locator("#save-button").click()
         await expect(self.page.locator("#editor-status")).to_contain_text(
-            "Конфіг збережено"
+            "Налаштування збережено"
         )
         gate.set()
         await expect(self.page.locator("#refresh-button")).to_be_enabled()
@@ -535,6 +553,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await expect(card.locator(".voltage-entity-label")).to_have_value(
             "Мітка в процесі"
         )
+        await card.locator('[data-action="edit-profile"]').click()
         await card.locator('[data-action="add-entity-item"]').click()
         await expect(card.locator(".selected-entity-item")).to_contain_text(
             "Мітка в процесі"
@@ -648,7 +667,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await expect(head).to_have_attribute("aria-expanded", "false")
 
     async def test_expanded_sensor_forms_fit_mobile_and_sidebar_widths(self):
-        for head in await self.page.locator(".subpanel-head").all():
+        for head in await self.page.locator(".subpanel-head:visible").all():
             await head.click(position={"x": 5, "y": 5})
         card = self.page.locator(".address-editor-card").first
         await card.locator(".power-enabled").check()
@@ -714,3 +733,290 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         gate.set()
         await self.refresh()
         await expect(field).to_have_value("Без відповіді")
+
+    async def test_personal_fields_survive_refresh_and_switch_without_replacing_draft(self):
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.addr-mode').select_option('personal')
+        await form.locator('.addr-user-id').fill('123456789')
+        await form.locator('.addr-allow-readings').check()
+        await expect(form.locator('.addr-entity-prefix')).to_be_hidden()
+        await self.refresh()
+        await expect(form.locator('.addr-user-id')).to_have_value('123456789')
+        await expect(form.locator('.addr-allow-readings')).to_be_checked()
+        await form.locator('.addr-mode').select_option('building')
+        await expect(form.locator('.addr-entity-prefix')).to_be_visible()
+        await expect(form.locator('.addr-entity-prefix')).to_have_value('demo_a')
+        await form.locator('.addr-mode').select_option('personal')
+        await expect(form.locator('.addr-user-id')).to_have_value('123456789')
+        for width in (360, 768, 1366):
+            await self.page.set_viewport_size({"width": width, "height": 900})
+            self.assertTrue(await self.page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"))
+        self.assertEqual(self.errors, [])
+
+    async def test_welcome_preference_is_saved_and_clone_has_independent_identity(self):
+        await self.page.locator('#cfg-welcome').uncheck()
+        await self.page.locator('#cfg-receive-commands').uncheck()
+        await self.page.locator('#save-button').click()
+        await self.wait_started('config/save')
+        body = next(body for endpoint, body in reversed(self.calls) if endpoint == 'config/save')
+        self.assertIs(body['config']['welcome_enabled'], False)
+        self.assertIs(body['config']['receive_commands'], False)
+        await self.page.locator('[data-action="clone-address"]').first.click()
+        profiles = self.page.locator('.address-editor-card')
+        a = await profiles.nth(0).get_attribute('data-profile-id')
+        b = await profiles.nth(1).get_attribute('data-profile-id')
+        self.assertNotEqual(a,b)
+        self.assertTrue(b)
+        self.assertEqual(self.errors, [])
+
+    async def test_recipient_selection_is_scoped_and_refresh_never_replaces_typed_id(self):
+        self.bot_profiles["profiles"].append({"id": "bot_2", "name": "Second bot"})
+        self.bot_profiles["recipients"] = {
+            "default": [
+                {"id": "123", "type": "private", "name": "User <img src=x>", "username": "person", "available": True},
+                {"id": "-1001", "type": "channel", "name": "House", "available": True},
+                {"id": "456", "type": "private", "name": "Blocked", "available": False},
+            ],
+            "bot_2": [{"id": "789", "type": "private", "name": "Second user", "available": True}],
+        }
+        await self.refresh()
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.addr-mode').select_option('personal')
+        await form.locator('.addr-user-id').fill('999')
+        await self.refresh()
+        picker = form.locator('.recipient-picker[data-private-only="true"]')
+        await expect(form.locator('.addr-user-id')).to_have_value('999')
+        await expect(picker.locator('option[value="-1001"]')).to_have_count(0)
+        await expect(picker.locator('option[value="456"]')).to_have_attribute('disabled', '')
+        await expect(form.locator('img')).to_have_count(0)
+        await picker.select_option('123')
+        await expect(form.locator('.addr-user-id')).to_have_value('123')
+        await form.locator('.addr-bot-id').select_option('bot_2')
+        await expect(picker.locator('option[value="123"]')).to_have_count(0)
+        await expect(picker.locator('option[value="789"]')).to_have_count(1)
+        await expect(form.locator('.addr-user-id')).to_have_value('123')
+        await picker.select_option('789')
+        await self.refresh()
+        await expect(form.locator('.addr-user-id')).to_have_value('789')
+        await form.locator('.addr-mode').select_option('building')
+        await form.locator('.addr-bot-id').select_option('default')
+        await form.locator('.recipient-picker[data-target=".addr-chat-id"]').select_option('-1001')
+        await expect(form.locator('.addr-chat-id')).to_have_value('-1001')
+        for width in (360, 768):
+            await self.page.set_viewport_size({"width": width, "height": 900})
+            self.assertTrue(await self.page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"))
+
+    async def test_bot_recipient_options_do_not_reuse_another_tokens_directory(self):
+        self.bot_profiles["profiles"].append({"id": "bot_2", "name": "Second bot", "chat_id": ""})
+        self.bot_profiles["recipients"] = {"bot_2": [{"id": "-1002", "type": "channel", "name": "Second channel", "available": True}]}
+        await self.refresh()
+        await self.page.locator('[data-tab="bots"]').click()
+        await self.page.locator('[data-edit-bot="bot_2"]').click()
+        picker = self.page.locator('.recipient-picker[data-target="#bot-chat"]')
+        await picker.select_option('-1002')
+        await expect(self.page.locator('#bot-chat')).to_have_value('-1002')
+        await self.page.locator('#bot-token').fill('777:NEW_TEST_TOKEN')
+        await expect(picker.locator('option[value="-1002"]')).to_have_count(0)
+        await self.refresh()
+        await expect(self.page.locator('#bot-chat')).to_have_value('-1002')
+        await expect(self.page.locator('#bot-token')).to_have_value('777:NEW_TEST_TOKEN')
+
+    async def test_generic_power_binary_is_saved_without_quality_sensor(self):
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.power-enabled').check()
+        await form.locator('.power-mode').select_option('sources')
+        row = form.locator('.power-source').first
+        await row.locator('.source-entity').select_option('binary_sensor.city_grid')
+        await row.locator('.source-present-state').select_option('off')
+        await self.refresh()
+        await expect(row.locator('.source-present-state')).to_have_value('off')
+        await self.page.locator('#save-button').click()
+        await self.wait_started('config/save')
+        data = next(body['config']['addresses'][0] for endpoint, body in reversed(self.calls) if endpoint=='config/save')
+        model = AddressConfig.model_validate(data)
+        self.assertEqual(model.power.mode, 'sources')
+        self.assertEqual(model.power.sources[0].kind, 'binary')
+        self.assertEqual(model.power.sources[0].freshness, 'state')
+        self.assertEqual(model.power.sources[0].present_state, 'off')
+        self.assertEqual(model.voltage.entities, [])
+
+    async def test_generic_pair_infers_units_and_keeps_advanced_draft(self):
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.power-enabled').check()
+        await form.locator('.power-mode').select_option('sources')
+        first, second = form.locator('.power-source').nth(0), form.locator('.power-source').nth(1)
+        await first.locator('.source-entity').select_option('sensor.grid_hz')
+        await second.locator('.source-entity').select_option('sensor.demo_voltage')
+        await second.locator('.source-availability').select_option('mains_powered')
+        await first.locator('summary').click()
+        await first.locator('.source-max-age').fill('75')
+        await first.locator('.source-threshold').fill('2.5')
+        await self.refresh()
+        await expect(first.locator('.source-max-age')).to_have_value('75')
+        await expect(first.locator('.source-threshold')).to_have_value('2.5')
+        await expect(second.locator('.source-kind')).to_have_value('voltage')
+        await expect(second.locator('.source-threshold')).to_have_value('50')
+        await self.page.locator('#validate-button').click()
+        await self.wait_started('config/validate')
+        data = next(body['config']['addresses'][0] for endpoint, body in reversed(self.calls) if endpoint=='config/validate')
+        model=AddressConfig.model_validate(data)
+        self.assertEqual([s.kind for s in model.power.sources], ['frequency','voltage'])
+        self.assertEqual(model.power.sources[0].max_age_seconds,75)
+        self.assertEqual(model.power.sources[1].availability,'mains_powered')
+        for width in (320, 375, 768, 1440):
+            await self.page.set_viewport_size({'width':width,'height':900})
+            self.assertTrue(await self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+
+    async def test_new_profile_wizard_preserves_navigation_reload_and_applies_explicitly(self):
+        self.candidates=[{'entity_prefix':'new_house','friendly_name':'Новий будинок','entities':{}}]
+        await self.refresh()
+        await self.page.locator('#add-address-button').click()
+        form=self.page.locator('.wizard-profile')
+        await expect(form.locator('.addr-entity-prefix')).to_have_value('new_house')
+        await form.locator('.addr-display-name').fill('Мій профіль')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('.addr-chat-id').fill('555123')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('.feature-emergency').uncheck()
+        await self.page.reload()
+        form=self.page.locator('.wizard-profile')
+        await expect(form.locator('[data-stage="2"]')).to_be_visible()
+        await expect(form.locator('.feature-emergency')).not_to_be_checked()
+        await form.locator('[data-action="wizard-back"]').click()
+        await expect(form.locator('.addr-chat-id')).to_have_value('555123')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('[data-action="wizard-next"]').click()
+        await expect(form.locator('[data-stage="3"]')).to_contain_text('555123')
+        self.assertFalse(any(e=='config/save' for e,_ in self.calls))
+        await form.locator('[data-action="wizard-apply"]').click()
+        await self.wait_started('config/save')
+        data=next(b for e,b in reversed(self.calls) if e=='config/save')
+        self.assertTrue(data['restart'])
+        model=AddressConfig.model_validate(data['config']['addresses'][-1])
+        self.assertEqual(model.display_name,'Мій профіль')
+        self.assertFalse(model.emergency.enabled)
+        self.assertTrue(model.profile_id)
+
+    async def test_personal_wizard_requires_explicit_owner_even_with_discovered_recipient(self):
+        self.accounts=[{'entity_id':'sensor.example_account','masked':'••••1234','address':'Приклад адреси'}]
+        await self.refresh()
+        await self.page.locator('#add-address-button').click()
+        form=self.page.locator('.wizard-profile')
+        await form.locator('.addr-mode').select_option('personal')
+        await form.locator('.addr-account').select_option('sensor.example_account')
+        await form.locator('[data-action="wizard-next"]').click()
+        await expect(form.locator('.addr-user-id')).to_have_value('')
+        await form.locator('[data-action="wizard-step"][data-step="3"]').click()
+        await expect(form.locator('[data-stage="1"]')).to_be_visible()
+        await form.locator('.addr-user-id').fill('123456')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('[data-action="wizard-next"]').click()
+        await expect(form.locator('[data-stage="3"]')).to_contain_text('123456')
+        self.assertFalse(any(e=='config/save' for e,_ in self.calls))
+
+    async def test_switching_profiles_keeps_unsaved_fields_and_only_one_editor(self):
+        first,second=self.page.locator('.address-editor-card').nth(0),self.page.locator('.address-editor-card').nth(1)
+        await first.locator('.addr-display-name').fill('Чернетка першого')
+        await second.locator('[data-action="edit-profile"]').click()
+        await expect(first.locator('.profile-editor')).to_be_hidden()
+        await second.locator('.addr-display-name').fill('Чернетка другого')
+        await self.refresh()
+        await first.locator('[data-action="edit-profile"]').click()
+        await expect(first.locator('.addr-display-name')).to_have_value('Чернетка першого')
+        await expect(second.locator('.addr-display-name')).to_have_value('Чернетка другого')
+        await expect(self.page.locator('.profile-editor:visible')).to_have_count(1)
+
+    async def test_existing_profile_has_same_steps_and_keeps_edits_across_navigation(self):
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('[data-action="show-all"]').click()
+        await expect(form.locator('[data-stage="0"]')).to_be_visible()
+        await expect(form.locator('[data-stage="1"]')).to_be_hidden()
+        await form.locator('.addr-display-name').fill('Назва в чернетці')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('.addr-chat-id').fill('567890')
+        await form.locator('[data-action="wizard-step"][data-step="3"]').click()
+        await expect(form.locator('.profile-review')).to_contain_text('567890')
+        await self.refresh()
+        await self.page.reload()
+        await self.page.locator('[data-action="edit-profile"]').first.click()
+        await expect(form.locator('[data-stage="3"]')).to_be_visible()
+        await form.locator('[data-action="wizard-step"][data-step="0"]').click()
+        await expect(form.locator('.addr-display-name')).to_have_value('Назва в чернетці')
+        self.assertFalse(any(e == 'config/save' for e,_ in self.calls))
+
+    async def test_inline_bot_onboarding_keeps_incomplete_profile_and_token_private(self):
+        self.candidates=[{'entity_prefix':'demo_a','friendly_name':'Будинок A','entities':{}}]
+        await self.refresh()
+        await self.page.locator('#add-address-button').click()
+        form = self.page.locator('.wizard-profile')
+        await form.locator('.addr-entity-prefix').select_option('demo_a')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('[data-action="connect-bot"]').click()
+        await self.page.locator('#bot-name').fill('Новий бот')
+        await self.page.locator('#bot-token').fill('654321:secret-for-browser-test')
+        await self.refresh_via_poll()
+        await expect(self.page.locator('#bot-token')).to_have_value('654321:secret-for-browser-test')
+        await self.page.locator('#bot-form button[type="submit"]').click()
+        await expect(self.page.locator('#bot-dialog')).not_to_be_visible()
+        await expect(form.locator('.addr-bot-id')).to_have_value('bot_654321')
+        await expect(form.locator('.telegram-progress')).to_contain_text('збережений')
+        await form.locator('[data-action="activate-bots"]').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('чернетку не застосовано')
+        self.assertFalse(any(e == 'config/save' for e,_ in self.calls))
+        self.assertNotIn('secret-for-browser-test', await self.page.evaluate('JSON.stringify(sessionStorage)'))
+        self.bot_profiles.update(restart_required=False, receiving=True,
+            runtime=[{'id':'bot_654321','ready':True}],
+            recipients={'bot_654321':[{'id':'567890','type':'private','name':'Власник тесту','available':True}]})
+        await form.locator('[data-action="refresh-recipients"]').click()
+        await expect(form.locator('.recipient-picker[data-target=".addr-chat-id"] option')).to_have_count(2)
+        await form.locator('.recipient-picker[data-target=".addr-chat-id"]').select_option('567890')
+        await expect(form.locator('.profile-summary')).to_contain_text('Власник тесту')
+        await form.locator('[data-action="wizard-step"][data-step="3"]').click()
+        await expect(form.locator('.profile-review')).to_contain_text('Новий бот')
+        await expect(form.locator('.profile-review')).to_contain_text('Власник тесту')
+
+    async def refresh_via_poll(self):
+        await self.page.clock.run_for(15001)
+        await expect(self.page.locator('#refresh-button')).to_be_enabled()
+
+    async def test_personal_review_names_owner_sensors_and_confirmation(self):
+        self.accounts=[{'entity_id':'sensor.test_account','masked':'••••1234','address':'Тестова адреса'}]
+        self.bot_profiles['recipients']={'default':[{'id':'678901','name':'Ірина','type':'private','available':True}]}
+        await self.refresh()
+        await self.page.locator('#add-address-button').click()
+        form=self.page.locator('.wizard-profile')
+        await form.locator('.addr-mode').select_option('personal')
+        await form.locator('.addr-account').select_option('sensor.test_account')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('.recipient-picker[data-target=".addr-user-id"]').select_option('678901')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('.addr-allow-readings').check()
+        await form.locator('.power-enabled').check()
+        await form.locator('.source-entity').first.select_option('binary_sensor.city_grid')
+        await form.locator('[data-action="wizard-next"]').click()
+        review=form.locator('.profile-review')
+        for text in ('••••1234', 'Ірина', '678901', 'Міська мережа', 'окремого підтвердження'):
+            await expect(review).to_contain_text(text)
+        await expect(review).not_to_contain_text('undefined')
+        for width in (320,375,768,1440):
+            await self.page.set_viewport_size({'width':width,'height':900})
+            self.assertTrue(await self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+
+    async def test_summary_refreshes_recipient_while_preserving_focused_draft(self):
+        form=self.page.locator('.address-editor-card').first
+        await form.locator('.addr-chat-id').fill('456789')
+        await form.locator('.addr-display-name').fill('Незбережена назва')
+        self.bot_profiles['recipients']={'default':[{'id':'456789','type':'private','name':'Олена','available':True}]}
+        await self.refresh_via_poll()
+        await expect(form.locator('.profile-summary')).to_contain_text('Олена')
+        await expect(form.locator('.addr-display-name')).to_have_value('Незбережена назва')
+        await expect(form.locator('.addr-display-name')).to_be_focused()
+
+    async def test_unsaved_bot_token_blocks_apply_instead_of_silently_ignoring_it(self):
+        await self.page.locator('[data-tab="bots"]').click()
+        await self.page.locator('#bot-name').fill('Не збережено')
+        await self.page.locator('#bot-token').fill('123456:do-not-ignore')
+        await self.page.locator('[data-tab="configure"]').click()
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Токен ще не збережений')
+        self.assertFalse(any(e == 'config/save' for e,_ in self.calls))

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from outage_calendar import canonical_warning_key
+from telegram_directory import RecipientDirectory
 
 
 class DeliveryJournal:
@@ -21,6 +22,7 @@ class DeliveryJournal:
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS interactions (key TEXT PRIMARY KEY, expires REAL, created REAL);
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY, at TEXT DEFAULT CURRENT_TIMESTAMP,
                 direction TEXT, action TEXT, chat_id TEXT, message_id INTEGER,
@@ -37,6 +39,7 @@ class DeliveryJournal:
         self.db.execute("UPDATE deliveries SET status='unknown' WHERE status='pending'")
         self._migrate_upcoming_deliveries()
         self.db.commit()
+        self.recipients = RecipientDirectory(self.db)
 
     def _migrate_upcoming_deliveries(self) -> None:
         """Preserve sent/ambiguous outcomes when warnings stop including end times.
@@ -203,7 +206,7 @@ class DeliveryJournal:
                     "edited_channel_post",
                 ):
                     msg = payload.get(kind) or {}
-                    if str(msg.get("chat", {}).get("id", "")) == str(allowed_chat):
+                    if allowed_chat and msg and str(msg.get("chat", {}).get("id", "")) == str(allowed_chat):
                         self.db.execute(
                             "INSERT INTO events(direction,action,chat_id,message_id,status,payload) VALUES('in',?,?,?,'received',?)",
                             (
@@ -229,6 +232,21 @@ class DeliveryJournal:
         self.db.execute(
             "DELETE FROM owned_messages WHERE rowid < (SELECT MAX(rowid)-10000 FROM owned_messages)"
         )
+
+    def claim_interaction(self, key: str, seconds: float, *, limit=None) -> bool:
+        """Persist a bounded cooldown before sending; never replay after a crash."""
+        import time
+        now = time.time()
+        with self.db:
+            self.db.execute("DELETE FROM interactions WHERE expires <= ?", (now,))
+            if self.db.execute("SELECT 1 FROM interactions WHERE key=?", (key,)).fetchone():
+                return False
+            if limit is not None and self.db.execute("SELECT COUNT(*) FROM interactions WHERE key LIKE 'welcome:%' AND created>?", (now-60,)).fetchone()[0] >= limit:
+                return False
+            if self.db.execute("SELECT COUNT(*) FROM interactions").fetchone()[0] >= 10000:
+                return False
+            self.db.execute("INSERT INTO interactions VALUES(?,?,?)", (key, now+seconds, now))
+        return True
 
     def close(self) -> None:
         self.db.close()

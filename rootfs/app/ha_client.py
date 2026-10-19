@@ -311,6 +311,13 @@ class HAClient:
         finally:
             self._pending.pop(msg_id, None)
 
+    async def command(self, kind: str, **data):
+        """Checked integration API result; upstream text is never logged."""
+        response = await self._send_command({"type": kind, **data})
+        if response.get("success") is not True:
+            raise HACommandError(response.get("error", {}).get("code", "unavailable"))
+        return response.get("result")
+
     async def get_state(self, entity_id: str) -> dict[str, Any] | None:
         """Get current state of an entity via REST API."""
         await self.wait_connected()
@@ -385,3 +392,9 @@ class HAClient:
 
         result = await self._send_command(payload)
         return result
+
+
+class HACommandError(RuntimeError):
+    def __init__(self, code):
+        self.code = str(code)
+        super().__init__(self.code)

@@ -10,6 +10,7 @@ import fcntl
 from pathlib import Path
 from contextlib import suppress
 from delivery_journal import DeliveryJournal
+from dialogue_screens import DialogueScreens
 from collections.abc import Awaitable, Callable
 from typing import Literal, TypeVar
 
@@ -43,6 +44,16 @@ class TelegramService:
         self.journal = journal
         self._feedback_task = None
         self._feedback_lock = None
+        self._screens = None
+
+    async def replace_menu(self, chat, operation):
+        if self._test_chat_id and str(chat) != self._test_chat_id:
+            raise ValueError("Menu destination differs from the test recipient")
+        if not self.journal:
+            raise RuntimeError("Menu cleanup requires persistent message ownership")
+        if self._screens is None:
+            self._screens = DialogueScreens(self.journal.db, self._bot)
+        return await self._screens.replace(chat, operation)
 
     @property
     def default_chat_id(self) -> str:
@@ -109,42 +120,51 @@ class TelegramService:
     async def start_feedback(self, lock_path: Path) -> None:
         if not self._test_chat_id or not self.journal:
             raise ValueError("Feedback requires an isolated test target and journal")
-        self._feedback_lock = lock_path.open("a")
-        fcntl.flock(self._feedback_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        webhook = await self._bot.get_webhook_info()
-        if webhook.url:
-            raise RuntimeError(
-                "Feedback cannot start while a Telegram webhook is configured"
-            )
+        await self.start_updates(lock_path, feedback=True)
+
+    async def start_updates(self, lock_path: Path, handler=None, *, feedback=False):
+        if self._feedback_task is not None or not self.journal:
+            raise RuntimeError("Only one update consumer is allowed per bot")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock = lock_path.open("a")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            webhook = await self._bot.get_webhook_info()
+            if webhook.url:
+                raise RuntimeError("A Telegram webhook is already configured")
+        except BaseException:
+            lock.close()
+            raise
+        self._feedback_lock = lock
+        self._incoming_handler = handler
+        self._capture_feedback = feedback
         self._feedback_task = asyncio.create_task(self._poll_feedback())
 
     async def _poll_feedback(self):
         while True:
             try:
                 updates = await self._bot.get_updates(
-                    offset=self.journal.offset,
-                    timeout=30,
-                    allowed_updates=[
-                        "message",
-                        "edited_message",
-                        "channel_post",
-                        "edited_channel_post",
-                    ],
+                    offset=self.journal.offset, timeout=30,
+                    allowed_updates=["message", "callback_query", "edited_message", "channel_post", "edited_channel_post", "my_chat_member"],
                 )
                 for update in updates:
-                    self.journal.ingest(
-                        update.update_id,
-                        update.model_dump(mode="json", exclude_none=True),
-                        self._test_chat_id,
-                    )
+                    if update.update_id < self.journal.offset:
+                        continue
+                    # Commit before executing commands: a crash cannot replay a write.
+                    self.journal.ingest(update.update_id, update.model_dump(mode="json", exclude_none=True, by_alias=True),
+                                        self._test_chat_id if getattr(self, "_capture_feedback", False) else "")
+                    self.journal.recipients.observe(update.model_dump(mode="json", exclude_none=True, by_alias=True), self._bot.id)
+                    if getattr(self, "_incoming_handler", None):
+                        try:
+                            await self._incoming_handler(update)
+                        except Exception as exc:
+                            logger.warning("Telegram command failed: %s", type(exc).__name__)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("Telegram feedback failed: %s", type(exc).__name__)
+                logger.warning("Telegram incoming updates failed: %s", type(exc).__name__)
                 if type(exc).__name__ == "TelegramConflictError":
-                    logger.error(
-                        "Feedback stopped: another Telegram consumer is active"
-                    )
+                    self.last_error = "TelegramConflictError"
                     return
                 await asyncio.sleep(5)
 

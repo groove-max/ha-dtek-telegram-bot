@@ -205,3 +205,28 @@ class ScheduleFreshnessTests(unittest.IsolatedAsyncioTestCase):
         attrs['schedule_coverage'][0]['end']=(day+timedelta(days=2)).isoformat()
         await f.on_tick()
         self.assertEqual(len(self.telegram.messages),1)
+
+
+class AssignmentWithoutScheduleTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp = ScheduleFreshnessTests.asyncSetUp
+    set_state = ScheduleFreshnessTests.set_state
+
+    async def test_verified_group_change_is_sent_without_all_clear_claim(self):
+        self.set_state(ready=False, group="GPV3.1")
+        self.feature.state_set("notified_groups", ["GPV5.1"])
+        await self.feature.on_tick()
+        self.assertEqual(len(self.telegram.messages), 1)
+        self.assertEqual(self.feature.state_get("notified_groups"), ["GPV3.1"])
+        self.assertNotIn("немає", self.telegram.messages[0])
+        self.assertFalse(self.feature.state_get("schedule_signature"))
+
+    async def test_assignment_change_during_save_blocks_old_notice(self):
+        self.set_state(ready=False, group="GPV3.1")
+        self.feature.state_set("notified_groups", ["GPV5.1"])
+        async def save():
+            self.set_state(ready=False, group="GPV4.1")
+        self.state.save = save
+        with self.assertRaises(ValueError):
+            await self.feature.on_tick()
+        self.assertEqual(self.telegram.messages, [])
+        self.assertEqual(self.feature.state_get("notified_groups"), ["GPV5.1"])
