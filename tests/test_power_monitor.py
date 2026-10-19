@@ -127,6 +127,59 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(detected, "unknown")
 
+    async def test_numeric_zero_needs_valid_loss_witness_in_paired_mode(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        for witness in (
+            None,
+            {"state": "50"},
+            {"state": "unavailable"},
+            {"state": "unknown"},
+            {"state": "nan"},
+            {"state": "0", "attributes": {"restored": True}},
+            {"state": "0", "last_updated": (
+                datetime.now(timezone.utc) - timedelta(hours=1)
+            ).isoformat()},
+        ):
+            with self.subTest(witness=witness):
+                states = {"sensor.v_main": {"state": "0"}}
+                if witness is not None:
+                    states["sensor.grid_frequency"] = witness
+                monitor = PowerMonitor(
+                    config=self._build_config(
+                        mode="loss_plus_voltage",
+                        voltage_entities=["sensor.v_main"],
+                        loss_entity="sensor.grid_frequency",
+                    ),
+                    ha=DummyHA(states),
+                    state=DummyState(),
+                )
+                self.assertEqual(await monitor.detect_current_power(), "unknown")
+
+    async def test_loss_witness_is_rechecked_after_voltage_fetch(self) -> None:
+        ha = DummyHA({
+            "sensor.grid_frequency": {"state": "0"},
+            "sensor.v_main": {"state": "0"},
+        })
+        get_state = ha.get_state
+
+        async def change_witness(entity_id):
+            if entity_id == "sensor.v_main":
+                ha._states["sensor.grid_frequency"] = {"state": "50"}
+            return await get_state(entity_id)
+
+        ha.get_state = change_witness
+        monitor = PowerMonitor(
+            config=self._build_config(
+                mode="loss_plus_voltage",
+                voltage_entities=["sensor.v_main"],
+                loss_entity="sensor.grid_frequency",
+            ),
+            ha=ha,
+            state=DummyState(),
+        )
+        self.assertEqual(await monitor.detect_current_power(), "unknown")
+
     async def test_loss_plus_voltage_partial_even_if_loss_entity_triggered(self) -> None:
         monitor = PowerMonitor(
             config=self._build_config(

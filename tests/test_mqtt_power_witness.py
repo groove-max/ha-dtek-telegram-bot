@@ -65,6 +65,7 @@ class MQTTWitnessTests(unittest.IsolatedAsyncioTestCase):
             "last_reported": datetime.now(timezone.utc).isoformat(),
         }
         self.assertFalse(await monitor.loss_condition_met())
+
         await self.receive("0", retain=True)
         self.assertFalse(await monitor.loss_condition_met())
         await self.receive("50")
@@ -78,6 +79,28 @@ class MQTTWitnessTests(unittest.IsolatedAsyncioTestCase):
             datetime.now(timezone.utc) - timedelta(seconds=601)
         ).isoformat()
         self.assertFalse(await monitor.loss_condition_met())
+
+    async def test_zero_voltage_requires_live_matching_mqtt_loss(self):
+        feature, monitor, ha, _, _ = (
+            fixtures.PowerPresenceFeatureTest()._build_feature()
+        )
+        feature.config.power.loss_mqtt_topic = "grid/frequency"
+        ha.mqtt_observation = self.client.mqtt_observation
+        monitor._loss_fresh_after = datetime.now(timezone.utc) - timedelta(seconds=1)
+        for entity in (feature.config.power.loss_entity, feature._voltage_entities[0]):
+            ha.states[entity] = {
+                "state": "0",
+                "last_reported": datetime.now(timezone.utc).isoformat(),
+            }
+        self.assertEqual(await monitor.detect_current_power(), "unknown")
+        await self.receive("0", retain=True)
+        self.assertEqual(await monitor.detect_current_power(), "unknown")
+        await self.receive("50")
+        self.assertEqual(await monitor.detect_current_power(), "unknown")
+        await self.receive("0")
+        self.assertEqual(await monitor.detect_current_power(), "off")
+        ha.states[feature.config.power.loss_entity]["state"] = "50"
+        self.assertEqual(await monitor.detect_current_power(), "unknown")
 
     def test_wildcard_witness_topic_is_rejected(self):
         for topic in ["#", "home/+/frequency", "home/\x00"]:

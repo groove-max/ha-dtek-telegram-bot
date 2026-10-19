@@ -130,7 +130,9 @@ DEFAULT_TEMPLATES: dict[str, str] = {
 
 ⏳ Можливе планове відключення за графіком (через {{ minutes }} хв).
 ⛔ Від: {{ start }}
-✅ До: {{ end }}
+{% if end_confirmed|default(true) %}✅ До: {{ end }}
+{% else %}🕓 Завершення за графіком: невідомо
+{% endif %}{{ '' -}}
 🕒 {{ timestamp }}""",
     # ── Feature 7: Status Message ──
     "status_on": """\

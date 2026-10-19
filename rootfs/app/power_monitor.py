@@ -72,6 +72,16 @@ class PowerMonitor:
                 unavailable_as_missing=False,
             )
             house_state = snapshot.get("house_state")
+            if (
+                mode == "loss_plus_voltage"
+                and house_state == "off"
+                and not await self.loss_condition_met()
+            ):
+                # A meter can briefly report numeric zero during a telemetry
+                # glitch. In the paired mode, every whole-house outage needs
+                # fresh independent confirmation, even for numeric readings.
+                # Recheck after the voltage fetch: the witness may have changed.
+                return "unknown"
             if house_state in ("on", "partial", "off"):
                 return str(house_state)
 

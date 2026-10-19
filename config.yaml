@@ -1,6 +1,6 @@
 ---
 name: "DTEK Telegram Bot"
-version: "0.4.0"
+version: "0.4.1"
 slug: "dtek_telegram_bot"
 description: >-
   Telegram notifications for DTEK Monitor with local power validation

@@ -6,12 +6,11 @@ from groups import display_group
 
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
-from groups import select_events
-from outage_calendar import extract_calendar_events, format_next_outage
+from outage_calendar import extract_calendar_events, format_next_outage, calendar_query_end
 from utils import OUTAGE_TYPE_UA, format_datetime, format_duration, now_kyiv
 
 if TYPE_CHECKING:
@@ -326,6 +325,18 @@ class StatusMessageFeature(Feature):
 
     async def _get_next_outage(self) -> str | None:
         """Get the next planned outage as a formatted string."""
+        events = await self.calendar_snapshot(self._fetch_next_outage_events)
+        selected = getattr(self.config, "selected_group", "")
+        groups = self.state_get("current_groups", [])
+        return format_next_outage(
+            events,
+            header_group=await self._resolve_current_group(),
+            group_labels=self.schedule_display_labels(),
+            now=now_kyiv(), group_state=self.state_get("groups_snapshot"),
+            groups=[selected] if selected else groups,
+        )
+
+    async def _fetch_next_outage_events(self) -> list[dict]:
         calendar_entity = self.entity("outage_schedule")
         now = now_kyiv()
 
@@ -335,7 +346,7 @@ class StatusMessageFeature(Feature):
             entity_id=calendar_entity,
             data={
                 "start_date_time": now.isoformat(),
-                "end_date_time": (now + timedelta(days=2)).isoformat(),
+                "end_date_time": calendar_query_end(self.state_get("groups_snapshot"), now).isoformat(),
             },
             return_response=True,
         )
@@ -345,12 +356,4 @@ class StatusMessageFeature(Feature):
             calendar_entity,
             exclude_emergency=True,
         )
-        groups = self.state_get("current_groups", [])
-        if groups:
-            events = select_events(events, groups, getattr(self.config, "selected_group", ""))
-        return format_next_outage(
-            events,
-            header_group=await self._resolve_current_group(),
-            group_labels=self.schedule_display_labels(),
-            now=now,
-        )
+        return events

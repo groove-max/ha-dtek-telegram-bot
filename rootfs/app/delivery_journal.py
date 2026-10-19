@@ -7,9 +7,12 @@ read a message. A pending request after a crash has an unknown delivery result.
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
+
+from outage_calendar import canonical_warning_key
 
 
 class DeliveryJournal:
@@ -32,7 +35,48 @@ class DeliveryJournal:
         """)
         self.db.execute("UPDATE events SET status='unknown' WHERE status='pending'")
         self.db.execute("UPDATE deliveries SET status='unknown' WHERE status='pending'")
+        self._migrate_upcoming_deliveries()
         self.db.commit()
+
+    def _migrate_upcoming_deliveries(self) -> None:
+        """Preserve sent/ambiguous outcomes when warnings stop including end times.
+
+        Copy aliases instead of destroying the old evidence. Only records whose
+        stored key matches their chat/address/stream can participate. Each bot
+        profile and test/production route retains its own independent journal.
+        """
+        rows = self.db.execute(
+            "SELECT key,status,payload,message_id,expires,retry_at FROM deliveries"
+        ).fetchall()
+        for old_key, status, raw, message_id, expires, retry_at in rows:
+            try:
+                payload = json.loads(raw)
+                context = payload.get("context") or {}
+                stream = context.get("stream")
+                if context.get("feature") != "upcoming_outage":
+                    continue
+                canonical = canonical_warning_key(stream)
+                chat, address = str(payload["chat"]), context["address"]
+                if not canonical or canonical == stream or not isinstance(address, str):
+                    continue
+                expected = hashlib.sha256(f"{chat}:upcoming:{address}:{stream}".encode()).hexdigest()
+                if old_key != expected:
+                    continue
+                key = hashlib.sha256(f"{chat}:upcoming:{address}:{canonical}".encode()).hexdigest()
+                scope = f"{chat}:{address}:upcoming_outage:{canonical}"
+                prior = self.delivery(key)
+                if prior is None:
+                    self.db.execute(
+                        "INSERT INTO deliveries(key,scope,status,payload,message_id,expires,retry_at) VALUES(?,?,?,?,?,?,?)",
+                        (key, scope, status, raw, message_id, expires, retry_at),
+                    )
+                elif prior[0] == "retry" and status in ("ok", "unknown", "rejected"):
+                    self.db.execute(
+                        "UPDATE deliveries SET status=?,message_id=? WHERE key=?",
+                        (status, message_id, key),
+                    )
+            except (ValueError, TypeError, KeyError, AttributeError):
+                continue
 
     def begin(
         self, action: str, chat: str, message_id: int | None, payload: dict

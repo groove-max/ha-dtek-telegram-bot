@@ -131,6 +131,82 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.step(60, "0")
         self.assertEqual(self.messages(), ["power_lost"])
 
+    async def test_zero_voltage_with_live_grid_replays_false_alert_without_messages(self):
+        # Replay a 56-second zero reading while the inverter keeps reporting 50 Hz.
+        self.feature.config.power.mode = "loss_plus_voltage"
+        self.feature.config.power.telemetry_notifications = False
+        self.time = 1
+        self.put("50", self.loss_entity)
+        await self.step(1, "0")
+        for t in (11, 16, 26, 31, 56):
+            self.time = t
+            self.put("49.9", self.loss_entity)
+            await self.step(t)
+            self.assertEqual(self.power(), "unknown")
+            self.assertEqual(self.messages(), [])
+        await self.step(57, "224.63")
+        await self.step(87)
+        self.assertEqual(self.power(), "on")
+        self.assertEqual(self.messages(), [])
+        self.assertEqual(self.state.get(self.prefix, "power_last_confirmed_state"), "on")
+
+    async def test_two_fresh_zero_readings_still_confirm_after_loss_delay(self):
+        self.feature.config.power.mode = "loss_plus_voltage"
+        self.feature.config.power.telemetry_notifications = False
+        self.time = 1
+        self.put("0", self.loss_entity)
+        await self.step(1, "0")
+        await self.step(10)
+        self.assertEqual(self.messages(), [])
+        await self.step(11)
+        self.assertEqual(self.power(), "off")
+        self.assertEqual(self.messages(), ["power_lost"])
+        self.time = 20
+        self.put("50", self.loss_entity)
+        await self.step(20, "230")
+        await self.step(50)
+        self.assertEqual(self.messages(), ["power_lost", "power_restored"])
+
+    async def test_zero_voltage_waits_for_loss_witness_before_starting_debounce(self):
+        self.feature.config.power.mode = "loss_plus_voltage"
+        self.feature.config.power.telemetry_notifications = False
+        self.time = 1
+        self.put("50", self.loss_entity)
+        await self.step(1, "0")
+        await self.step(20)
+        self.assertEqual(self.messages(), [])
+        self.time = 25
+        self.put("0", self.loss_entity)
+        await self.step(25)
+        await self.step(34)
+        self.assertEqual(self.messages(), [])
+        await self.step(35)
+        self.assertEqual(self.messages(), ["power_lost"])
+
+    async def test_loss_witness_recovery_cancels_pending_zero_voltage_outage(self):
+        self.feature.config.power.mode = "loss_plus_voltage"
+        self.feature.config.power.telemetry_notifications = False
+        self.time = 1
+        self.put("0", self.loss_entity)
+        await self.step(1, "0")
+        self.time = 9
+        self.put("50", self.loss_entity)
+        await self.step(9)
+        await self.step(31)
+        self.assertEqual(self.power(), "unknown")
+        self.assertEqual(self.messages(), [])
+
+    async def test_stale_loss_witness_cannot_confirm_fresh_zero_voltage(self):
+        self.feature.config.power.mode = "loss_plus_voltage"
+        self.feature.config.power.telemetry_notifications = False
+        self.time = 1
+        self.put("0", self.loss_entity)
+        # The voltage sample is fresh but the independent witness has expired.
+        await self.step(152, "0")
+        await self.step(180, "0")
+        self.assertEqual(self.power(), "unknown")
+        self.assertEqual(self.messages(), [])
+
     async def test_short_zero_dip_cancels_loss(self):
         await self.step(1, "0")
         await self.step(8, "230")

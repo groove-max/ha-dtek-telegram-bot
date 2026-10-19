@@ -16,6 +16,7 @@ from telegram_service import TelegramService
 from template_engine import TemplateEngine
 from groups import state_groups, select_events, presentation_context, display_labels
 from utils import format_datetime, now_kyiv
+from outage_calendar import verified_coverage_end
 
 logger = logging.getLogger(__name__)
 
@@ -172,38 +173,17 @@ class Feature(ABC):
 
     def has_schedule_coverage(self, start: datetime, end: datetime, kind: str = "outage") -> bool:
         """Missing published days must not become an all-clear notification."""
-        attrs = (self.state_get("groups_snapshot") or {}).get("attributes", {})
-        if "schedule_coverage" not in attrs:
-            return True  # Legacy integration, without the coverage contract.
-        coverage = attrs["schedule_coverage"]
-        if not isinstance(coverage, list):
-            return False
         groups = self.state_get("current_groups", [])
         selected = getattr(self.config, "selected_group", "")
         if selected:
             if selected not in groups:
                 return False
             groups = [selected]
-        if not groups:
-            return False
         try:
-            for group in groups:
-                intervals = sorted(
-                    (datetime.fromisoformat(c["start"]), datetime.fromisoformat(c["end"]))
-                    for c in coverage if c["group_id"] == group and c["kind"] == kind
-                )
-                cursor = start
-                for left, right in intervals:
-                    if left.tzinfo is None or right.tzinfo is None or left >= right:
-                        return False
-                    if left > cursor:
-                        break
-                    cursor = max(cursor, right)
-                if cursor < end:
-                    return False
-        except (KeyError, TypeError, ValueError):
+            horizon = verified_coverage_end(self.state_get("groups_snapshot"), groups, start, kind)
+            return horizon is None or horizon.timestamp() >= end.timestamp()
+        except ValueError:
             return False
-        return True
 
     def _schedule_source(self) -> tuple[str | None, str | None]:
         """Optional contract metadata; old integrations retain their original behavior."""

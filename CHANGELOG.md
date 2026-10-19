@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [0.4.1] - 2026-10-19
+
+- Compare logical schedule intervals within the displayed days, preserving groups and sources while ignoring midnight splitting, timezone notation and translated titles. Migrate legacy fingerprints without suppressing real changes or acknowledging failed sends.
+- Deduplicate advance warnings by group and start time, preserving old acknowledgements and sent/uncertain delivery-journal outcomes across upgrades. End-time revisions update schedules/status rather than repeating countdown warnings.
+- Use continuous publication coverage for warning and pinned-status times. Mark an end at an unverified boundary as unknown; validate the status snapshot against group/revision races, fetch midnight continuations and apply the same presentation in previews and custom-template context.
+- Cover upgrades, restarts, concurrent checks, failed/ambiguous sends, multiple groups, publication gaps, DST and unknown-end formatting with regression tests; document behavior in English and Ukrainian.
+- Require fresh independent grid-loss confirmation for low/zero voltage in `loss_plus_voltage`. Conflicting or unavailable evidence produces an unknown state instead of false outage/recovery messages. Single-sensor detection and existing confirmation delays are preserved.
+- Cover transient zero readings, missing/stale witnesses, MQTT replay and delayed/recovering loss signals with regression tests; document paired-sensor rules in English and Ukrainian.
+
+**Upgrade:** Existing settings and Telegram delivery history are preserved; no configuration migration is needed. In paired-sensor mode, a zero voltage reading now also requires fresh confirmation from the independent grid-loss sensor. Updated integration versions provide the coverage metadata needed to mark an unverified schedule end as unknown. Custom warning templates receive `end: "невідомо"` in this case; reset the override to use the new default wording.
+
 ## [0.4.0] - 2026-10-19
 
 - Choose a different Telegram bot for each address, or share one bot profile between several addresses. Manage profiles in the new **Telegram bots** tab.
