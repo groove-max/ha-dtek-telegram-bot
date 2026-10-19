@@ -7,33 +7,30 @@
 <a id="dtek-monitor"></a>
 ## Connect DTEK Monitor
 
-Bot **0.4.0** supports the public building entities from DTEK Monitor **1.7.0** and **2.0.0b1**. These projects have independent version numbers; the integration's beta does not require a beta bot. Both require HA **2026.3.0+**. Regional support comes from the integration: Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
+Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 2.0.0-rc1. HA 2026.3.0+ is required. Address support covers Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
 
-| Your setup | What to select in the bot |
+| What you need | Configuration |
 | --- | --- |
-| An address configured directly in DTEK Monitor | Discover and select that building in the bot's web editor. |
-| An Odesa personal account in Monitor 2.0 | First check the building link in **My DTEK → Settings**. A unique address match links automatically; resolve an ambiguous or missing link there. Then discover the public building in the bot. |
-| Several personal accounts in the same building | Use the shared building entry once. The bot does not need a separate address for each account. |
-| Accounts or addresses in different buildings | Add each discovered building as a separate bot address. |
+| Building channel/group or private address alerts | Building mode; select an address from discovery. |
+| Building linked to an account in My DTEK | Check the building link in cabinet settings, then select that building in the bot. |
+| Personal cabinet groups, readings and reminders | Personal profile; requires bot 0.5.0-rc1 and Monitor 2.0.0-rc1. [Complete setup guide](docs/PERSONAL.md). |
 
-The bot does not need your DTEK phone, password, account number or apartment number. It does not use the personal calendar, send readings, or deliver the integration's account reminders. Those features remain in [My DTEK](https://github.com/groove-max/ha-dtek-monitor/blob/v2.0.0b1/docs/PERSONAL_ACCOUNT.md), even when the bot's destination is a private conversation.
+For a shared chat, leave `selected_group` empty: building mode keeps all address groups. You may manually choose a confirmed group in this mode; a selection in My DTEK does not change it. Personal mode instead uses only the cabinet API groups, without manual substitution or fallback to building groups.
 
-For a shared building chat, leave `selected_group` empty to include all building groups. For personal alerts, choose a confirmed group in the bot if needed. **The apartment group selected in My DTEK does not change the bot's selection**, and changing the bot's selection does not filter the building entities. If the building has one group, leaving the field empty follows it automatically.
-
-Discovery uses the building's power/status/group entities and their common ID prefix. A cabinet account entity is not an address candidate. Keep these entity IDs consistent; renaming individual IDs can break discovery or notifications. A friendly display name can be changed in the bot without renaming HA entities.
+Building discovery uses the common entity ID prefix. Renaming individual IDs may break notifications; change the display name in the editor instead. Personal mode has a separate account selector; DTEK passwords are not stored in the bot.
 
 <a id="monitor-upgrade"></a>
-### Upgrade the integration to 2.0.0b1
+### Upgrade the integration to 2.0.0-rc1
 
-This is an optional public beta. Working 1.7.0 installations can continue using the bot. However, 1.7.0 has a [known first-setup issue](https://github.com/groove-max/ha-dtek-monitor/issues/5): when no schedule is published, setup can retry indefinitely without creating the address entities. **2.0.0b1 fixes this case** and loads the address independently of schedule availability.
+This is an optional release candidate. Working 1.7.0 installations can continue using the bot. However, 1.7.0 has a [known first-setup issue](https://github.com/groove-max/ha-dtek-monitor/issues/5): when no schedule is published, setup can retry indefinitely without creating the address entities. **2.0.0b1 fixes this case** and loads the address independently of schedule availability.
 
 1. Create a full HA backup that includes integration files, `.storage`, app data, `dtek_telegram_bot.yaml` and template overrides.
-2. In HACS, select **2.0.0b1** for DTEK Monitor and restart HA. If beta versions are hidden, follow the [beta installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/v2.0.0b1/docs/BETA.md).
+2. In HACS, select **2.0.0-rc1** for DTEK Monitor and restart HA. If prereleases are hidden, follow the [installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md).
 3. Keep the existing integration entry and bot addresses. Existing entity IDs, destinations, sensor bindings and group selections should remain unchanged.
 4. Check that the integration entry is loaded, the bot reconnects to HA, and local sensors report fresh values. A missing published schedule alone is not an upgrade failure.
-5. If you change bot settings, use **Save and restart**. For an optional delivery test, first choose a [test destination](#testing).
+5. If you change bot settings, use **Apply (Застосувати)**. For an optional delivery test, first choose a [test destination](#testing).
 
-Version 2 migrates the integration's configuration format. **Returning to 1.7.0 requires restoring the pre-upgrade backup**, including configuration and old integration files; reinstalling old code alone is insufficient. See the integration's [rollback instructions](https://github.com/groove-max/ha-dtek-monitor/blob/v2.0.0b1/docs/BETA.md#return-to-the-previous-version).
+Version 2 migrates the integration's configuration format. **Returning to 1.7.0 requires restoring the pre-upgrade backup**, including configuration and old integration files; reinstalling old code alone is insufficient. See the integration's [rollback instructions](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md#return-to-the-previous-version).
 
 <a id="schedule-availability"></a>
 ### Understand a missing schedule
@@ -51,7 +48,9 @@ In Monitor 2.0, check the building's **DTEK connection** and **Schedule availabi
 | `unsupported` | The address is marked as served by an unsupported external operator. |
 | `error` | A request failed or the response could not be validated. |
 
-The bot also checks the requested notification interval and groups, so today's status does not guarantee coverage for tomorrow. It pauses unverified schedule/group/upcoming-outage messages and resumes checking automatically. A log entry such as `Schedule has not been verified; notifications paused` can therefore reflect missing publication, not a broken Telegram token. Do not select the **Last known schedule (view only)** calendar as a live notification source.
+The bot also checks the requested notification interval and groups, so today's status does not guarantee coverage for tomorrow. It pauses unverified schedule/upcoming-outage messages and resumes checking automatically. A log entry such as `Schedule has not been verified; notifications paused` can therefore reflect missing publication, not a broken Telegram token. Do not select the **Last known schedule (view only)** calendar as a live notification source.
+
+A verified group assignment change can still be announced without a schedule; it never means “no outages”.
 
 Power monitoring from fresh local sensors can continue while DTEK schedules are unavailable. The `dtek_only` mode still depends on DTEK address data and does not measure actual electricity.
 
@@ -68,7 +67,7 @@ Create a bot with [@BotFather](https://t.me/BotFather), add it to your destinati
 
 ### Simplest option: messages just for you
 
-Create the bot, press **Start**, find the personal chat ID below and put it in `telegram_chat_id`. A personal ID is positive, for example `"123456789"`; keep negative IDs for groups/channels. Do not substitute your personal `@username` for the numeric ID.
+Create the bot, enter its token in the app and start it. Send `/start`, then select yourself from detected recipients on the profile’s **Telegram** step. You can leave the app’s default `telegram_chat_id` empty. If needed, enter the numeric ID manually; a private ID is positive and group/channel IDs are usually negative. A personal `@username` cannot replace the numeric ID.
 
 Configure your address in HA and enable the notifications you want. `feedback_enabled` is not needed for normal outgoing messages. Pressing Start lets the bot contact you, but does not automatically register an address/subscription: this is an HA-configured notification bot, not a Telegram-command setup wizard.
 
@@ -97,9 +96,9 @@ addresses:
 To use another bot:
 
 1. Create it with @BotFather and add it to the intended group/channel, or press **Start** in a personal conversation.
-2. Open the app’s **Telegram bots** tab. Enter a label, token and default chat ID. You can instead set the chat separately for each address.
+2. On the profile’s **Telegram** step, choose **Connect a bot**, or use the **Telegram bots** tab. Enter a label and token. Its default chat can remain empty if each profile specifies its own recipient.
 3. Choose **Verify token and save bot**. The app calls Telegram `getMe` and displays the bot’s `@username`; this check does not send a message or verify chat permissions.
-4. In **Settings**, choose that bot for an address. Use **Save and restart** to apply both profile and address changes.
+4. In **Settings**, choose that bot for an address. Use **Apply (Застосувати)** to apply both profile and address changes.
 5. For an optional delivery check, enter a **Test chat** in the profile and use **Templates → Send test**. The button sends only to that bot’s test chat. A missing or inaccessible test destination never falls back to a working group.
 
 One profile can serve several addresses. Adding the same bot twice is rejected to avoid competing update collectors. A new token for the **same** bot can replace the stored token; a different bot needs a new profile. Leave the token blank while editing to keep it. Profiles in use by saved or running addresses cannot be deleted: first change those addresses, save and restart.
@@ -108,9 +107,11 @@ The runtime YAML stores only `telegram_bot_id` (`default` or the ID shown in the
 
 Clients, delivery journals and incoming-update collectors are separate for each bot. A Telegram error or rate limit for one bot does not stop the other bot workers. Status message IDs and notification acknowledgements are scoped to bot, chat, test/production mode and address. Switching bot or chat creates a new status; the old message stays in the old chat and can be removed manually. Rotating a token for the same bot preserves its status. The first upgrade imports the existing default bot’s state and journal automatically; keep a private backup before updating.
 
-**Current limits:** one bot and destination per address. Fan-out to several recipients, forum topics and user-managed subscriptions are not implemented. Do not duplicate an `entity_prefix` to simulate subscriptions; validation rejects duplicates. Separate development installations still need separate runtime YAML files to avoid sharing `/homeassistant/dtek_telegram_bot.yaml`.
+**One destination per profile.** To send the same building to another chat, use **Clone** in the editor: the copy gets its own stable profile ID, notification settings and delivery history. Two profiles may use the same building prefix; their profile IDs must differ. User-managed subscriptions and forum topics are not supported. Use one add-on installation for several profiles.
 
 ### Find the chat ID
+
+The editor offers a recipient list beside ID fields. Enable **Receive commands**, write `/start` to your bot, then press **Refresh** in the editor. Groups and channels appear after the bot receives a new message or membership update. Select the correct bot first; personal profiles list private users only. Manual input remains available, and detection does not authorize access. See [detected recipients](docs/PERSONAL.md#detected-telegram-recipients) for setup and limitations.
 
 If another trusted HA configuration already uses this chat, copy its numeric ID. Otherwise, obtain it directly from Telegram using your own bot:
 
@@ -148,6 +149,8 @@ if not seen:
 
 An existing webhook conflicts with `getUpdates`; do not remove another service's webhook just to test this app. Use a dedicated bot. Telegram's [update API](https://core.telegram.org/bots/api#getupdates) and [bot privacy rules](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get) explain which new messages the bot receives. A bot is not a general chat-history reader.
 
+A **profile** combines one building/account, one recipient and its notification settings. A **Telegram bot** is the BotFather token used to deliver those messages; several profiles can share it. A **power sensor** reports volts, hertz or presence. An **energy sensor** reports cumulative kWh and is configured in DTEK Monitor for reading suggestions.
+
 <a id="configuration"></a>
 ## Where settings live
 
@@ -156,7 +159,7 @@ Settings are divided by purpose:
 | Location | Settings |
 | --- | --- |
 | HA app **Configuration** tab | `telegram_bot_token`, `telegram_chat_id`, optional `test_chat_id`, `feedback_enabled` (default `false`). Restart after changing them. |
-| App web editor | Addresses, bot selection, power/voltage rules, notifications and templates. Use **Save and restart** for runtime changes. |
+| App web editor | Addresses, bot selection, power/voltage rules, notifications and templates. Use **Apply (Застосувати)** for runtime changes. |
 | **Telegram bots** tab | Additional bot profiles, default/test chats and optional feedback. **Verify token and save bot** stores the profile; restart applies it to notifications. |
 
 The editor stores runtime settings in `dtek_telegram_bot.yaml` in HA's configuration directory. Inside this app, its path is `/homeassistant/dtek_telegram_bot.yaml`; the same file may appear as `/config/dtek_telegram_bot.yaml` in an HA file editor. `/data/config.yaml` is a fallback; an existing fallback is copied when the preferred file is first available. Do not maintain conflicting copies.
@@ -165,7 +168,7 @@ The editor stores runtime settings in `dtek_telegram_bot.yaml` in HA's configura
 
 ### Editing safely
 
-Background refresh updates live data without replacing fields you are editing. **Validate** checks the current draft and shows a snapshot; it does not save it. **Save** writes settings; **Save and restart** also applies them to the running app. If you keep typing during a save, those later edits remain unsaved.
+Background refresh updates live data without replacing fields you are editing. **Validate** checks the current draft and shows a snapshot; it does not save it. **Save** writes settings; **Apply (Застосувати)** also applies them to the running app. If you keep typing during a save, those later edits remain unsaved.
 
 Bot tokens stay only in the current form until submission and are never returned by the API or stored in browser draft storage. A background refresh preserves this form; closing/reloading the page discards unsaved profile fields. Profile saves also reject concurrent edits; use **Reload profile** to load the saved values before retrying.
 
@@ -191,6 +194,21 @@ For operators with hidden group IDs, normally leave `selected_group` empty and u
 ## Configure actual power detection
 
 Use the [mode selection table](README.md#power-detection) first. The following examples use placeholder entity IDs; replace them through discovery and your HA device pages.
+
+### New setup: Home Assistant sensors
+
+**Add profile** and **Configure** use the same four steps. They walk through the data source, Telegram, notifications and review. **Apply (Застосувати)** validates, saves and restarts. **Additional actions** contains import/export and saving without activation; **Tools** contains templates, discovery and diagnostics. Shared command-receiving preferences and fallback credentials are below the profile cards.
+
+On the **Telegram** step, choose an existing bot or **Add another bot**. Enter its name and BotFather token in the dialog. Saving verifies the token and selects the bot for this profile. **Start saved settings** restarts the app using the settings already on disk; an unfinished profile stays in your browser draft. Other saved pending changes also take effect. Wait for the app to reconnect, send `/start` to the bot, then **Refresh recipients** and explicitly choose the recipient. A manual ID remains supported. The default bot token is still managed in the HA app configuration.
+
+The **Review** step shows the account/address, bot, recipient name and ID, notifications, power sensors and their roles, voltage monitoring and reading-submission permissions. **Apply** saves all profiles and restarts the app. Save or discard an unfinished bot-token form first. Old power schemes remain under **Advanced: compatibility with older schemes**; existing settings are preserved. **All sections** opens the expanded editor when you need it.
+
+Navigation, background refresh and a page reload preserve profile drafts. Unsaved bot tokens stay only in the current form and are never stored in browser storage. Selecting a discovered Telegram user does not grant access until you apply the profile.
+
+
+For new sensor setups, use `power.mode: sources`: a binary status, voltage or frequency, with optional independent confirmation. Voltage display/quality monitoring is configured separately. See [Power sensors](docs/POWER.md) for setup, examples and limitations.
+
+The examples below document compatible existing schemes. Upgrading preserves their sensor bindings, delays, MQTT topics and multiphase behavior. Switch to the new scheme explicitly in the editor when ready.
 
 ### One sensor: `voltage_only`
 
@@ -285,6 +303,8 @@ Use the device's active topic, not an obsolete retained topic. If HA needs a num
 
 ### Multiple phases
 
+Use the compatible `voltage_only` or `loss_plus_voltage` scheme. `sources` combines observations of one line, not separate phases.
+
 Add voltage entities with labels such as `L1`, `L2`, `L3`. `on` means all configured phases are present; `off` requires evidence that all are absent. `partial` means some power is present with other phases absent or unknown; the status distinguishes missing and unknown phases. Uncertain evidence never becomes a phase-loss alert. Use a loss witness only if it describes the same monitored feed/topology.
 
 A previously confirmed outage survives a later data gap, so a valid recovery can still notify. Durations are marked unknown when missing observations prevent a reliable calculation.
@@ -333,6 +353,8 @@ enable new notifications; the bot continues to use the building's outage calenda
 
 Open **Templates**, choose a template, preview it, edit and save an override. Reset removes the override and restores the built-in text. Sending a test publishes a real message only to the selected bot’s test chat. Configure it first; the button never uses the production chat as a fallback.
 
+The public introduction is the **Привітання · welcome** template: replace its text and links as desired. It is shared by all bots on this add-on and receives only `telegram_user_id`, never private account data. Its switch is under **General and service settings → Greeting for new users**; the standard GitHub introduction is enabled by default.
+
 Templates use Jinja. Available context is shown in the editor and depends on the message. For group presentation, `group`, `groups`, `selected_group`, `old_group`, `new_group` already respect hidden labels; `groups_public` indicates whether public group numbers exist.
 
 For `upcoming_outage`, `end_confirmed` tells whether the published schedule confirms
@@ -349,6 +371,8 @@ Overrides are stored in `/data/templates/*.j2` and survive updates. Consequently
 <a id="testing"></a>
 ## Test without posting to the main chat
 
+Personal profiles and their template tests can send only to the authorized private chat; a shared test group is rejected. [Personal mode](docs/PERSONAL.md).
+
 1. Choose a test destination: press **Start** in a private conversation, or add the bot to a test group/channel with the required permissions.
 2. For the **Default bot**, set the Supervisor option `test_chat_id` and restart. This redirects all of that bot’s notifications to the test chat, preserving the existing behavior.
 3. For an additional bot, set **Test chat** in its profile. **Send test** uses it immediately after the profile is saved. To redirect all notifications, also enable **Test mode**, then save and restart. Other bot profiles keep their own destinations.
@@ -364,6 +388,8 @@ Explicit temporary send failures may be retried within a bounded window after re
 
 <a id="updates"></a>
 ## Backups, updates and moving to another HA
+
+[Upgrade to 0.5.0-rc1 and rollback](docs/UPGRADING.md). Update the integration first if you want personal mode.
 
 - Back up the app data and HA configuration, including `dtek_telegram_bot.yaml` and template overrides.
 - Read the [changelog](CHANGELOG.md), update the app, then verify the active configuration and destination.

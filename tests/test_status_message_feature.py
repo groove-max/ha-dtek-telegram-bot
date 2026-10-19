@@ -98,6 +98,10 @@ class DummyTelegram:
         self.edit_calls += 1
         return self.edit_result == "ok"
 
+    async def pin_message(self, message_id: int, **kwargs: object) -> bool:
+        self.pinned_message_id = message_id
+        return True
+
 
 class DummyState:
     def __init__(self) -> None:
@@ -135,6 +139,13 @@ class DummyPowerMonitor:
 @unittest.skipUnless(HAS_RUNTIME_DEPS, "PyYAML and pydantic are not installed in the local test environment")
 class StatusMessageFeatureTest(unittest.IsolatedAsyncioTestCase):
     prefix = "vulytsia_prykladna_12a"
+
+    async def test_enabling_pin_pins_existing_status_without_replacing_it(self):
+        feature, telegram, state = self._build_feature(edit_result="ok")
+        await feature.on_start()
+        self.assertEqual(telegram.pinned_message_id, 33)
+        self.assertEqual(state.get(self.prefix, "status_pinned_message_id"), 33)
+        self.assertEqual(telegram.sent_messages, [])
 
     def _build_feature(
         self,

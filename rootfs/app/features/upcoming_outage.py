@@ -41,7 +41,7 @@ class UpcomingOutageFeature(Feature):
 
     async def on_tick(self) -> None:
         """Check for upcoming outages."""
-        async with notification_lock(self.state, self.config.entity_prefix):
+        async with notification_lock(self.state, self.profile_key):
             await self._check_and_notify()
 
     async def _check_and_notify(self) -> None:
@@ -108,7 +108,7 @@ class UpcomingOutageFeature(Feature):
             )
             delivered = await self.send_message(
                 text,
-                delivery_key=f"upcoming:{self.config.entity_prefix}:{event_key}",
+                delivery_key=f"upcoming:{self.profile_key}:{event_key}",
                 delivery_context={"stream": event_key, "expires": ev_start.timestamp()},
                 disable_notification=self.config.upcoming_outage.silent,
             )

@@ -13,8 +13,13 @@ from bot_profiles import BotProfileStore, default_profile
 from delivery_journal import DeliveryJournal
 from state_store import StateStore
 from telegram_service import TelegramService
+from outage_calendar import ScheduleUnavailable
 
 logger = logging.getLogger(__name__)
+
+
+def config_receives(config):
+    return getattr(config, "receive_commands", True)
 
 
 class RoutedState:
@@ -50,6 +55,8 @@ class BotRuntime:
         self._tick_pending = set()
         self._pending_events = {}
         self._feedback_starts = []
+        self.conversation_factory = None
+        self.conversations = {}
         self._base_state = StateStore(data_dir / "state.json")
         self.state = RoutedState(self._base_state, {})
         used_ids = set()
@@ -83,12 +90,17 @@ class BotRuntime:
                     or address.telegram_chat_id
                     or profile.chat_id
                 )
-                scope = f"{profile.bot_id}:{profile.test_mode}:{chat}:{address.entity_prefix}"
-                self.state.routes[address.entity_prefix] = (
+                scope = f"{profile.bot_id}:{profile.test_mode}:{chat}:{address.key}"
+                if address.profile_id:
+                    scope += f":{address.mode}:{address.account_entity}:{address.entity_prefix}"
+                self.state.routes[address.key] = (
                     "route:" + hashlib.sha256(scope.encode()).hexdigest()
                 )
 
     def service(self, address):
+        profile = self.profiles.get(address.telegram_bot_id)
+        if address.mode == "personal" and profile and profile.test_mode and profile.test_chat_id != str(address.telegram_user_id):
+            return None  # Never reroute cabinet messages into a shared test channel.
         return self.clients.get(address.telegram_bot_id)
 
     def chat(self, address):
@@ -104,24 +116,24 @@ class BotRuntime:
         migrate = legacy_owner in (None, default.bot_id) and "default" in self.clients
         if migrate:
             for address in self.config.addresses:
-                if address.telegram_bot_id != "default":
+                if address.mode != "building" or address.profile_id or address.telegram_bot_id != "default":
                     continue
                 legacy_dir = self._legacy_dir(default)
                 legacy = self._base_state
                 if default.test_chat_id:
                     legacy = StateStore(legacy_dir / "state.json")
                     legacy.load()
-                values = legacy.get_all(address.entity_prefix)
+                values = legacy.get_all(address.key)
                 stored_chat = values.get("status_message_chat_id")
                 if stored_chat and str(stored_chat) != self.chat(address):
                     continue
                 if values.get("status_message_id") and not stored_chat:
                     # Older data without a chat owner cannot authorize an edit.
                     values.pop("status_message_id", None)
-                route = self.state.routes[address.entity_prefix]
+                route = self.state.routes[address.key]
                 if not self._base_state.get_all(route):
                     for key, value in values.items():
-                        self.state.set(address.entity_prefix, key, value)
+                        self.state.set(address.key, key, value)
         for profile_id, client in self.clients.items():
             profile = self.profiles[profile_id]
             mode = (
@@ -140,11 +152,11 @@ class BotRuntime:
                         source.backup(target)
             client.journal = DeliveryJournal(path)
             client.allowed_routes = {
-                a.entity_prefix: self.chat(a)
+                a.key: self.chat(a)
                 for a in self.config.addresses
                 if a.telegram_bot_id == profile_id
             }
-            if profile.feedback_enabled:
+            if config_receives(self.config) and (self.conversation_factory is not None or profile.feedback_enabled):
                 self._feedback_starts.append(
                     asyncio.create_task(self._start_feedback(profile, client))
                 )
@@ -170,12 +182,17 @@ class BotRuntime:
     async def _start_feedback(self, profile, client):
         try:
             async with asyncio.timeout(15):
-                await client.start_feedback(
-                    self.data_dir / f"feedback-{profile.bot_id}.lock"
-                )
+                lock_path = self.data_dir / f"feedback-{profile.bot_id}.lock"
+                if self.conversation_factory is None:
+                    await client.start_feedback(lock_path)
+                else:
+                    handler = self.conversation_factory(profile.id, client)
+                    self.conversations[profile.id] = handler
+                    await client.start_updates(lock_path, handler.handle, feedback=profile.feedback_enabled)
         except Exception as exc:
+            self.conversations.pop(profile.id, None)
             self.errors[profile.id] = (
-                "Збір зворотного зв’язку недоступний. Перевірте тестовий чат та інші запущені копії бота."
+                "Вхідні повідомлення недоступні. Перевірте webhook та інші запущені копії бота."
             )
             logger.warning(
                 "Feedback unavailable for %s: %s", profile.id, type(exc).__name__
@@ -211,6 +228,11 @@ class BotRuntime:
                 for feature in features:
                     try:
                         await getattr(feature, method)(*args)
+                    except ScheduleUnavailable:
+                        logger.debug(
+                            "%s.%s paused for %s: schedule not verified yet",
+                            feature.name, method, profile_id,
+                        )
                     except Exception as exc:
                         logger.error(
                             "%s.%s failed for %s: %s",

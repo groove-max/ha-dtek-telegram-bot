@@ -1,6 +1,14 @@
 """Built-in default message templates (Ukrainian)."""
 
 DEFAULT_TEMPLATES: dict[str, str] = {
+    "welcome": """\
+⚡ Цей бот автоматизує сповіщення про графіки відключень і стан електропостачання. Також він може нагадувати про покази лічильника та передавати їх у ДТЕК.
+
+Хочете налаштувати такого бота для себе або свого будинку? Код та інструкції для Home Assistant доступні на GitHub:
+🤖 <a href="https://github.com/groove-max/ha-dtek-telegram-bot">Telegram-бот</a>
+🏠 <a href="https://github.com/groove-max/ha-dtek-monitor">Інтеграція ДТЕК</a>
+
+Ваш Telegram ID: <code>{{ telegram_user_id }}</code>""",
     # ── Feature 1: Schedule Change ──
     "schedule_change": """\
 ⚡️ {{ display_name }}
@@ -138,14 +146,25 @@ DEFAULT_TEMPLATES: dict[str, str] = {
     "status_on": """\
 🟢 {{ short_name }}
 🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
+
+✅ Електропостачання: наявне
 {% if voltage is not none or phases %}
-✅ Електропостачання: норма
 {% if phases %}
 {{ phases | format_phase_summary }}
 {% else %}
 🔌 Напруга: {{ voltage | round(1) }} В
 {% endif %}
 {% endif %}
+{% if next_outage %}
+📅 Найближче планове:
+{{ next_outage }}
+{% endif %}
+🕒 Оновлено: {{ timestamp }}""",
+    "status_unknown": """\
+⚪️ {{ short_name }}
+🔵 {% if groups_public|default(true) %}Група {% endif %}{{ group }}
+
+❔ Стан живлення невідомий: немає актуальних вимірювань.
 {% if next_outage %}
 📅 Найближче планове:
 {{ next_outage }}

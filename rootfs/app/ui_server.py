@@ -65,6 +65,7 @@ class UIServer:
         self._app.router.add_get("/api/bots", self._bots)
         self._app.router.add_post("/api/bots/save", self._save_bot)
         self._app.router.add_post("/api/bots/delete", self._delete_bot)
+        self._app.router.add_post("/api/bots/activate", self._activate_bots)
         self._app.router.add_post("/api/config/validate", self._validate_config)
         self._app.router.add_post("/api/config/save", self._save_config)
         self._app.router.add_post("/api/templates/preview", self._preview_template)
@@ -160,6 +161,28 @@ class UIServer:
                 "preview": await self._orchestrator.preview_runtime_config(validated),
             }
         )
+
+    async def _activate_bots(self, request: web.Request) -> web.Response:
+        """Start saved settings without saving an incomplete profile draft."""
+        body = await self._read_json_body(request)
+        if (
+            body.get("expected_revision") != self._orchestrator.bot_profiles.revision()
+            or body.get("config_revision") != runtime_config_revision()
+        ):
+            return web.json_response(
+                {"message": "Збережені налаштування змінилися. Оновіть стан перед запуском; чернетка залишиться у браузері."},
+                status=409,
+            )
+        try:
+            saved = self._orchestrator._get_editor_runtime_config()
+            self._orchestrator.validate_destinations(saved)
+        except (ValueError, ValidationError):
+            return web.json_response(
+                {"message": "Збережені профілі потребують виправлення. Перевірте їх і натисніть «Застосувати»."},
+                status=400,
+            )
+        asyncio.create_task(self._delayed_restart())
+        return web.json_response({"restart_scheduled": True})
 
     async def _save_config(self, request: web.Request) -> web.Response:
         body = await self._read_json_body(request)

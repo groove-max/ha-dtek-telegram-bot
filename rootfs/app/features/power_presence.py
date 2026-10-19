@@ -54,6 +54,10 @@ class PowerPresenceFeature(Feature):
         return self.config.power.enabled
 
     def get_watched_entities(self) -> list[str]:
+        if self.config.power.mode == "sources":
+            return list(dict.fromkeys(
+                [s.entity for s in self.config.power.sources] + self._voltage_entities
+            ))
         entities = (
             [self.entity("power")]
             if self.config.power.mode == "dtek_only"
@@ -70,6 +74,8 @@ class PowerPresenceFeature(Feature):
 
     async def on_start(self) -> None:
         self._stopped = False
+        if self._power_monitor:
+            self._power_monitor.sources.reset()
         # A persisted timeout is not valid evidence after a process restart.
         self.state_set("loss_stale_reference_at", None)
         self.state_set("power_observation_gap", True)
@@ -181,7 +187,13 @@ class PowerPresenceFeature(Feature):
                         self._confirm_since + self.config.power.confirm_timeout
                     )
 
-        actual = await pm.detect_current_power()
+        if self.config.power.mode == "sources":
+            evidence = await pm.sources.snapshot()
+            actual = evidence["state"]
+            if evidence.get("pending_seconds"):
+                deadlines.append(clock + evidence["pending_seconds"])
+        else:
+            actual = await pm.detect_current_power()
         current = self.state_get("power_state", "unknown")
         if actual != self._candidate:
             self._candidate, self._candidate_since = actual, clock
@@ -216,7 +228,8 @@ class PowerPresenceFeature(Feature):
                 house_transition = await self._commit(actual, snapshot)
             else:
                 deadlines.append(self._candidate_since + delay)
-        await self._phases(snapshot, clock, deadlines, suppress=house_transition)
+        if self.config.power.mode != "sources":
+            await self._phases(snapshot, clock, deadlines, suppress=house_transition)
         self._arm(deadlines)
 
     @staticmethod

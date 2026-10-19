@@ -226,3 +226,32 @@ class UIConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 500)
         self.assertEqual(config.load_runtime_config_payload(), self.payload)
         self.server._delayed_restart.assert_not_called()
+
+    async def test_activate_bots_never_saves_incomplete_browser_config(self):
+        self.orchestrator.bot_profiles = Mock()
+        self.orchestrator.bot_profiles.revision.return_value = 'bots-current'
+        response = await self.client.post('/api/bots/activate', json={
+            'expected_revision': 'bots-current',
+            'config_revision': config.runtime_config_revision(),
+            'config': {'addresses': [{'mode': 'personal'}]},
+        })
+        self.assertEqual(response.status, 200)
+        await asyncio.sleep(0)
+        self.server._delayed_restart.assert_awaited_once()
+        self.assertEqual(config.load_runtime_config_payload(), self.payload)
+
+    async def test_activate_bots_rejects_concurrent_changes_and_invalid_saved_profiles(self):
+        self.orchestrator.bot_profiles = Mock()
+        self.orchestrator.bot_profiles.revision.return_value = 'bots-current'
+        for bot_revision, config_revision in [('old', config.runtime_config_revision()), ('bots-current', 'old')]:
+            response = await self.client.post('/api/bots/activate', json={
+                'expected_revision': bot_revision, 'config_revision': config_revision,
+            })
+            self.assertEqual(response.status, 409)
+        self.orchestrator.validate_destinations.side_effect = ValueError('invalid saved route')
+        response = await self.client.post('/api/bots/activate', json={
+            'expected_revision':'bots-current', 'config_revision':config.runtime_config_revision(),
+        })
+        self.assertEqual(response.status, 400)
+        self.server._delayed_restart.assert_not_awaited()
+        self.assertEqual(config.load_runtime_config_payload(), self.payload)

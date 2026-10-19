@@ -157,16 +157,18 @@ def validate_destinations(config, store: BotProfileStore) -> None:
     profiles = {"default": default_profile(config), **store.read()}
     seen = set()
     for address in config.addresses:
-        if address.entity_prefix in seen:
+        if address.key in seen:
             raise ValueError(
                 "Адресу додано двічі. Для кожної адреси залиште один запис."
             )
-        seen.add(address.entity_prefix)
+        seen.add(address.key)
         profile = profiles.get(address.telegram_bot_id)
         if not profile or not profile.token:
             raise ValueError(
                 "Для адреси обрано неналаштованого бота. Додайте або оберіть бота."
             )
+        if address.mode == "personal" and profile.test_mode and profile.test_chat_id != str(address.telegram_user_id):
+            raise ValueError("Особистий профіль потребує приватного тестового чату авторизованого користувача.")
         if not (
             (profile.test_chat_id if profile.test_mode else "")
             or address.telegram_chat_id

@@ -10,6 +10,10 @@ from groups import event_group
 from utils import TZ_KYIV, format_date_short, format_time_short, now_kyiv
 
 
+class ScheduleUnavailable(ValueError):
+    """The source explicitly has no verified schedule for notifications yet."""
+
+
 def parse_event_time(value: str | datetime) -> datetime | None:
     """Parse an event time string to datetime."""
     if isinstance(value, datetime):
@@ -116,7 +120,7 @@ def verified_coverage_end(group_state, groups, now, kind="outage"):
     """Continuous common coverage; None means an older integration lacks metadata."""
     attrs = (group_state or {}).get("attributes", {})
     if attrs.get("schedule_notifications_ready", True) is not True:
-        raise ValueError("Schedule is unverified")
+        raise ScheduleUnavailable("Schedule is unverified")
     if "schedule_coverage" not in attrs:
         return None
     coverage = attrs["schedule_coverage"]
@@ -152,7 +156,7 @@ def upcoming_schedule_events(events, *, now=None, group_state=None, groups=None)
         groups = sorted({event_group(e) for e in events if event_group(e)})
     horizon = verified_coverage_end(group_state, groups, now)
     if horizon is not None and horizon.timestamp() <= now.timestamp():
-        raise ValueError("No verified schedule at the current time")
+        raise ScheduleUnavailable("No verified schedule at the current time")
     result = []
     for event in events:
         start, end = parse_event_time(event["start"]), parse_event_time(event["end"])

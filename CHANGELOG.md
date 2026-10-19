@@ -2,7 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.5.0-rc1] - 2026-10-20
+
+**Release candidate — for testing before the final 0.5.0 release.** Requires Home Assistant OS, HA 2026.3.0+, and amd64/aarch64. Personal mode and PNG menus require **DTEK Monitor 2.0.0-rc1**; existing building notifications also work with Monitor 1.7.0 and 2.0.0b1.
+
+### Start here
+
+- Use **address schedules** for a building group, channel or private chat. Use **personal cabinet** for an explicitly assigned private user's account, readings and reminders. Both can share a bot token.
+- A four-step editor guides source → Telegram → notifications → review. Choose recipients detected after `/start`, or enter their numeric IDs. Drafts survive background updates.
+- Update the integration first for personal mode, then the bot. Existing recipients, sensor bindings, templates and delivery history are preserved; no personal profile or submission permission is enabled automatically.
+- The app store reads the repository version and may offer this RC even though GitHub marks it as a prerelease. Keep automatic app updates off if you want to stay on 0.4.1.
+
+[English: upgrade and rollback](docs/UPGRADING.md) · [Українська: оновлення та відкат](docs/UPGRADING.uk.md)
+
+[English user guide](README.md) · [Український посібник](README.uk.md)
+
+### Changes since 0.4.1
+
+- Complete the profile setup flow for new and existing profiles, with inline bot onboarding, explicit recipient selection, detailed review, and draft-safe live summaries.
+
+
+- Add a four-step profile wizard, compact profile cards with one editor at a time, a single Apply action and optional tools. Preserve drafts across profile navigation, refresh and page reload; keep explicit private-owner authorization.
+- Separate grid-presence sources from voltage display/quality alerts. Support binary polarity, voltage and frequency, one or two independent same-line sources, per-source freshness and optional live MQTT verification. A declared mains-powered secondary can corroborate an explicit grid loss after a grace period; missing, conflicting or restored data stays unknown. Preserve existing modes, timings and multiphase configurations without automatic migration.
+- Test source combinations, contradictory/invalid/stale reports, disappearing devices, reconnects, debounce behavior and wizard draft protection. Document sensor contracts and the new setup in English/Ukrainian.
+
+- Keep one current private menu screen, including schedule images, with persistent tracking and retryable cleanup. Preserve status, alerts and reminders; pin existing status messages without recreating them and omit the status button only when an automatically refreshed pinned status is enabled. Offer an account selector for several personal profiles. Respect Telegram's 48-hour deletion limit.
+- Discover private recipients, groups and channels through the existing update collector. Add bot-specific recipient selectors alongside manual IDs, with unavailable-recipient handling, bounded metadata storage and no automatic authorization. Preserve editor drafts on refresh and isolate recipient lists when changing bot tokens. Document setup and Telegram limitations in English/Ukrainian.
+- Use the shared status templates for private status requests, including overrides, voltage and schedule freshness. Add icons, clearer schedule buttons, reusable navigation and a menu return that cancels pending reading confirmations; style reading results, reminders and errors consistently. Document independent personal notification switches.
+- Preserve Telegram field aliases when handling real incoming commands and callbacks, so private menus respond correctly. Keep incoming payloads out of the journal when feedback capture is disabled; test with real aiogram update models.
+- Add `receive_commands` so several HA servers can send through one Telegram token while only the cabinet server receives private commands; expose the switch in the editor and document shared-token setup.
+
+- Add personal profiles alongside existing building profiles, with an explicit private Telegram recipient, separate reading/reminder permissions and current cabinet groups only. Reuse schedule notifications and power detection without falling back to another building group.
+- Add private menus for status, today/tomorrow all-group PNG tables, manual or energy-sensor reading proposals, explicit confirmation and read-only result checks. Keep account setup/history in HA; reuse the integration's submission and calibration protections.
+- Send optional rate-limited private introductions with project links to unconfigured users. Share one update consumer with test feedback; retain cursors, reject stale/replayed commands and preserve an existing webhook.
+- Isolate profile state, prevent personal data from being routed to shared test chats, invalidate obsolete confirmations, and announce verified group changes even before publication without claiming an empty schedule.
+- Document setup, compatibility, authorization and behavior in English/Ukrainian; add backend, browser and image regression tests. Add Pillow and Cyrillic fonts for deterministic PNG rendering.
+
+**Compatibility:** Personal profiles and PNG menus require the DTEK Monitor 2.0.0-rc1. Existing building profiles remain compatible with 1.7.0/2.0.0b1. No personal profile, submission permission or reminder is enabled automatically; private introductions default to on and can be disabled. Save and restart to apply configuration.
+
+- Read history directly from DTEK even when HA has never submitted readings. Hide inactive records by default, retain warning statuses and add show-all/newer/older navigation. Keep submission result checks separate from official monthly settlement.
+- Use the integration's calibrated cumulative-energy proposal in the reading form, with observation time and explicit confirmation. Never silently drop unavailable source data or retry an uncertain submission.
+- Keep the Status button when an automatically refreshed pinned status is not configured. Allow editing the public welcome template, including its links; account data is never supplied to that template.
+- Refresh English/Ukrainian guides for installation, profiles, detected recipients, independent power sources, private permissions, templates and upgrade/rollback.
 
 ## [0.4.1] - 2026-10-19
 

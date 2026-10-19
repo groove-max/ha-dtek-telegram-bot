@@ -5,5 +5,9 @@
 # Add your own address using discovery in the web editor, then save and restart.
 # Configuration examples and sensor requirements: DOCS.md / DOCS.uk.md.
 ha_token: ""
+# Reply privately to unconfigured users with project links, at most once/day.
+welcome_enabled: true
+# With one token on multiple HA servers, enable receiving on only one server.
+receive_commands: true
 export_default_templates: false
 addresses: []

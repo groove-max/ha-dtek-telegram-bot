@@ -42,6 +42,10 @@ const HOUSE_STATE_META = {
   off: { label: "нема світла", tone: "bad" },
 };
 const POWER_MODE_META = {
+  sources: {
+    label: "Датчики Home Assistant",
+    copy: "Оберіть готовий статус живлення або вимірювання на вході міської мережі. Додаткове підтвердження — за бажанням. Напруга для повідомлень налаштовується окремо.",
+  },
   dtek_only: {
     label: "Лише DTEK",
     copy: "Використовує лише binary_sensor.<prefix>_power. Найпростіше налаштування, але воно може відставати від зовнішніх сенсорів.",
@@ -58,6 +62,12 @@ const POWER_MODE_META = {
 
 const state = {
   activeTab: "configure",
+  activeProfile: -1,
+  wizard: null,
+  detailsOpen: {},
+  profileSteps: {},
+  showAll: false,
+  botTarget: null,
   overview: null,
   discovery: null,
   diagnostics: null,
@@ -191,6 +201,8 @@ function persistTemplateDraftSnapshot() {
 }
 
 function restorePersistedUiState() {
+  state.profileSteps = readSessionJson(`${UI_STORAGE_PREFIX}:steps`) || {};
+  state.showAll = readSessionValue(`${UI_STORAGE_PREFIX}:show-all`) === "true";
   const savedTab = readSessionValue(ACTIVE_TAB_STORAGE_KEY);
   if (savedTab) {
     state.activeTab = savedTab;
@@ -240,6 +252,9 @@ function updateBusyControls() {
     document.getElementById("reload-config-button")].forEach((button) => {
     button.disabled = unavailable || state.configBusy || state.botBusy;
   });
+  editorContainer.querySelectorAll('[data-action="wizard-apply"], [data-action="activate-bots"], [data-action="connect-bot"]').forEach(button => {
+    button.disabled = unavailable || state.configBusy || state.botBusy;
+  });
   document.getElementById("bot-fields").disabled = unavailable || state.configBusy || state.botBusy;
   document.querySelectorAll("[data-edit-bot], [data-delete-bot]").forEach((button) => { button.disabled = state.configBusy || state.botBusy; });
   templatesContainer.querySelectorAll("[data-action]").forEach((button) => {
@@ -259,12 +274,13 @@ function markEditorChanged() {
 }
 
 function updateEditorLiveParts() {
+  updateRecipientPickers();
   const notices = document.getElementById("editor-notices");
   if (notices && state.configPayload) {
     const text = [];
     if (state.configPayload.test_chat_id) text.push(`Основний бот у тестовому режимі: повідомлення → ${state.configPayload.test_chat_id}.`);
-    if (state.configPayload.bots?.restart_required) text.push("Профілі ботів змінено. Збережіть налаштування та перезапустіть застосунок.");
-    if (state.configPayload.restart_required) text.push("Збережені налаштування ще не застосовані. Потрібен перезапуск.");
+    if (state.configPayload.bots?.restart_required) text.push("Боти збережені й очікують запуску. Натисніть «Застосувати» або запустіть збережені налаштування на кроці Telegram.");
+    if (state.configPayload.restart_required) text.push("Збережені налаштування очікують застосування.");
     if (state.editorDirty && state.baseRevision && state.baseRevision !== state.configPayload.revision) {
       text.push("Збережені налаштування змінилися поза цією чернеткою. Ваш ввід збережено; перед збереженням узгодьте зміни.");
     }
@@ -276,6 +292,10 @@ function updateEditorLiveParts() {
     const address = state.draftConfig?.addresses?.[index];
     const preview = form.querySelector(".preview-card");
     if (!address) return;
+    const title = form.querySelector(".profile-summary h3");
+    if (title) title.textContent = address.display_name || "Новий профіль";
+    updateProfileSummary(form, address);
+    updateTelegramSetup(form, address);
     if (preview) preview.outerHTML = renderPowerPreview(address, index);
     const guidance = form.querySelector(".draft-guidance");
     if (guidance) guidance.outerHTML = renderDraftGuidance(address);
@@ -285,6 +305,7 @@ function updateEditorLiveParts() {
       button.classList.toggle("active", Boolean(address.power?.enabled && button.dataset.preset === address.power.mode));
     });
   });
+  updateWizard();
   updateBusyControls();
 }
 
@@ -439,6 +460,7 @@ async function fetchJson(url, options = {}) {
 function createBlankAddress(prefill = {}) {
   return {
     entity_prefix: prefill.entity_prefix ?? "",
+    profile_id: "", mode: "building", account_entity: "", telegram_user_id: 0, allow_readings: false, reading_reminders: false,
     display_name: prefill.display_name ?? prefill.friendly_name ?? "",
     telegram_chat_id: "",
     telegram_bot_id: "default",
@@ -460,7 +482,8 @@ function createBlankAddress(prefill = {}) {
     },
     power: {
       enabled: false,
-      mode: "dtek_only",
+      mode: "sources",
+      sources: [],
       loss_entity: "",
       loss_state: "0",
       loss_delay: 30,
@@ -503,6 +526,8 @@ function buildAddressExportPayload(address) {
 function buildConfigExportPayload(config) {
   const normalizedConfig = {
     export_default_templates: Boolean(config?.export_default_templates),
+    receive_commands: config?.receive_commands !== false,
+    welcome_enabled: config?.welcome_enabled !== false,
     addresses: (config?.addresses || []).map((address) =>
       deepMerge(createBlankAddress(), address || {})
     ),
@@ -542,7 +567,7 @@ function normalizeImportedAddressPayload(payload) {
       label: String(item.label || "").trim(),
     }));
 
-  if (!normalized.entity_prefix) {
+  if (!normalized.entity_prefix && normalized.mode !== "personal") {
     throw new Error("У файлі адреси відсутній entity_prefix.");
   }
 
@@ -568,6 +593,8 @@ function normalizeImportedConfigPayload(payload) {
   const currentConfig = getDraftConfig();
   return {
     ha_token: String(rawConfig.ha_token || currentConfig.ha_token || "").trim(),
+    receive_commands: rawConfig.receive_commands ?? currentConfig.receive_commands ?? true,
+    welcome_enabled: rawConfig.welcome_enabled ?? currentConfig.welcome_enabled ?? true,
     export_default_templates: Boolean(
       rawConfig.export_default_templates ?? currentConfig.export_default_templates ?? false,
     ),
@@ -689,7 +716,7 @@ async function handleAddressImportFile(file) {
 
   const config = getDraftConfig();
   const duplicateIndex = config.addresses.findIndex(
-    (address) => address.entity_prefix === importedAddress.entity_prefix,
+    (address) => profileIdentity(address) === profileIdentity(importedAddress),
   );
 
   if (targetIndex === null) {
@@ -1133,8 +1160,8 @@ function renderDiscovery() {
       catalog.voltage_sensors || [],
     ),
     renderCatalogSection(
-      "DTEK binary сенсори",
-      "Опорні power entity, знайдені на DTEK-пристроях.",
+      "Бінарні статуси HA",
+      "Для живлення обирайте лише статус міської мережі. Інші бінарні датчики тут також видимі.",
       catalog.binary_power || [],
     ),
     renderCatalogSection(
@@ -1176,7 +1203,7 @@ function getDraftGuidance(address) {
     address.power?.enabled &&
     ["voltage_only", "loss_plus_voltage"].includes(address.power.mode);
 
-  if (!address.entity_prefix) {
+  if (!address.entity_prefix && address.mode !== "personal") {
     errors.push("Для роботи профілю потрібно вказати entity_prefix.");
   }
   if (!address.display_name && address.entity_prefix) {
@@ -1186,6 +1213,8 @@ function getDraftGuidance(address) {
     errors.push("Моніторинг напруги увімкнено, але voltage entities не вибрані.");
   }
   if (address.power?.enabled) {
+    if (address.power.mode === "sources" && !address.power.sources?.[0]?.entity) errors.push("Оберіть основний датчик живлення.");
+    if (address.power.mode === "sources" && address.power.sources?.length === 2 && address.power.sources[0].entity === address.power.sources[1].entity) errors.push("Для підтвердження потрібен інший незалежний датчик.");
     if (address.power.mode === "dtek_only") {
       hints.push("Режим лише DTEK простий, але зовнішні сенсори зазвичай реагують швидше.");
       if (hasFrequencySensors && hasVoltageSensors) {
@@ -1465,7 +1494,7 @@ function renderDraftGuidance(address) {
             </div>
           `
           : !guidance.errors.length
-            ? '<p class="helper-copy">Цей draft виглядає структурно повним. Запустіть перевірку, щоб порівняти його з живим станом HA.</p>'
+            ? '<p class="helper-copy">Налаштування заповнені. Запустіть перевірку, щоб порівняти його з живим станом HA.</p>'
             : ""
       }
     </div>
@@ -1486,14 +1515,18 @@ function previewDescription() {
   return time ? `Живий стан збережених налаштувань оновлено о ${time}.` : "Живий стан ще недоступний.";
 }
 
+function profileIdentity(address) {
+  return address?.profile_id || address?.entity_prefix || "";
+}
+
 function resolvePreview(address, index) {
   const snapshot = currentEditorPreview();
   const previews = snapshot?.addresses || [];
-  if (previews[index]?.entity_prefix === address.entity_prefix) {
+  if (profileIdentity(previews[index]) === profileIdentity(address)) {
     return previews[index];
   }
   if (address.entity_prefix) {
-    return previews.find((item) => item.entity_prefix === address.entity_prefix) || null;
+    return previews.find((item) => profileIdentity(item) === profileIdentity(address)) || null;
   }
   return previews[index] || null;
 }
@@ -1568,6 +1601,11 @@ function renderPowerPreview(address, index) {
     `;
   }
 
+  if (preview.mode === "sources") {
+    const evidence = preview.signals?.power_sources;
+    const labels = {reported: "дані датчика", unavailable: "немає зв’язку", stale: "застарілий звіт", awaiting_report: "очікування нового звіту після підключення", invalid_value: "некоректне значення", invalid_timestamp: "некоректний час звіту", unit_mismatch: "невідповідні одиниці", silent_after_confirmed_loss: "датчик вимкнувся після підтвердження"};
+    return `<div class="preview-card"><h4>Перевірка датчиків</h4><p>${escapeHtml(preview.reason || "Очікування даних")}</p><div class="signal-grid">${(evidence?.sources || []).map(item => `<div class="signal-card"><p class="entity-id">${escapeHtml(item.entity_id)}</p><strong>${escapeHtml(getHouseStateMeta(item.state).label)}</strong><p>${escapeHtml(labels[item.reason] || item.reason)}</p></div>`).join("")}</div><p class="helper-copy">Це перевірка поточних значень. Робочий бот додатково витримує налаштовані затримки; очікування після зникнення датчика не відновлюється зі збереженого стану.</p></div>`;
+  }
   const lossSnapshot = preview.signals?.loss_entity || null;
   const voltageSnapshots = preview.signals?.voltage_entities || [];
   const voltageTopology = preview.signals?.voltage_topology || {};
@@ -1649,11 +1687,66 @@ function renderPowerPreview(address, index) {
   `;
 }
 
+function powerSourceCatalog() {
+  return ["binary_power", "voltage_sensors", "frequency_sensors"].flatMap(getCatalogItems);
+}
+
+function renderPowerSource(source = {}, index = 0) {
+  const kind = source.kind || "binary";
+  const items = mergeSelectableItems(powerSourceCatalog(), [{entity: source.entity || "", label: "Поточний датчик"}]);
+  return `<fieldset class="power-source" data-source-index="${index}">
+    <legend>${index ? "Додаткове підтвердження (необов’язково)" : "Звідки визначати наявність світла?"}</legend>
+    <label class="field"><span>${index ? "Другий датчик тієї самої лінії" : "Датчик у Home Assistant"}</span>
+      <select class="source-entity">${renderEntityOptions(items, source.entity || "", index ? "Без другого датчика" : "Оберіть статус, напругу або частоту")}</select>
+    </label>
+    <div class="source-settings">
+      <label class="field source-binary"><span>Світло є, коли датчик має стан</span>
+        <select class="source-present-state"><option value="on" ${source.present_state !== "off" ? "selected" : ""}>Увімкнено (on)</option><option value="off" ${source.present_state === "off" ? "selected" : ""}>Вимкнено (off)</option></select>
+      </label>
+      ${index ? `<label class="field"><span>Під час відключення цей датчик…</span><select class="source-availability"><option value="always_on" ${source.availability !== "mains_powered" ? "selected" : ""}>Працює та повідомляє про відсутність мережі</option><option value="mains_powered" ${source.availability === "mains_powered" ? "selected" : ""}>Вимикається разом із мережею</option></select></label>` : `<p class="helper-copy">Цей датчик і його зв’язок мають працювати під час відключення. Наприклад, статус із вашої автоматизації або вхід мережі інвертора. Вихід інвертора не показує наявність міської мережі.</p>`}
+      <details class="source-advanced"><summary>Тип датчика та свіжість даних</summary>
+        <label class="field"><span>Тип значення</span><select class="source-kind"><option value="binary" ${kind === "binary" ? "selected" : ""}>Статус (on/off)</option><option value="voltage" ${kind === "voltage" ? "selected" : ""}>Напруга (В)</option><option value="frequency" ${kind === "frequency" ? "selected" : ""}>Частота (Гц)</option></select></label>
+        <label class="field source-numeric"><span>Поріг наявності мережі (В або Гц)</span><input class="source-threshold" type="number" min="0.01" step="any" value="${escapeHtml(source.present_above ?? (kind === "voltage" ? 50 : 1))}" /></label>
+        <label class="field source-binary"><span>Як оновлюється статус?</span><select class="source-freshness"><option value="state" ${(source.freshness || "state") === "state" ? "selected" : ""}>При зміні; HA повідомляє про втрату зв’язку</option><option value="heartbeat" ${source.freshness === "heartbeat" ? "selected" : ""}>Регулярні звіти з перевіркою давності</option></select></label>
+        <label class="field source-heartbeat"><span>Максимальний вік звіту (с)</span><input class="source-max-age" type="number" min="1" value="${escapeHtml(source.max_age_seconds ?? 180)}" /></label>
+        <label class="field"><span>MQTT-топік живих даних (необов’язково)</span><input class="source-mqtt" type="text" value="${escapeHtml(source.mqtt_topic || "")}" /></label>
+        <p class="helper-copy">Незмінний бінарний статус не застаріває сам по собі: його інтеграція має повідомляти unavailable при втраті зв’язку. Для вимірювань потрібні регулярні звіти. MQTT-топік, якщо вказаний, має містити саме це значення; retained-повідомлення не підтверджують стан.</p>
+      </details>
+    </div>
+  </fieldset>`;
+}
+
+function collectPowerSources(form) {
+  const rows = [...form.querySelectorAll(".power-source")];
+  return rows.filter((row, index) => row.querySelector(".source-entity").value || (index === 0 && rows[1]?.querySelector(".source-entity").value)).map(row => {
+    const kind = row.querySelector(".source-kind").value;
+    return {
+      entity: row.querySelector(".source-entity").value, kind,
+      present_state: row.querySelector(".source-present-state").value,
+      present_above: toNumber(row.querySelector(".source-threshold").value, kind === "voltage" ? 50 : 1),
+      availability: row.querySelector(".source-availability")?.value || "always_on",
+      freshness: kind === "binary" ? row.querySelector(".source-freshness").value : "heartbeat",
+      max_age_seconds: toNumber(row.querySelector(".source-max-age").value, 180, Number.parseInt),
+      mqtt_topic: row.querySelector(".source-mqtt").value.trim(),
+    };
+  });
+}
+
+function syncPowerSources(form) {
+  form.querySelectorAll(".power-source").forEach(row => {
+    const kind = row.querySelector(".source-kind").value;
+    row.querySelector(".source-settings").classList.toggle("hidden", !row.querySelector(".source-entity").value);
+    row.querySelectorAll(".source-binary").forEach(n => n.classList.toggle("hidden", kind !== "binary"));
+    row.querySelectorAll(".source-numeric").forEach(n => n.classList.toggle("hidden", kind === "binary"));
+    row.querySelectorAll(".source-heartbeat").forEach(n => n.classList.toggle("hidden", kind === "binary" && row.querySelector(".source-freshness").value === "state" && !row.querySelector(".source-mqtt").value.trim()));
+  });
+}
+
 function renderAddressEditor(address, index) {
   const candidate = getCandidateForPrefix(address.entity_prefix);
   const addressCandidates = getAddressCandidateOptions(address.entity_prefix, address.display_name);
   const voltageEntities = address.voltage?.entities || [];
-  const frequencySensors = mergeSelectableItems(getCatalogItems("frequency_sensors"), [
+  const frequencySensors = mergeSelectableItems(powerSourceCatalog(), [
     { entity: address.power?.loss_entity || "", label: "Поточне значення" },
   ]);
   const voltageSensors = mergeSelectableItems(getCatalogItems("voltage_sensors"), voltageEntities);
@@ -1669,7 +1762,7 @@ function renderAddressEditor(address, index) {
   const powerPanelKey = getPanelStateKey(address, index, "power");
   const advancedPanelKey = getPanelStateKey(address, index, "advanced");
   return `
-    <article class="editor-card address-editor-card" data-index="${index}">
+    <article class="editor-card address-editor-card" data-index="${index}" data-profile-id="${escapeHtml(address.profile_id || "")}">
       <div class="addr-header">
         <div class="addr-title-row">
           <h3>Адреса ${index + 1}</h3>
@@ -1681,8 +1774,13 @@ function renderAddressEditor(address, index) {
           </div>
         </div>
         <div class="addr-identity-grid">
-          <label class="field">
-            <span>Entity prefix</span>
+          <label class="field"><span>Режим профілю</span><select class="addr-mode"><option value="building" ${address.mode !== "personal" ? "selected" : ""}>Графіки за адресою</option><option value="personal" ${address.mode === "personal" ? "selected" : ""}>Особистий кабінет</option></select></label>
+          <label class="field personal-only"><span>Особовий рахунок у HA</span><select class="addr-account"><option value="">Оберіть рахунок</option>${(state.discovery?.accounts || []).map(a => `<option value="${escapeHtml(a.entity_id)}" ${a.entity_id === address.account_entity ? "selected" : ""}>${escapeHtml(a.masked + " · " + a.address)}</option>`).join("")}${address.account_entity && !(state.discovery?.accounts || []).some(a => a.entity_id === address.account_entity) ? `<option selected value="${escapeHtml(address.account_entity)}">${escapeHtml(address.account_entity)} · недоступний</option>` : ""}</select><small>Підключіть кабінет через DTEK Monitor. Група береться тільки з API кабінету.</small></label>
+          <label class="field personal-only"><span>Telegram ID власника</span><input class="addr-user-id" type="text" inputmode="numeric" value="${address.telegram_user_id || ""}" />${recipientPicker(".addr-user-id", true)}<small>Напишіть /start обраному боту, натисніть «Оновити» й оберіть себе зі списку або введіть ID вручну. Перевірте ім’я, @username та ID: збереження надасть цій людині доступ до рахунку.</small></label>
+          <label class="toggle personal-only"><input class="addr-allow-readings" type="checkbox" ${address.allow_readings ? "checked" : ""}/><span>Дозволити передачу показів із підтвердженням</span></label>
+          <label class="toggle personal-only"><input class="addr-reminders" type="checkbox" ${address.reading_reminders ? "checked" : ""}/><span>Нагадувати про покази</span></label>
+          <label class="field building-only">
+            <span>Адреса з DTEK Monitor</span>
             <select class="addr-entity-prefix">
               <option value="">Оберіть адресу з dtek_monitor</option>
               ${addressCandidates
@@ -1707,14 +1805,15 @@ function renderAddressEditor(address, index) {
           <label class="field">
             <span>Telegram-бот</span>
             <select class="addr-bot-id">${botOptions(address.telegram_bot_id || "default")}</select>
-            <small>Додайте іншого бота на вкладці «Telegram-боти».</small>
+            <small>Оберіть наявного бота або натисніть «Додати іншого бота» вище.</small>
           </label>
-          <label class="field">
+          <label class="field building-only">
             <span>Чат ID</span>
             <input class="addr-chat-id" type="text" value="${escapeHtml(address.telegram_chat_id || "")}" placeholder="Окремий чат (необов'язково)" />
+            ${recipientPicker(".addr-chat-id")}
             <small>Особистий чат, група або канал. Для особистого чату спочатку натисніть «Розпочати» у бота. Порожнє поле використовує чат обраного бота.</small>
           </label>
-          <label class="field">
+          <label class="field building-only">
             <span>Обрана група (порожньо — всі окремо)</span>
             <input class="addr-selected-group" type="text" value="${escapeHtml(address.selected_group || "")}" placeholder="GPV5.1" />
             <small>Якщо оператор не показує номери груп, залиште поле порожнім — бот покаже всі варіанти окремо.</small>
@@ -1747,13 +1846,13 @@ function renderAddressEditor(address, index) {
         data-panel-key="${escapeHtml(voltagePanelKey)}"
       >
         <div class="subpanel-head" data-action="toggle-section" role="button" tabindex="0">
-          <h4>Напруга та фази</h4>
+          <h4>Напруга: показувати та попереджати</h4>
         </div>
         <div class="subpanel-body">
           <div class="helper-block subtle">
             <p class="meta-label">Напруга та фази</p>
             <p class="helper-copy">
-              Вибрані тут сенсори є базою для всієї внутрішньої логіки add-on. Один сенсор означає однофазну схему, два або три сенсори вмикають пофазовий стан будинку та повідомлення про partial/phase changes.
+              Ці датчики показують напругу та її якість. У режимі «Датчики Home Assistant» вони не змінюють рішення про наявність світла. Для кількох фаз використовуйте окрему збережену схему в розділі живлення.
             </p>
           </div>
           <div class="voltage-topology-fields">
@@ -1761,7 +1860,7 @@ function renderAddressEditor(address, index) {
               index,
               "voltage",
               "Сенсори напруги",
-              "Оберіть один, два або три сенсори із каталогу. Цей набір використовується і для status/power logic, і для окремих voltage alerts.",
+              "Оберіть датчик напруги для статусу. Для різних фаз можна додати кілька та вказати їх назви.",
               voltageSensors,
               voltageEntities,
             )}
@@ -1787,7 +1886,7 @@ function renderAddressEditor(address, index) {
               <span>Надсилати окремі сповіщення про якість напруги</span>
             </label>
             <p class="helper-copy">
-              Цей чекбокс вмикає лише окремі повідомлення про низьку/високу/нормальну напругу. Самі сенсори вище все одно використовуються для power, status і пофазової логіки.
+              Цей чекбокс вмикає лише окремі повідомлення про низьку/високу/нормальну напругу. Показання залишаються у статусі навіть без окремих сповіщень. Наявність світла визначається в секції живлення.
             </p>
           </div>
           <div class="inline-fields voltage-alert-only">
@@ -1822,7 +1921,7 @@ function renderAddressEditor(address, index) {
           <label class="toggle"><input class="power-enabled" type="checkbox" ${address.power?.enabled ? "checked" : ""} /><span>Визначення живлення</span></label>
         </div>
         <div class="subpanel-body">
-          ${renderModePresetBar(address, index)}
+
           <div class="power-mode-guidance">${renderModeGuidance(address)}</div>
           ${powerHints}
 
@@ -1831,14 +1930,20 @@ function renderAddressEditor(address, index) {
               <label class="field compact-field">
                 <span>Режим</span>
                 <select class="power-mode">
+                  <option value="sources" ${address.power?.mode === "sources" ? "selected" : ""}>Датчики Home Assistant</option>
                   <option value="dtek_only" ${address.power?.mode === "dtek_only" ? "selected" : ""}>Лише DTEK</option>
-                  <option value="voltage_only" ${address.power?.mode === "voltage_only" ? "selected" : ""}>Лише напруга</option>
-                  <option value="loss_plus_voltage" ${address.power?.mode === "loss_plus_voltage" ? "selected" : ""}>Швидка втрата + напруга</option>
+                  <option value="voltage_only" ${address.power?.mode === "voltage_only" ? "selected" : ""}>Напруга та фази (сумісна схема)</option>
+                  <option value="loss_plus_voltage" ${address.power?.mode === "loss_plus_voltage" ? "selected" : ""}>Сигнал втрати + напруга (сумісна схема)</option>
                 </select>
               </label>
             </div>
 
-            <div class="helper-block subtle voltage-mode-only">
+            <div class="sources-only">
+              ${renderPowerSource(address.power?.sources?.[0], 0)}
+              ${renderPowerSource(address.power?.sources?.[1], 1)}
+              <p class="helper-copy">Два датчики мають вимірювати ту саму лінію незалежно один від одного. Вони не є різними фазами. Суперечливі дані означають невідомий стан. Зникнення другого датчика підтверджує відключення тільки після явного сигналу першого та очікування.</p>
+            </div>
+            <div class="helper-block subtle sensor-mode-only">
               <label class="toggle">
                 <input class="power-telemetry-notifications" type="checkbox" ${address.power?.telemetry_notifications === true ? "checked" : ""} />
                 <span>Повідомляти про втрату та повернення даних</span>
@@ -1850,7 +1955,7 @@ function renderAddressEditor(address, index) {
               <p class="helper-copy">Недоступність датчика не підтверджує відключення світла. Для швидкого підтвердження потрібен незалежний сенсор тієї самої лінії, доступний від резервного живлення.</p>
             </div>
 
-            <div class="power-sensor-group voltage-mode-only">
+            <div class="power-sensor-group sensor-mode-only">
               <label class="field compact-field">
                 <span>Підтвердження відсутності напруги (с)</span>
                 <input class="power-loss-delay" type="number" min="0" step="1" value="${escapeHtml(address.power?.loss_delay ?? 30)}" />
@@ -1865,7 +1970,7 @@ function renderAddressEditor(address, index) {
                     ${renderEntityOptions(
                       frequencySensors,
                       address.power?.loss_entity || "",
-                      "Оберіть сенсор частоти",
+                      "Оберіть датчик мережі",
                     )}
                   </select>
                 </label>
@@ -1882,10 +1987,10 @@ function renderAddressEditor(address, index) {
               </div>
             </div>
 
-            <div class="power-sensor-group loss-plus-voltage-only">
-              <p class="section-label">Підтвердження повного outage</p>
+            <div class="power-sensor-group sensor-mode-only">
+              <p class="section-label">Очікування другого датчика</p>
               <div class="inline-fields">
-                <label class="field" style="flex:2">
+                <label class="field loss-plus-voltage-only" style="flex:2">
                   <span>Логіка</span>
                   <input type="text" value="Підтвердження береться із секції «Напруга та фази»" readonly />
                 </label>
@@ -1894,15 +1999,15 @@ function renderAddressEditor(address, index) {
                   <input class="power-confirm-timeout" type="number" step="1" value="${escapeHtml(address.power?.confirm_timeout ?? 15)}" />
                 </label>
               </div>
-              <p class="helper-copy">
+              <p class="helper-copy loss-plus-voltage-only">
                 Після спрацювання loss trigger add-on чекає новий update від сенсора(ів) напруги. Якщо за цей час приходить свіже значення вище порога, це вважається хибним спрацюванням. Якщо update не приходить або напруга явно зникає, старе значення вважається stale і будинок переходить в outage.
               </p>
             </div>
 
-            <div class="power-sensor-group voltage-mode-only">
+            <div class="power-sensor-group sensor-mode-only">
               <p class="section-label">Повернення</p>
               <div class="inline-fields">
-                <label class="field compact-field">
+                <label class="field voltage-mode-only">
                   <span>Логіка</span>
                   <input type="text" value="Відновлення також визначається за секцією «Напруга та фази»" readonly />
                 </label>
@@ -2007,6 +2112,11 @@ function renderAddressEditor(address, index) {
 }
 
 function renderEditor(force = false) {
+  if (!state.wizard) {
+    const saved = readSessionJson(`${UI_STORAGE_PREFIX}:wizard`);
+    const i = state.draftConfig?.addresses?.findIndex(a => a.profile_id === saved?.id) ?? -1;
+    if (i >= 0 && Number.isInteger(saved?.step) && saved.step >= 0 && saved.step <= 3) { state.wizard = saved; state.activeProfile = i; }
+  }
   if (!state.configPayload) {
     editorContainer.innerHTML = '<p class="empty-state">Редактор ще не готовий.</p>';
     return;
@@ -2022,10 +2132,11 @@ function renderEditor(force = false) {
   const config = state.draftConfig || cloneJson(state.configPayload.config);
   const options = state.configPayload.options;
   const addresses = config.addresses;
+  state.activeProfile = Math.min(state.activeProfile, Math.max(0, addresses.length - 1));
   const interaction = editorInteraction();
 
   editorContainer.innerHTML = `
-    <section class="editor-card">
+    <details class="editor-card global-settings"><summary>Загальні та службові налаштування</summary>
       <div class="field-grid">
         <label class="field">
           <span>Чат за замовчуванням</span>
@@ -2042,11 +2153,16 @@ function renderEditor(force = false) {
           <input id="cfg-ha-token" type="password" autocomplete="off" value="${escapeHtml(config.ha_token || "")}" />
         </label>
       </div>
+      <label class="toggle"><input id="cfg-receive-commands" type="checkbox" ${config.receive_commands !== false ? "checked" : ""}/><span>Приймати команди та особисті повідомлення</span></label>
+      <p class="helper-copy">Якщо цей токен працює на кількох HA, увімкніть приймання лише на сервері з особистим кабінетом. Решта серверів продовжать надсилати сповіщення.</p>
+      <label class="toggle"><input id="cfg-welcome" type="checkbox" ${config.welcome_enabled !== false ? "checked" : ""}/><span>Привітання для нових користувачів</span></label>
+      <p class="helper-copy">Лише у приватній переписці у відповідь на звернення, не частіше разу на добу. Текст і посилання можна змінити: «Шаблони» → «Привітання · welcome». Типово — опис бота, посилання на GitHub і Telegram ID співрозмовника. Шаблон спільний для всіх ботів цього add-on; дані рахунків у нього не передаються.</p>
       <p id="editor-preview-time" class="helper-copy">${escapeHtml(previewDescription())}</p>
-    </section>
-    ${addresses.map((address, index) => renderAddressEditor(address, index)).join("") || '<p class="empty-state">Адрес ще немає. Натисніть «Додати адресу» або виберіть її на вкладці «Пошук».</p>'}
+    </details>
+    ${addresses.map((address, index) => renderAddressEditor(address, index)).join("") || '<p class="empty-state">Профілів ще немає. Натисніть «Додати профіль», щоб обрати адресу або особистий кабінет.</p>'}
   `;
 
+  decorateProfiles();
   syncAllEditorVisibility();
   restoreEditorInteraction(interaction);
   updateEditorLiveParts();
@@ -2054,13 +2170,200 @@ function renderEditor(force = false) {
   editorStatus.textContent = state.editorStatus.message;
 }
 
+function decorateProfiles() {
+  // Reparent existing controls, preserving the collector and all draft protections.
+  const global = editorContainer.querySelector(".global-settings");
+  if (global) editorContainer.append(global);
+  editorContainer.querySelectorAll(".address-editor-card").forEach((form, index) => {
+    const address = state.draftConfig?.addresses?.[index] || {};
+    const summary = document.createElement("div");
+    summary.className = "profile-summary";
+    const bot = state.configPayload?.bots?.profiles?.find(b => b.id === (address.telegram_bot_id || "default"));
+    const recipient = address.mode === "personal" ? address.telegram_user_id : address.telegram_chat_id || bot?.chat_id || state.configPayload?.options?.default_chat_id;
+    const runtime = state.overview?.addresses?.find(a => a.profile_id === profileIdentity(address) || a.entity_prefix === address.entity_prefix);
+    summary.innerHTML = `<div><h3>${escapeHtml(address.display_name || "Новий профіль")}</h3><p class="helper-copy">${address.mode === "personal" ? "Особистий кабінет" : "Графіки за адресою"} · ${escapeHtml(bot?.name || "Основний бот")} · ${escapeHtml(recipient || "Одержувача не обрано")}</p><small>${runtime ? (state.overview?.runtime?.ha_connected ? "Працює · " + escapeHtml(HOUSE_STATE_META[runtime.live_power]?.label || "дані оновлюються") : "Немає зв’язку з HA") : "Налаштування профілю"}</small></div><button type="button" class="secondary-button" data-action="edit-profile" data-index="${index}" aria-expanded="${index === state.activeProfile}">Налаштувати</button>`;
+    const body = document.createElement("div");
+    body.className = "profile-editor";
+    while (form.firstChild) body.append(form.firstChild);
+    form.append(summary, body);
+    const source = document.createElement("p"); source.className = "profile-source helper-copy"; summary.querySelector("div").append(source);
+    const actions = document.createElement("details");
+    actions.className = "profile-actions";
+    actions.innerHTML = '<summary>Дії з профілем</summary>';
+    actions.append(body.querySelector(".addr-actions"));
+    body.append(actions);
+    body.classList.toggle("hidden", index !== state.activeProfile);
+    const timings = document.createElement("details");
+    timings.className = "power-timing";
+    timings.innerHTML = "<summary>Затримки та повідомлення про втрату даних</summary>";
+    body.querySelectorAll(".power-fields > .sensor-mode-only").forEach(node => timings.append(node));
+    body.querySelector(".power-fields").append(timings);
+    const isNew = state.wizard?.id === address.profile_id && Boolean(address.profile_id);
+    if (isNew) form.classList.add("wizard-profile");
+    form.classList.add("stepped-profile");
+    const modes = body.querySelector(".power-mode").closest(".inline-fields");
+    const compatibility = document.createElement("details");
+    compatibility.className = "power-compatibility";
+    compatibility.innerHTML = '<summary>Додатково: сумісність зі старими схемами</summary><p class="helper-copy">Нові профілі використовують датчики Home Assistant. Тут можна залишити попередню схему для наявної конфігурації.</p>';
+    modes.before(compatibility); compatibility.append(modes);
+    const legacy = document.createElement("p"); legacy.className = "legacy-power-note helper-copy";
+    compatibility.before(legacy);
+    const stages = [0,1,2,3].map(step => {
+      const node = document.createElement("section");
+      node.className = "profile-stage";
+      node.dataset.stage = step;
+      return node;
+    });
+    const grid = body.querySelector(".addr-identity-grid");
+    for (const field of [...grid.children]) {
+      const delivery = field.querySelector(".addr-bot-id, .addr-chat-id, .addr-user-id");
+      const notify = field.querySelector(".addr-allow-readings, .addr-reminders");
+      stages[delivery ? 1 : notify ? 2 : 0].append(field);
+    }
+    body.querySelector(".addr-header").remove();
+    while (body.firstChild) stages[2].append(body.firstChild);
+    const nav = document.createElement("nav");
+    nav.className = "wizard-steps";
+    nav.setAttribute("aria-label", "Кроки налаштування");
+    nav.innerHTML = ["1. Джерело", "2. Telegram", "3. Сповіщення", "4. Перевірка"].map((label, i) => `<button type="button" class="secondary-button" data-action="wizard-step" data-step="${i}">${label}</button>`).join("");
+    body.append(nav, ...stages);
+    const controls = document.createElement("div");
+    controls.className = "wizard-controls";
+    controls.innerHTML = `<button type="button" class="secondary-button" data-action="wizard-back">Назад</button><button type="button" class="secondary-button" data-action="wizard-next">Далі</button>`;
+    body.append(controls);
+    stages[1].insertAdjacentHTML("afterbegin", `<div class="telegram-setup"><div class="telegram-progress" role="status"></div><div class="tool-actions"><button type="button" class="secondary-button" data-action="connect-bot">Додати іншого бота</button><button type="button" class="secondary-button" data-action="activate-bots">Запустити збережені налаштування</button><button type="button" class="secondary-button" data-action="refresh-recipients">Оновити одержувачів</button></div><p class="helper-copy">Після запуску напишіть боту /start. Для групи додайте бота й надішліть /start@ім’я_бота; для каналу призначте його адміністратором. Оберіть одержувача нижче або введіть ID. Виявлення користувача саме по собі не надає доступу до рахунку.</p></div>`);
+    if (!isNew) controls.insertAdjacentHTML("beforeend", '<button type="button" class="secondary-button" data-action="show-all">Усі розділи</button>');
+  });
+  editorContainer.querySelectorAll("details").forEach(node => {
+    node.open = Boolean(state.detailsOpen[detailKey(node)]);
+  });
+  updateWizard();
+}
+
+function detailKey(node) {
+  const form = node.closest(".address-editor-card");
+  return `${form?.dataset.profileId || form?.dataset.index || "global"}:${node.className}:${node.closest(".power-source")?.dataset.sourceIndex || ""}`;
+}
+editorContainer.addEventListener("toggle", event => {
+  if (event.target instanceof HTMLDetailsElement && event.target.isConnected) {
+    state.detailsOpen[detailKey(event.target)] = event.target.open;
+  }
+}, true);
+
+function selectedBot(address) {
+  return state.configPayload?.bots?.profiles?.find(b => b.id === (address.telegram_bot_id || "default"));
+}
+function destination(address) {
+  const bot = selectedBot(address);
+  const id = address.mode === "personal" ? address.telegram_user_id : address.telegram_chat_id || bot?.chat_id || (bot?.id === "default" ? state.configPayload?.options?.default_chat_id : "");
+  const peer = state.configPayload?.bots?.recipients?.[bot?.id]?.find(p => String(p.id) === String(id));
+  return {id, peer, label: id ? `${peer?.name || (address.mode === "personal" ? "Власник" : "Чат")}${peer?.username ? " · @" + peer.username : ""} · ${id}` : "Одержувача не обрано"};
+}
+function updateProfileSummary(form, address) {
+  const bot = selectedBot(address), dest = destination(address);
+  const summary = form.querySelector(".profile-summary");
+  summary.querySelector("p").textContent = `${address.mode === "personal" ? "Особистий кабінет" : "Графіки за адресою"} · ${bot?.name || "Бота не знайдено"} · ${dest.label}`;
+  // A cabinet and a building can share a prefix. Never match a different profile's health.
+  const source = summary.querySelector(".profile-source");
+  const account = state.discovery?.accounts?.find(a => a.entity_id === address.account_entity);
+  if (source) source.textContent = address.mode === "personal" ? account ? `${account.masked} · ${account.address}` : "Рахунок недоступний" : getCandidateForPrefix(address.entity_prefix)?.friendly_name || address.entity_prefix || "Адресу не обрано";
+  const runtime = state.overview?.addresses?.find(a => address.profile_id ? a.profile_id === address.profile_id : a.entity_prefix === address.entity_prefix && a.mode !== "personal");
+  summary.querySelector("small").textContent = !state.overview?.runtime?.ha_connected ? "Немає зв’язку з Home Assistant" : runtime ? `Працює · ${HOUSE_STATE_META[runtime.live_power]?.label || "дані оновлюються"}` : "Ще не запущено";
+  const note = form.querySelector(".legacy-power-note");
+  if (note) { note.textContent = `Поточна схема: ${POWER_MODE_META[address.power?.mode]?.label || "Датчики Home Assistant"}. Змінити можна в додаткових налаштуваннях нижче.`; note.classList.toggle("hidden", !address.power?.enabled || address.power.mode === "sources"); }
+}
+function updateTelegramSetup(form, address) {
+  const bot = selectedBot(address), snapshot = state.configPayload?.bots;
+  const runtime = snapshot?.runtime?.find(b => b.id === bot?.id);
+  const dest = destination(address);
+  const receiving = snapshot?.receiving !== false;
+  const active = Boolean(runtime?.ready && !runtime.error && !runtime.delivery_error);
+  const message = !bot ? "1. Оберіть або додайте бота." : snapshot?.restart_required ? "1. Бот збережений. Запустіть збережені налаштування, щоб він почав бачити одержувачів. Чернетка цього профілю залишиться незастосованою." : !receiving ? "Приймання команд вимкнено на цьому HA. Виявлення одержувачів і особисте меню не працюватимуть. Увімкніть приймання в загальних налаштуваннях лише на одному сервері для цього токена." : (runtime?.error || runtime?.delivery_error) ? `Бот потребує уваги: ${runtime.error || runtime.delivery_error}` : !active ? "Підключення бота ще не підтверджене. Оновіть стан після запуску." : dest.id ? `Бот підключений. Одержувач: ${dest.label}.` : "2. Напишіть боту /start, потім оновіть список і оберіть одержувача.";
+  const node = form.querySelector(".telegram-progress");
+  if (node) {
+    node.textContent = message;
+    if (bot?.username && /^[a-zA-Z0-9_]+$/.test(bot.username)) {
+      const link = document.createElement("a"); link.href = `https://t.me/${bot.username}`; link.target = "_blank"; link.rel = "noopener"; link.textContent = ` Відкрити @${bot.username}`; node.append(link);
+    }
+  }
+  const activate = form.querySelector('[data-action="activate-bots"]');
+  if (activate) { activate.classList.toggle("hidden", !snapshot?.restart_required && !state.configPayload?.restart_required); activate.disabled = state.configBusy || state.botBusy; }
+}
+function sensorLabel(entity) {
+  const item = powerSourceCatalog().find(s => s.entity_id === entity);
+  return item ? `${item.friendly_name || entity} (${entity})` : entity || "не обрано";
+}
+function reviewProfile(address) {
+  const bot = selectedBot(address), dest = destination(address);
+  const account = state.discovery?.accounts?.find(a => a.entity_id === address.account_entity);
+  const house = getCandidateForPrefix(address.entity_prefix);
+  const source = address.mode === "personal" ? account ? `${account.masked} · ${account.address}` : "Рахунок недоступний у Home Assistant" : house?.friendly_name || address.entity_prefix || "Адресу не обрано";
+  const names = [address.schedule_change.enabled && "зміни графіка", address.group_change.enabled && "зміни групи", address.emergency.enabled && "екстрені відключення", address.upcoming_outage.enabled && `нагадування за ${address.upcoming_outage.minutes} хв`, address.power.enabled && "наявність світла", address.voltage.enabled && "якість напруги", address.status_message.enabled && "статус", address.mode === "personal" && address.reading_reminders && "нагадування про покази"].filter(Boolean);
+  const sources = address.power?.sources || [];
+  let power = "Без локального визначення живлення";
+  if (address.power.enabled) {
+    power = address.power.mode === "sources" ? sources.map((s,i) => `${i ? "Підтвердження" : "Основний"}: ${sensorLabel(s.entity)}; ${s.kind === "binary" ? `статус «${s.present_state}» означає наявність мережі` : s.kind === "frequency" ? "частота" : "напруга"}; ${s.availability === "mains_powered" ? "вимикається разом із мережею" : "працює при відключенні"}`).join("\n") || "Датчик не обрано" : `${POWER_MODE_META[address.power.mode]?.label}: ${address.power.loss_entity ? sensorLabel(address.power.loss_entity) + "; " : ""}${(address.voltage.entities || []).map(e => sensorLabel(e.entity)).join(", ")}`;
+    power += `\nЗатримка відключення: ${address.power.loss_delay} с; відновлення: ${address.power.restore_delay} с.`;
+  }
+  const warnings = [];
+  if (!state.overview?.runtime?.ha_connected) warnings.push("Немає зв’язку з Home Assistant. Перевірте його перед запуском.");
+  if (address.mode === "personal" && !account) warnings.push("Обраний рахунок зараз недоступний.");
+  if (!bot || !dest.id) warnings.push("Оберіть бота та одержувача на кроці Telegram.");
+  if (dest.peer?.available === false || dest.peer?.available === 0) warnings.push("Бот більше не має доступу до обраного чату.");
+  if (bot?.test_mode) warnings.push(address.mode === "personal" && String(bot.test_chat_id) !== String(dest.id) ? "Тестовий чат не збігається з власником. Особисті повідомлення заблоковані." : `Увімкнений тестовий режим: повідомлення → ${bot.test_chat_id}.`);
+  if (address.mode === "personal" && getDraftConfig().receive_commands === false) warnings.push("Приймання команд вимкнено. Особисте меню недоступне.");
+  const rows = [["Джерело", source], ["Бот", bot ? `${bot.name}${bot.username ? " · @" + bot.username : ""}` : "не обрано"], ["Одержувач", dest.label], ["Сповіщення", names.join(", ") || "вимкнені"], ["Живлення", power], ["Якість напруги", address.voltage.enabled ? (address.voltage.entities || []).map(e => sensorLabel(e.entity)).join(", ") || "датчик не обрано" : "сповіщення вимкнені"]];
+  if (address.mode === "personal") rows.push(["Передача показів", address.allow_readings ? "Дозволена лише власнику, після окремого підтвердження в Telegram" : "Вимкнена"]);
+  return `<h3>Перевірте перед запуском</h3><dl class="profile-review">${rows.map(([k,v])=>`<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>${warnings.map(w=>`<p class="status-warn">${escapeHtml(w)}</p>`).join("")}<p class="helper-copy">«Застосувати» перевірить і збереже всі профілі та перезапустить застосунок. Увімкнені повідомлення надходитимуть указаним одержувачам. Незбережені поля токена потрібно спершу зберегти у формі бота.</p><button type="button" class="primary-button" data-action="wizard-apply">Застосувати</button>`;
+}
+function updateWizard() {
+  editorContainer.querySelectorAll(".stepped-profile").forEach(form => {
+    const index = Number(form.dataset.index), address = state.draftConfig?.addresses?.[index];
+    if (!address) return;
+    const isNew = form.classList.contains("wizard-profile");
+    const step = isNew ? state.wizard?.step || 0 : state.profileSteps[profileIdentity(address)] || 0;
+    const all = state.showAll && !isNew;
+    form.querySelectorAll(".profile-stage").forEach(node => node.classList.toggle("hidden", !all && Number(node.dataset.stage) !== step));
+    form.querySelectorAll('[data-action="wizard-step"]').forEach(node => node.setAttribute("aria-current", !all && Number(node.dataset.step) === step ? "step" : "false"));
+    form.querySelector('[data-action="wizard-back"]').disabled = step === 0 || all;
+    form.querySelector('[data-action="wizard-next"]').classList.toggle("hidden", step === 3 || all);
+    const toggle = form.querySelector('[data-action="show-all"]');
+    if (toggle) toggle.textContent = all ? "Повернутися до кроків" : "Усі розділи";
+    if (step === 3 || all) {
+      const html = reviewProfile(address), node = form.querySelector('[data-stage="3"]');
+      if (node._reviewHtml !== html) { node.innerHTML = html; node._reviewHtml = html; }
+    }
+  });
+  if (state.wizard) writeSessionJson(`${UI_STORAGE_PREFIX}:wizard`, state.wizard);
+}
+function wizardStep(next, form) {
+  if (!form) return;
+  const index = Number(form.dataset.index), address = collectEditorConfig().addresses[index];
+  const isNew = form.classList.contains("wizard-profile");
+  const step = isNew ? state.wizard.step : state.profileSteps[profileIdentity(address)] || 0;
+  if (isNew && next > step) {
+    if (next > 0 && !(address.mode === "personal" ? address.account_entity : address.entity_prefix)) {
+      setEditorStatus("Оберіть адресу або рахунок, щоб продовжити.", "status-warn"); return;
+    }
+    if (next > 1 && !destination(address).id) {
+      setEditorStatus("Оберіть одержувача у Telegram.", "status-warn"); return;
+    }
+    if (next > 1 && address.mode === "personal" && !/^[1-9][0-9]*$/.test(String(address.telegram_user_id || ""))) {
+      setEditorStatus("Оберіть власника особистого кабінету в Telegram.", "status-warn"); return;
+    }
+  }
+  if (state.editorDirty) persistEditorDraftSnapshot();
+  const value = Math.max(0, Math.min(3, next));
+  if (isNew) state.wizard.step = value;
+  else { state.profileSteps[profileIdentity(address)] = value; writeSessionJson(`${UI_STORAGE_PREFIX}:steps`, state.profileSteps); }
+  updateWizard();
+  form.querySelector(`[data-action="wizard-step"][data-step="${value}"]`)?.focus();
+}
+
 function collectSelectedEntityItems(form, selector) {
   return Array.from(form.querySelectorAll(selector))
-    .map((node) => ({
-      entity: node.dataset.entity?.trim() || "",
-      label: node.dataset.label?.trim() || "",
-    }))
-    .filter((item) => item.entity);
+    .map(node => ({entity: node.dataset.entity?.trim() || "", label: node.dataset.label?.trim() || ""}))
+    .filter(item => item.entity);
 }
 
 function collectEditorConfig() {
@@ -2068,17 +2371,26 @@ function collectEditorConfig() {
   const config = {
     ha_token: document.getElementById("cfg-ha-token")?.value.trim() ?? "",
     export_default_templates: currentConfig.export_default_templates ?? false,
+    receive_commands: document.getElementById("cfg-receive-commands")?.checked ?? true,
+    welcome_enabled: document.getElementById("cfg-welcome")?.checked ?? true,
     addresses: [],
   };
 
   const addressForms = editorContainer.querySelectorAll(".address-editor-card");
   for (const form of addressForms) {
+    const personal = form.querySelector(".addr-mode").value === "personal";
     config.addresses.push({
+      profile_id: form.dataset.profileId || "",
+      mode: personal ? "personal" : "building",
+      account_entity: form.querySelector(".addr-account").value,
+      telegram_user_id: Number(form.querySelector(".addr-user-id").value) || 0,
+      allow_readings: form.querySelector(".addr-allow-readings").checked,
+      reading_reminders: form.querySelector(".addr-reminders").checked,
       entity_prefix: form.querySelector(".addr-entity-prefix").value.trim(),
       display_name: form.querySelector(".addr-display-name").value.trim(),
-      telegram_chat_id: form.querySelector(".addr-chat-id").value.trim(),
+      telegram_chat_id: personal ? String(Number(form.querySelector(".addr-user-id").value) || "") : form.querySelector(".addr-chat-id").value.trim(),
       telegram_bot_id: form.querySelector(".addr-bot-id").value,
-      selected_group: form.querySelector(".addr-selected-group").value.trim(),
+      selected_group: personal ? "" : form.querySelector(".addr-selected-group").value.trim(),
       schedule_change: {
         enabled: form.querySelector(".feature-schedule-change").checked,
         silent: form.querySelector(".schedule-silent").checked,
@@ -2106,6 +2418,7 @@ function collectEditorConfig() {
       power: {
         enabled: form.querySelector(".power-enabled").checked,
         mode: form.querySelector(".power-mode").value,
+        sources: collectPowerSources(form),
         loss_entity: form.querySelector(".power-loss-entity").value.trim(),
         loss_mqtt_topic: form.querySelector(".power-loss-mqtt-topic").value.trim(),
         loss_state: form.querySelector(".power-loss-state").value.trim(),
@@ -2146,12 +2459,19 @@ function collectEditorConfig() {
 }
 
 function syncAddressFormVisibility(form) {
+  updateRecipientPickers(form);
+  syncPowerSources(form);
+  const personal = form.querySelector(".addr-mode")?.value === "personal";
+  form.querySelectorAll(".personal-only").forEach(n => n.classList.toggle("hidden", !personal));
+  form.querySelectorAll(".building-only").forEach(n => n.classList.toggle("hidden", personal));
   const powerEnabled = form.querySelector(".power-enabled").checked;
   const mode = form.querySelector(".power-mode").value;
   const voltageEnabled = form.querySelector(".voltage-enabled").checked;
   const statusEnabled = form.querySelector(".feature-status-enabled").checked;
   const statusDeliveryMode = form.querySelector(".feature-status-delivery-mode").value;
-  const usesVoltageTopology = powerEnabled && mode !== "dtek_only";
+  const usesVoltageTopology = powerEnabled && ["voltage_only", "loss_plus_voltage"].includes(mode);
+  form.querySelectorAll(".sources-only").forEach(n => n.classList.toggle("hidden", !powerEnabled || mode !== "sources"));
+  form.querySelectorAll(".sensor-mode-only").forEach(n => n.classList.toggle("hidden", !powerEnabled || mode === "dtek_only"));
   const lossPlusVoltageMode = powerEnabled && mode === "loss_plus_voltage";
   const hasVoltageEntities =
     form.querySelectorAll(".voltage-selected-entities .selected-entity-item").length > 0;
@@ -2357,7 +2677,7 @@ async function validateConfig() {
     // Validation is not a save. Keep the draft and its persisted revision.
     state.validatedPreview = { revision, preview: result.preview };
     updateEditorLiveParts();
-    setEditorStatus("Конфіг валідний. Прев'ю оновлено. Незбережені зміни залишаються у чернетці.", "status-good");
+    setEditorStatus("Налаштування перевірено. Попередній перегляд оновлено. Незбережені зміни залишаються у чернетці.", "status-good");
   } finally {
     state.configBusy = false;
     updateBusyControls();
@@ -2366,6 +2686,7 @@ async function validateConfig() {
 
 async function saveConfig({ restart }) {
   if (state.configBusy || state.botBusy || !state.configPayload) return;
+  if (state.botDirty) { setEditorStatus("Спочатку збережіть або скасуйте зміни у формі бота. Токен ще не збережений.", "status-warn"); return; }
   const config = collectEditorConfig();
   const revision = state.editorRevision;
   state.configBusy = true;
@@ -2385,6 +2706,8 @@ async function saveConfig({ restart }) {
     if (revision === state.editorRevision) {
       state.draftConfig = cloneJson(result.config);
       state.editorDirty = false;
+      state.wizard = null;
+      removeSessionValue(`${UI_STORAGE_PREFIX}:wizard`);
       clearEditorDraftSnapshot();
     } else {
       persistEditorDraftSnapshot();
@@ -2392,8 +2715,8 @@ async function saveConfig({ restart }) {
     updateEditorLiveParts();
     setEditorStatus(state.editorDirty
       ? "Попередню версію збережено. Нові зміни залишаються незбереженими у чернетці."
-      : restart ? "Конфіг збережено. Перезапуск запланований."
-        : "Конфіг збережено. Для застосування натисніть «Зберегти і перезапустити».",
+      : restart ? "Налаштування збережено. Перезапуск запланований."
+        : "Налаштування збережено. Для застосування натисніть «Застосувати».",
       state.editorDirty || restart ? "status-warn" : "status-good");
   } finally {
     state.configBusy = false;
@@ -2416,13 +2739,13 @@ function ensureTemplateSelection() {
     state.templateSelection.templateName = templates[0].name;
   }
   const addressIndex = config.addresses?.findIndex(
-    (address) => address.entity_prefix === state.templateSelection.addressPrefix,
+    (address) => profileIdentity(address) === state.templateSelection.addressPrefix,
   ) ?? -1;
   if (addressIndex >= 0) state.templateSelection.addressIndex = addressIndex;
   if (state.templateSelection.addressIndex >= (config.addresses?.length || 0)) {
     state.templateSelection.addressIndex = 0;
   }
-  state.templateSelection.addressPrefix = config.addresses?.[state.templateSelection.addressIndex]?.entity_prefix || "";
+  state.templateSelection.addressPrefix = profileIdentity(config.addresses?.[state.templateSelection.addressIndex]);
 }
 
 function getSelectedTemplateMeta() {
@@ -2777,10 +3100,15 @@ refreshButton.addEventListener("click", () => {
 
 addAddressButton.addEventListener("click", () => {
   const config = getDraftConfig();
-  config.addresses.push(createBlankAddress());
+  const candidates = state.discovery?.candidates || [];
+  const address = createBlankAddress(candidates.length === 1 ? candidates[0] : {});
+  address.profile_id = Array.from(crypto.getRandomValues(new Uint8Array(16)), v => v.toString(16).padStart(2, "0")).join("");
+  state.activeProfile = config.addresses.length;
+  state.wizard = {id: address.profile_id, step: 0};
+  config.addresses.push(address);
   setDraftConfig(
     config,
-    "Додано порожню адресу в чернетку. Після редагування запустіть перевірку, щоб оновити прев'ю.",
+    "Новий профіль: оберіть джерело даних, одержувача та сповіщення.",
     "muted",
   );
 });
@@ -2850,8 +3178,22 @@ editorContainer.addEventListener("change", (event) => {
   if (!(target instanceof HTMLElement)) {
     return;
   }
+  if (target.classList.contains("recipient-picker")) return;
   const form = target.closest(".address-editor-card");
+  if (["cfg-welcome", "cfg-receive-commands"].includes(target.id)) { markEditorChanged(); return; }
   if (form) {
+    if (target.classList.contains("source-entity")) {
+      const row = target.closest(".power-source");
+      const entity = target.value;
+      const kind = entity.startsWith("binary_sensor.") ? "binary" : getCatalogItems("frequency_sensors").some(s => s.entity_id === entity) ? "frequency" : "voltage";
+      row.querySelector(".source-kind").value = kind;
+      row.querySelector(".source-threshold").value = kind === "voltage" ? 50 : 1;
+      row.querySelector(".source-freshness").value = kind === "binary" ? "state" : "heartbeat";
+    }
+    if (target.classList.contains("addr-account") && !form.querySelector(".addr-display-name").value.trim()) {
+      const account = state.discovery?.accounts?.find(a => a.entity_id === target.value);
+      if (account) form.querySelector(".addr-display-name").value = account.address;
+    }
     if (target.classList.contains("addr-entity-prefix") && target instanceof HTMLSelectElement) {
       const displayNameInput = form.querySelector(".addr-display-name");
       const selectedOption = target.selectedOptions?.[0] || null;
@@ -2871,6 +3213,7 @@ editorContainer.addEventListener("input", (event) => {
   if (!(target instanceof HTMLElement)) {
     return;
   }
+  if (target.classList.contains("recipient-picker")) return;
   if (target.closest(".address-editor-card") || target.id === "cfg-ha-token") {
     markEditorChanged();
   }
@@ -2883,11 +3226,11 @@ templatesContainer.addEventListener("change", (event) => {
   }
   if (target.id === "template-address-select") {
     state.templateSelection.addressIndex = Number.parseInt(target.value, 10) || 0;
-    state.templateSelection.addressPrefix = getDraftConfig().addresses?.[state.templateSelection.addressIndex]?.entity_prefix || "";
+    state.templateSelection.addressPrefix = profileIdentity(getDraftConfig().addresses?.[state.templateSelection.addressIndex]);
     state.templatePreview = null;
     persistTemplateDraftSnapshot();
     renderTemplates(true);
-    setTemplateStatus("Адресу шаблону змінено. Побудуйте прев'ю знову, щоб використати поточний draft-конфіг.", "muted");
+    setTemplateStatus("Адресу шаблону змінено. Побудуйте прев'ю знову, щоб використати поточну чернетку.", "muted");
   }
   if (target.id === "template-select") {
     persistTemplateDraftSnapshot();
@@ -2910,7 +3253,7 @@ templatesContainer.addEventListener("input", (event) => {
     state.templatePreview = null;
     updateTemplatePreview();
     persistTemplateDraftSnapshot();
-    setTemplateStatus("Джерело шаблону змінено. Побудуйте прев'ю, щоб рендерити поточний draft.", "muted");
+    setTemplateStatus("Джерело шаблону змінено. Побудуйте прев'ю, щоб рендерити поточну чернетку.", "muted");
   }
 });
 
@@ -2933,6 +3276,42 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "edit-profile") {
+    if (state.editorDirty) persistEditorDraftSnapshot();
+    state.activeProfile = Number(actionEl.dataset.index);
+    editorContainer.querySelectorAll(".address-editor-card").forEach((form, index) => {
+      form.querySelector(".profile-editor").classList.toggle("hidden", index !== state.activeProfile);
+      form.querySelector('[data-action="edit-profile"]').setAttribute("aria-expanded", String(index === state.activeProfile));
+    });
+    return;
+  }
+  if (action === "wizard-next" || action === "wizard-back" || action === "wizard-step") {
+    const form = actionEl.closest(".address-editor-card");
+    const address = state.draftConfig.addresses[Number(form.dataset.index)];
+    const step = form.classList.contains("wizard-profile") ? state.wizard.step : state.profileSteps[profileIdentity(address)] || 0;
+    wizardStep(action === "wizard-step" ? Number(actionEl.dataset.step) : step + (action === "wizard-next" ? 1 : -1), form);
+    return;
+  }
+  if (action === "show-all") {
+    state.showAll = !state.showAll;
+    writeSessionValue(`${UI_STORAGE_PREFIX}:show-all`, String(state.showAll));
+    updateWizard(); return;
+  }
+  if (action === "connect-bot") {
+    if (!mayReplaceBotForm()) return;
+    state.botTarget = profileIdentity(state.draftConfig.addresses[Number(actionEl.closest(".address-editor-card").dataset.index)]);
+    editBot();
+    const dialog = document.getElementById("bot-dialog");
+    dialog.querySelector(".bot-dialog-body").append(document.getElementById("bot-form"), document.getElementById("bot-status"));
+    document.getElementById("bot-extra").open = false;
+    dialog.showModal(); document.getElementById("bot-name").focus(); return;
+  }
+  if (action === "refresh-recipients") { void loadDashboard(); return; }
+  if (action === "activate-bots") { void activateBots(); return; }
+  if (action === "wizard-apply") {
+    void saveConfig({restart: true}).catch(error => setEditorStatus(`Помилка застосування: ${error.message}`, "status-bad"));
+    return;
+  }
   if (action === "toggle-section") {
     if (target.closest(".toggle")) {
       return;
@@ -3014,7 +3393,9 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (action === "clone-address" && index >= 0) {
-    config.addresses.splice(index + 1, 0, cloneJson(config.addresses[index]));
+    const copy = cloneJson(config.addresses[index]);
+    copy.profile_id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (v) => v.toString(16).padStart(2, "0")).join("");
+    config.addresses.splice(index + 1, 0, copy);
     setDraftConfig(config, "Адресу клоновано в чернетці. Запустіть перевірку, щоб перебудувати прев'ю.", "muted");
     return;
   }
@@ -3059,6 +3440,45 @@ function botOptions(selected) {
   return options.join("");
 }
 
+function recipientPicker(target, privateOnly = false) {
+  return `<select class="recipient-picker" data-target="${target}" data-private-only="${privateOnly}" aria-label="Виявлені одержувачі"><option value="">Оберіть зі списку або введіть ID вище</option></select>`;
+}
+
+function updateRecipientPickers(root = document) {
+  root.querySelectorAll(".recipient-picker").forEach((select) => {
+    if (select === document.activeElement) return;
+    const address = select.closest(".address-editor-card");
+    const botId = address ? address.querySelector(".addr-bot-id")?.value : state.botEditingId;
+    const tokenChanged = !address && Boolean(document.getElementById("bot-token")?.value);
+    const peers = tokenChanged ? [] : (state.configPayload?.bots?.recipients?.[botId] || []);
+    const visible = peers.filter(p => select.dataset.privateOnly !== "true" || p.type === "private");
+    const types = {private: "👤", group: "👥", supergroup: "👥", channel: "📣"};
+    const hint = visible.length ? "Оберіть зі списку або введіть ID вище" : "Ще немає одержувачів — введіть ID або напишіть боту";
+    const html = `<option value="">${hint}</option>` + visible.map(p =>
+      `<option value="${escapeHtml(p.id)}" ${p.available === 0 || p.available === false ? "disabled" : ""}>${escapeHtml(`${types[p.type] || ""} ${p.name || "Без назви"}${p.username ? ` · @${p.username}` : ""} · ${p.id}${!p.available ? " · недоступний" : ""}`)}</option>`
+    ).join("");
+    // Browsers normalize boolean attributes in innerHTML. Compare our source,
+    // otherwise a refresh could clear a selection between input and change.
+    if (select._recipientOptionsHtml !== html) {
+      select.innerHTML = html;
+      select._recipientOptionsHtml = html;
+    }
+    // Only the option list changes. Typed IDs and draft configuration stay intact.
+  });
+}
+
+document.addEventListener("change", (event) => {
+  const select = event.target;
+  if (!(select instanceof HTMLSelectElement) || !select.classList.contains("recipient-picker") || !select.value) return;
+  const root = select.closest(".address-editor-card") || document.getElementById("bot-form");
+  const target = root.querySelector(select.dataset.target);
+  if (!target) return;
+  target.value = select.value;
+  select.value = "";
+  target.dispatchEvent(new Event("input", {bubbles: true}));
+  target.dispatchEvent(new Event("change", {bubbles: true}));
+});
+
 function botStatus(message, bad = false) {
   const node = document.getElementById("bot-status");
   node.textContent = message;
@@ -3084,6 +3504,7 @@ function renderBots() {
     if (select !== document.activeElement) select.innerHTML = botOptions(select.value);
   });
   document.querySelectorAll("[data-edit-bot], [data-delete-bot]").forEach((button) => { button.disabled = state.botBusy; });
+  updateRecipientPickers();
 }
 
 function editBot(id = "") {
@@ -3099,7 +3520,10 @@ function editBot(id = "") {
   document.getElementById("bot-feedback").checked = Boolean(profile.feedback_enabled);
   document.getElementById("bot-form-title").textContent = id ? `Редагувати ${profile.name || id}` : "Додати бота";
   document.getElementById("bot-name").focus();
+  updateRecipientPickers(document.getElementById("bot-form"));
 }
+
+document.getElementById("bot-token").addEventListener("input", () => updateRecipientPickers(document.getElementById("bot-form")));
 
 function mayReplaceBotForm() {
   return !state.botDirty ||
@@ -3146,9 +3570,16 @@ async function saveBot(remove = false, id = state.botEditingId) {
       throw new Error("Неочікувана відповідь сервера. Поля профілю збережено у формі; оновіть список перед повтором.");
     }
     state.configPayload.bots = result;
-    if (!remove) editBot(result.profile.id);
+    if (!remove) {
+      editBot(result.profile.id);
+      if (state.botTarget) {
+        const form = [...editorContainer.querySelectorAll(".address-editor-card")].find(f => profileIdentity(state.draftConfig.addresses[Number(f.dataset.index)]) === state.botTarget);
+        if (form) { form.querySelector(".addr-bot-id").innerHTML = botOptions(result.profile.id); markEditorChanged(); }
+        document.getElementById("bot-dialog").close();
+      }
+    }
     else if (state.botEditingId === id) editBot();
-    botStatus("Збережено. Оберіть бота для адреси та натисніть «Зберегти і перезапустити».");
+    botStatus("Збережено. Оберіть бота для адреси та натисніть «Застосувати».");
   } catch (error) {
     botStatus(error.message, true);
   } finally {
@@ -3158,10 +3589,26 @@ async function saveBot(remove = false, id = state.botEditingId) {
     state.writeEpoch += 1;
     document.getElementById("bot-fields").disabled = false;
     renderBots();
-    updateBusyControls();
+    updateEditorLiveParts();
   }
 }
 
+document.getElementById("bot-dialog").addEventListener("close", () => {
+  document.getElementById("bot-form-home").append(document.getElementById("bot-status"), document.getElementById("bot-form"));
+  state.botTarget = null;
+});
+document.getElementById("bot-dialog-close").addEventListener("click", () => document.getElementById("bot-dialog").close());
+async function activateBots() {
+  if (state.botBusy || state.configBusy) return;
+  if (state.botDirty) { setEditorStatus("Спочатку збережіть токен у формі бота.", "status-warn"); return; }
+  if (state.editorDirty) persistEditorDraftSnapshot();
+  state.configBusy = true; state.writeEpoch++; updateBusyControls();
+  try {
+    await fetchJson("./api/bots/activate", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({expected_revision:state.configPayload.bots.revision, config_revision:state.configPayload.revision})});
+    setEditorStatus("Перезапуск заплановано. Збережені профілі відновлять роботу; чернетку не застосовано. Зачекайте й оновіть одержувачів.", "status-warn");
+  } catch (error) { setEditorStatus(error.message, "status-bad"); }
+  finally { state.configBusy=false; state.writeEpoch++; updateBusyControls(); }
+}
 updateBusyControls();
 restorePersistedUiState();
 setActiveTab(state.activeTab);

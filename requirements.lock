@@ -22,3 +22,4 @@ PyYAML==6.0.3
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 yarl==1.25.1
+pillow==13.0.0

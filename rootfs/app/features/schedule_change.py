@@ -51,7 +51,7 @@ class ScheduleChangeFeature(Feature):
         await self._check_and_notify()
 
     async def _check_and_notify(self) -> None:
-        async with notification_lock(self.state, self.config.entity_prefix):
+        async with notification_lock(self.state, self.profile_key):
             await self._check_and_notify_locked()
 
     async def _check_and_notify_locked(self) -> None:

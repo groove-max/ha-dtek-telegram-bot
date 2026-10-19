@@ -16,7 +16,7 @@ from telegram_service import TelegramService
 from template_engine import TemplateEngine
 from groups import state_groups, select_events, presentation_context, display_labels
 from utils import format_datetime, now_kyiv
-from outage_calendar import verified_coverage_end
+from outage_calendar import ScheduleUnavailable, verified_coverage_end
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class Feature(ABC):
         templates: TemplateEngine,
     ) -> None:
         self.config = address_config
+        self.profile_key = getattr(address_config, "key", address_config.entity_prefix)
         self.ha = ha_client
         self.tg = telegram
         self.state = state_store
@@ -128,9 +129,12 @@ class Feature(ABC):
             if groups:
                 attrs = state.get("attributes", {})
                 if require_schedule and "schedule_notifications_ready" in attrs:
+                    if attrs["schedule_notifications_ready"] is not True:
+                        raise ScheduleUnavailable(
+                            "Schedule has not been verified; notifications paused"
+                        )
                     if (
-                        attrs["schedule_notifications_ready"] is not True
-                        or not isinstance(attrs.get("schedule_snapshot_id"), str)
+                        not isinstance(attrs.get("schedule_snapshot_id"), str)
                         or not attrs["schedule_snapshot_id"]
                     ):
                         raise ValueError(
@@ -211,7 +215,7 @@ class Feature(ABC):
         identity.update(
             template=template_name,
             feature=self.name,
-            address=self.config.entity_prefix,
+            address=self.profile_key,
             power_last_change=self.state_get("power_last_change"),
         )
         fingerprint = hashlib.sha256(
@@ -231,11 +235,11 @@ class Feature(ABC):
 
     def state_get(self, key: str, default: Any = None) -> Any:
         """Get a value from persistent state for this address."""
-        return self.state.get(self.config.entity_prefix, key, default)
+        return self.state.get(self.profile_key, key, default)
 
     def state_set(self, key: str, value: Any) -> None:
         """Set a value in persistent state for this address."""
-        self.state.set(self.config.entity_prefix, key, value)
+        self.state.set(self.profile_key, key, value)
 
     @property
     def telegram_chat_id(self) -> str | None:
@@ -251,11 +255,14 @@ class Feature(ABC):
 
     async def send_message(self, text: str, **kwargs: Any) -> int | None:
         """Send a message to the configured chat for this address."""
+        group_notice = kwargs.pop("group_notice", None)
+        if group_notice is not None and self.name != "group_change":
+            raise ValueError("Only group changes can omit a schedule")
         delivery_key = kwargs.pop("delivery_key", getattr(self, "_delivery_key", None))
         delivery_context = kwargs.pop("delivery_context", {})
         context = {
             "feature": self.name,
-            "address": self.config.entity_prefix,
+            "address": self.profile_key,
             "state": {
                 key: self.state_get(key)
                 for key in (
@@ -279,12 +286,14 @@ class Feature(ABC):
         if save is not None:
             await save()
         if self.name in ("schedule_change", "group_change", "upcoming_outage"):
-            groups = await self.read_groups(require_schedule=True)
+            groups = await self.read_groups(require_schedule=group_notice is None)
+            if group_notice is not None and tuple(groups) != group_notice:
+                raise ValueError("Cabinet group changed before notification")
             revision = self._schedule_revision()
-            if (
+            if group_notice is None and ((
                 verified_calendar is not None
                 and verified_calendar != (tuple(groups), revision, self._schedule_source())
-            ) or (revision is not None and verified_calendar is None):
+            ) or (revision is not None and verified_calendar is None)):
                 raise ValueError("Schedule changed before send; fetch it again")
         expires = delivery_context.get("expires")
         if expires is not None and now_kyiv().timestamp() >= expires:

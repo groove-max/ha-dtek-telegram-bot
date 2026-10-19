@@ -26,6 +26,8 @@ from features.group_change import GroupChangeFeature
 from features.power_presence import PowerPresenceFeature
 from features.status_message import StatusMessageFeature
 from ha_client import HAClient
+from personal_source import PersonalSource
+from conversations import Conversations
 from groups import state_groups, select_events, presentation_context, display_labels
 from messages import DEFAULT_TEMPLATES
 from outage_calendar import build_schedule_lines, extract_calendar_events, upcoming_schedule_events, parse_event_time, format_next_outage, calendar_query_end
@@ -55,6 +57,7 @@ SCHEDULE_GROUP_ENTITY_SUFFIXES = (
     "schedule_group",
 )
 TEMPLATE_GROUPS = {
+    "welcome": "Привітання",
     "schedule_change": "Schedule",
     "schedule_empty": "Schedule",
     "emergency_start": "Emergency",
@@ -74,6 +77,7 @@ TEMPLATE_GROUPS = {
     "status_on": "Status",
     "status_partial": "Status",
     "status_off": "Status",
+    "status_unknown": "Status",
 }
 
 
@@ -83,8 +87,10 @@ class Orchestrator:
     def __init__(self, config: FullConfig) -> None:
         self.config = config
         self.ha = HAClient(ha_token=config.ha_token)
+        self.personal_sources = {a.key: PersonalSource(self.ha, a) for a in config.addresses if a.mode == "personal"}
         self.bot_profiles = BotProfileStore()
         self.bots = BotRuntime(config, self.bot_profiles)
+        self.bots.conversation_factory = lambda profile, client: Conversations(self, profile, client)
         self.tg = self.bots.clients.get("default")  # Legacy default profile alias.
         self.state = self.bots.state
         self.templates = TemplateEngine()
@@ -98,6 +104,18 @@ class Orchestrator:
         self._ha_task: asyncio.Task[None] | None = None
         self._tick_task: asyncio.Task[None] | None = None
 
+    async def render_status(self, address: AddressConfig) -> str:
+        """Render the shared status templates without sending or editing a post."""
+        renderer = StatusMessageFeature(
+            address_config=address,
+            ha_client=self.personal_sources.get(address.key, self.ha),
+            telegram=self.bots.service(address),
+            state_store=self.state,
+            templates=self.templates,
+        )
+        renderer.set_power_monitor(self._power_monitors.get(address.key))
+        return await renderer.render_current()
+
     def _init_features(self) -> None:
         """Instantiate enabled features for each address and wire dependencies."""
         for addr in self.config.addresses:
@@ -105,20 +123,21 @@ class Orchestrator:
             if telegram is None or not self.bots.chat(addr):
                 logger.warning("No Telegram destination for %s; address paused", addr.entity_prefix)
                 continue
+            source = self.personal_sources.get(addr.key, self.ha)
             # Create PowerMonitor for this address
             power_monitor = PowerMonitor(
                 config=addr,
-                ha=self.ha,
+                ha=source,
                 state=self.state,
             )
-            self._power_monitors[addr.entity_prefix] = power_monitor
+            self._power_monitors[addr.key] = power_monitor
 
             # Create all features
             addr_features: list[Feature] = []
             for feature_cls in ALL_FEATURES:
                 feature = feature_cls(
                     address_config=addr,
-                    ha_client=self.ha,
+                    ha_client=source,
                     telegram=telegram,
                     state_store=self.state,
                     templates=self.templates,
@@ -152,7 +171,7 @@ class Orchestrator:
                     if status_message:
                         f.set_status_message(status_message)
 
-            self._features_by_address[addr.entity_prefix] = addr_features
+            self._features_by_address[addr.key] = addr_features
             self.features.extend(addr_features)
 
     def _collect_watched_entities(self) -> set[str]:
@@ -177,6 +196,20 @@ class Orchestrator:
             "on_state_change", self._features_by_entity.get(entity_id, []),
             (entity_id, old_state, new_state),
         )
+        for key, source in self.personal_sources.items():
+            entities = (source.snapshot or {}).get("entities", {})
+            for suffix, actual in entities.items():
+                if actual != entity_id:
+                    continue
+                virtual = f"{entity_id.split('.')[0]}.{source.config.entity_prefix}_{suffix}"
+                features = self._features_by_entity.get(virtual, [])
+                if suffix == "schedule_group":
+                    # Let the per-bot worker read its own cabinet assignment. Never
+                    # forward building groups or delay unrelated physical sensor events.
+                    await self._enqueue_features("on_state_change", features, (virtual, {}, {}))
+                else:
+                    await self._enqueue_features("on_state_change", features, (virtual, old_state, new_state))
+
 
     async def _enqueue_features(self, method, features, args=()):
         by_bot = {}
@@ -192,7 +225,7 @@ class Orchestrator:
         while self._running:
             await asyncio.sleep(TICK_INTERVAL)
             if self.ha.is_connected:
-                await self._enqueue_features("on_tick", self.features)
+                await self._enqueue_features("on_tick", [*self.features, *self.bots.conversations.values()])
 
     async def run(self) -> None:
         """Main run loop."""
@@ -217,6 +250,9 @@ class Orchestrator:
         self.ha.watch_mqtt_topics({
             a.power.loss_mqtt_topic for a in self.config.addresses
             if a.power.enabled and a.power.mode == "loss_plus_voltage" and a.power.loss_mqtt_topic
+        } | {
+            s.mqtt_topic for a in self.config.addresses for s in a.power.sources
+            if a.power.enabled and a.power.mode == "sources" and s.mqtt_topic
         })
         self.ha.on_state_change(self._dispatch_state_change)
         logger.info("Watching %d entities", len(watched))
@@ -231,6 +267,12 @@ class Orchestrator:
         # Resolve display names from HA device registry
         await self._resolve_display_names()
 
+        for source in self.personal_sources.values():
+            try:
+                snapshot = await source.refresh()
+                self.ha.watch_entities(set(snapshot.get("entities", {}).values()) | {source.config.account_entity})
+            except Exception:
+                logger.warning("Personal source unavailable; automatic ticks will retry")
         await self._enqueue_features("on_start", self.features)
 
         logger.info("DTEK Telegram Bot started successfully")
@@ -247,6 +289,11 @@ class Orchestrator:
     async def _resolve_display_names(self) -> None:
         """Fetch display names from HA device registry for addresses without one."""
         for addr in self.config.addresses:
+            if getattr(addr, "mode", "building") == "personal" and not addr.display_name:
+                try:
+                    addr.display_name = (await self.personal_sources[addr.key].refresh())["address"]
+                except Exception:
+                    addr.display_name = "Особистий профіль ДТЕК"
             if addr.display_name:
                 logger.info("Using configured display_name for %s: %s", addr.entity_prefix, addr.display_name)
                 continue
@@ -307,12 +354,12 @@ class Orchestrator:
             return self.config
 
         active_by_prefix = {
-            address.entity_prefix: address for address in self.config.addresses
+            address.key: address for address in self.config.addresses
         }
         for address in editor_config.addresses:
             if address.display_name:
                 continue
-            active = active_by_prefix.get(address.entity_prefix)
+            active = active_by_prefix.get(address.key)
             if active and active.display_name:
                 address.display_name = active.display_name
         return editor_config
@@ -377,7 +424,7 @@ class Orchestrator:
 
     async def _build_address_overview(self, addr: AddressConfig) -> dict[str, Any]:
         """Build a summary card for a configured address."""
-        features = self._features_by_address.get(addr.entity_prefix, [])
+        features = self._features_by_address.get(addr.key, [])
         watched_entities = sorted(
             {
                 entity_id
@@ -390,7 +437,7 @@ class Orchestrator:
 
         if self.ha.is_connected:
             states = await asyncio.gather(
-                *[self.ha.get_state(entity_id) for entity_id in watched_entities]
+                *[self.personal_sources.get(addr.key, self.ha).get_state(entity_id) for entity_id in watched_entities]
             )
             for entity_id, state in zip(watched_entities, states, strict=False):
                 if state is None:
@@ -401,12 +448,14 @@ class Orchestrator:
                     "last_updated": state.get("last_updated", ""),
                 }
 
-            power_monitor = self._power_monitors.get(addr.entity_prefix)
+            power_monitor = self._power_monitors.get(addr.key)
             if power_monitor:
                 live_power = await power_monitor.detect_current_power()
 
         return {
             "entity_prefix": addr.entity_prefix,
+            "profile_id": addr.key,
+            "mode": addr.mode,
             "display_name": addr.display_name or addr.entity_prefix,
             "chat_id": self.bots.chat(addr),
             "telegram_bot_id": addr.telegram_bot_id,
@@ -414,7 +463,7 @@ class Orchestrator:
             "power_mode": addr.power.mode if addr.power.enabled else "disabled",
             "enabled_features": [feature.name for feature in features],
             "watched_entities": watched_entities,
-            "stored_state": self.state.get_all(addr.entity_prefix),
+            "stored_state": self.state.get_all(addr.key),
             "live_power": live_power,
             "live_entities": live_entities,
             "loss_mqtt_observation": self.ha.mqtt_observation(addr.power.loss_mqtt_topic) if addr.power.loss_mqtt_topic else None,
@@ -430,8 +479,8 @@ class Orchestrator:
             "configured_addresses": [
                 {
                     "config": addr.model_dump(),
-                    "features": [feature.name for feature in self._features_by_address.get(addr.entity_prefix, [])],
-                    "state": self.state.get_all(addr.entity_prefix),
+                    "features": [feature.name for feature in self._features_by_address.get(addr.key, [])],
+                    "state": self.state.get_all(addr.key),
                 }
                 for addr in self.config.addresses
             ],
@@ -484,8 +533,16 @@ class Orchestrator:
             )
 
         candidates.sort(key=lambda item: (item["configured"], item["friendly_name"].lower()))
+        accounts = []
+        try:
+            accounts = await self.ha.command("dtek_monitor/accounts")
+            if not isinstance(accounts, list):
+                accounts = []
+        except Exception:
+            pass  # Address-only installations and older integration versions remain supported.
         return {
             "ha_connected": True,
+            "accounts": accounts,
             "candidates": candidates,
             "catalog": self._build_entity_catalog(entity_map),
         }
@@ -534,7 +591,7 @@ class Orchestrator:
             lowered = entity_id.lower()
             snapshot = self._state_snapshot(entity_id, state)
 
-            if domain == "binary_sensor" and entity_id.endswith("_power"):
+            if domain == "binary_sensor":
                 catalog["binary_power"][entity_id] = snapshot
 
             if domain == "sensor":
@@ -563,6 +620,7 @@ class Orchestrator:
 
     async def _build_address_preview(self, addr: AddressConfig) -> dict[str, Any]:
         """Preview the current live inputs that drive this address config."""
+        source = self._source_for(addr)
         entity_ids: list[str] = []
         dtek_power_entity = f"binary_sensor.{addr.entity_prefix}_power" if addr.entity_prefix else ""
         if dtek_power_entity:
@@ -570,12 +628,13 @@ class Orchestrator:
         if addr.power.loss_entity:
             entity_ids.append(addr.power.loss_entity)
         entity_ids.extend(entity.entity for entity in addr.voltage.entities if entity.entity)
+        entity_ids.extend(s.entity for s in addr.power.sources)
 
         snapshots: dict[str, dict[str, Any]] = {}
         if entity_ids:
             unique_ids = list(dict.fromkeys(entity_ids))
             states = await asyncio.gather(
-                *[self.ha.get_state(entity_id) for entity_id in unique_ids]
+                *[source.get_state(entity_id) for entity_id in unique_ids]
             )
             for entity_id, state in zip(unique_ids, states, strict=False):
                 snapshots[entity_id] = self._state_snapshot(entity_id, state)
@@ -589,6 +648,7 @@ class Orchestrator:
         ]
 
         detected_power = None
+        power_sources = None
         reason = "Home Assistant ще не підключений."
         voltage_topology: dict[str, Any] = {
             "house_state": None,
@@ -601,7 +661,7 @@ class Orchestrator:
             "unavailable_as_missing": getattr(addr.voltage, "unavailable_as_missing", True),
         }
         if addr.entity_prefix:
-            power_monitor = PowerMonitor(addr, self.ha, self.state)
+            power_monitor = PowerMonitor(addr, source, self.state)
             detected_power = await power_monitor.detect_current_power()
             voltage_topology = await power_monitor.get_voltage_snapshot()
             if loss_snapshot is not None:
@@ -612,15 +672,23 @@ class Orchestrator:
                 loss_snapshot,
                 voltage_topology,
             )
+            if addr.power.enabled and addr.power.mode == "sources":
+                power_sources = await power_monitor.sources.snapshot()
+                reason = {
+                    "agreement": "Джерела узгоджені. Сповіщення надійде після затримки підтвердження.",
+                    "conflicting_sources": "Датчики суперечать один одному. Стан невідомий; відключення не підтверджене.",
+                }.get(power_sources["reason"], "Очікуємо достовірні дані від обраних джерел. Перевірте їх доступність та частоту оновлення.")
 
         return {
             "entity_prefix": addr.entity_prefix,
             "display_name": addr.display_name or addr.entity_prefix or "New address",
+            "profile_id": addr.key,
             "power_enabled": addr.power.enabled,
             "mode": addr.power.mode if addr.power.enabled else "dtek_only",
             "detected_power": detected_power,
             "reason": reason,
             "signals": {
+                "power_sources": power_sources,
                 "dtek_power": dtek_snapshot,
                 "loss_entity": self._augment_loss_snapshot(addr, loss_snapshot),
                 "voltage_entities": self._augment_voltage_snapshots(addr, voltage_snapshots, voltage_topology),
@@ -818,6 +886,8 @@ class Orchestrator:
         if not profile.test_chat_id:
             raise ValueError("Вкажіть тестовий чат для обраного бота. Тест у робочий чат не надсилається.")
         chat_id = profile.test_chat_id
+        if address.mode == "personal" and chat_id != str(address.telegram_user_id):
+            raise ValueError("Особистий профіль можна тестувати лише в дозволеному приватному чаті.")
         text = f"🧪 Тест шаблону: {template_name}\n\n{preview['rendered']}"
         service = TelegramService(profile.token, profile.chat_id, test_chat_id=chat_id)
         try:
@@ -883,13 +953,21 @@ class Orchestrator:
     def _template_entity(cls, address: AddressConfig, suffix: str) -> str:
         return cls._template_entities(address, suffix)[0]
 
+    def _source_for(self, address):
+        if address.mode != "personal":
+            return self.ha
+        source = self.personal_sources.get(address.key)
+        if source is not None and source.config.account_entity == address.account_entity:
+            return source
+        return PersonalSource(self.ha, address)
+
     async def _groups_for_address(self, address: AddressConfig) -> list[str]:
         return state_groups(await self._group_state_for_address(address))
 
     async def _group_state_for_address(self, address: AddressConfig) -> dict | None:
         if self.ha.is_connected:
             for entity in self._template_entities(address, "schedule_group"):
-                state = await self.ha.get_state(entity)
+                state = await self._source_for(address).get_state(entity)
                 if state_groups(state):
                     return state
         return None
@@ -904,7 +982,7 @@ class Orchestrator:
         if not self.ha.is_connected or not address.entity_prefix:
             return None
         for entity_id in self._template_entities(address, suffix):
-            state = await self.ha.get_state(entity_id)
+            state = await self._source_for(address).get_state(entity_id)
             if state is None:
                 continue
             value = str(state.get("state", ""))
@@ -932,7 +1010,7 @@ class Orchestrator:
                 "provider_id", "address_id", "schedule_snapshot_id", "schedule_notifications_ready"
             )))
         revision = identity(before)
-        result = await self.ha.call_service(
+        result = await self._source_for(address).call_service(
             domain="calendar",
             service="get_events",
             entity_id=calendar_entity,
@@ -958,6 +1036,9 @@ class Orchestrator:
         template_name: str,
     ) -> dict[str, Any]:
         """Build a preview context that resembles runtime data for one address."""
+        if template_name == "welcome":
+            # The public greeting must never receive account/address context.
+            return {"telegram_user_id": 123456789}
         display_name = address.display_name or address.entity_prefix or "New address"
         group = await self._current_group_for_address(address)
         group_state = None
@@ -984,11 +1065,11 @@ class Orchestrator:
             "short_name": display_name,
         }
 
-        if template_name in {"schedule_change", "schedule_empty", "group_change", "upcoming_outage", "status_on", "status_partial"}:
+        if template_name in {"schedule_change", "schedule_empty", "group_change", "upcoming_outage", "status_on", "status_partial", "status_unknown"}:
             events = await self._fetch_calendar_events_for_address(
                 address,
                 group_state=group_state,
-                exclude_emergency=template_name in {"schedule_change", "schedule_empty", "group_change", "status_on", "status_partial"},
+                exclude_emergency=template_name in {"schedule_change", "schedule_empty", "group_change", "status_on", "status_partial", "status_unknown"},
             )
         else:
             events = []
@@ -1024,7 +1105,7 @@ class Orchestrator:
                 new_end=format_datetime(end_raw) if end_raw else timestamp,
             )
         elif template_name == "emergency_end":
-            outage_start_iso = self.state.get(address.entity_prefix, "outage_start_time")
+            outage_start_iso = self.state.get(address.key, "outage_start_time")
             duration = "—"
             if outage_start_iso:
                 try:
@@ -1036,7 +1117,7 @@ class Orchestrator:
         elif template_name == "group_change":
             schedule_lines = build_schedule_lines(events, header_group=group, group_labels=display_labels(group_state))
             context.update(
-                old_group=self.state.get(address.entity_prefix, "current_group", "—"),
+                old_group=self.state.get(address.key, "current_group", "—"),
                 new_group=group,
                 schedule_lines=schedule_lines,
             )
@@ -1139,6 +1220,12 @@ class Orchestrator:
                 unknown_phases=unknown_phases,
                 next_outage=next_outage,
             )
+        elif template_name == "status_unknown":
+            context["next_outage"] = format_next_outage(
+                events, header_group=group, group_labels=display_labels(group_state),
+                group_state=group_state,
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
+            )
         elif template_name == "status_off":
             outage_type_raw = await self._get_entity_value(address, "status")
             dtek_reports_ok = outage_type_raw == "ok"
@@ -1146,7 +1233,7 @@ class Orchestrator:
             outage_start = None
             outage_end = None
             outage_duration = None
-            power_last_change = self.state.get(address.entity_prefix, "power_last_change")
+            power_last_change = self.state.get(address.key, "power_last_change")
             if power_last_change:
                 try:
                     outage_duration = format_duration(
@@ -1265,6 +1352,12 @@ class Orchestrator:
             self.bot_profiles.read() != {k: v for k, v in self.bots.profiles.items() if k != "default"}
         )
         snapshot["runtime"] = self.bots.public()
+        snapshot["recipients"] = {}
+        for profile in snapshot["profiles"]:
+            client = self.bots.clients.get(profile["id"])
+            if client and client.journal and str(client._bot.id) == str(profile["bot_id"]):
+                snapshot["recipients"][profile["id"]] = client.journal.recipients.list()
+        snapshot["receiving"] = self.config.receive_commands
         return snapshot
 
     async def save_bot_profile(self, payload):

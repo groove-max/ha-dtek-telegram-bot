@@ -8,7 +8,7 @@ import sys
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rootfs/app"))
 from bot_profiles import (
@@ -191,6 +191,26 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         for runtime in self.runtimes:
             await runtime.close()
 
+    async def test_receive_switch_stops_pollers_but_keeps_sending_routes(self):
+        self.config.receive_commands = False
+        runtime = BotRuntime(self.config, self.store, self.path)
+        runtime.conversation_factory = Mock()
+        self.runtimes.append(runtime)
+        await runtime.start()
+        runtime.conversation_factory.assert_not_called()
+        self.assertEqual(runtime._feedback_starts, [])
+        self.assertTrue(runtime.service(self.config.addresses[0]))
+        self.assertEqual(runtime.chat(self.config.addresses[0]), "-10001")
+
+    async def test_enabled_receiving_starts_one_consumer_per_token(self):
+        runtime = BotRuntime(self.config, self.store, self.path)
+        runtime.conversation_factory = Mock(return_value=SimpleNamespace(handle=AsyncMock()))
+        self.runtimes.append(runtime)
+        with patch("bot_runtime.TelegramService.start_updates", new_callable=AsyncMock) as start:
+            await runtime.start()
+            await asyncio.gather(*runtime._feedback_starts)
+            self.assertEqual(start.await_count, len(runtime.clients))
+
     async def test_one_client_per_bot_and_correct_default_chats(self):
         runtime = await self.runtime()
         a, b, c = self.config.addresses
@@ -224,6 +244,21 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await runtime.enqueue("default", "on_tick", [second])
         await runtime._queues["default"].join()
         self.assertEqual(second.on_tick.await_count, 2)
+
+    async def test_unpublished_schedule_pauses_only_its_feature_and_real_errors_remain_visible(self):
+        from outage_calendar import ScheduleUnavailable
+        runtime = await self.runtime()
+        unavailable = SimpleNamespace(name="schedule", on_tick=AsyncMock(side_effect=ScheduleUnavailable("not published")))
+        working = SimpleNamespace(name="power", on_tick=AsyncMock())
+        broken = SimpleNamespace(name="broken", on_tick=AsyncMock(side_effect=ValueError("malformed payload")))
+        with self.assertLogs("bot_runtime", level="DEBUG") as logs:
+            await runtime.enqueue("default", "on_tick", [unavailable, working, broken])
+            await runtime._queues["default"].join()
+        working.on_tick.assert_awaited_once()
+        errors = [r for r in logs.records if r.levelname == "ERROR"]
+        self.assertEqual(len(errors), 1)
+        self.assertIn("broken", errors[0].getMessage())
+        self.assertTrue(any("schedule not verified yet" in r.getMessage() for r in logs.records))
 
     async def test_status_ids_and_delivery_keys_are_separate_for_same_chat(self):
         self.config.addresses[1].telegram_chat_id = "-10001"

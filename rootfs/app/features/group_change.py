@@ -43,7 +43,12 @@ class GroupChangeFeature(Feature):
     async def on_state_change(
         self, entity_id: str, old_state: dict[str, Any], new_state: dict[str, Any]
     ) -> None:
-        async with notification_lock(self.state, self.config.entity_prefix):
+        async with notification_lock(self.state, self.profile_key):
+            if getattr(self.config, "mode", "building") == "personal" and new_state.get("attributes", {}).get("selection_source") != "cabinet":
+                # Source events are only a wake-up: the assignment must be read
+                # in this worker, never borrowed from a building event payload.
+                new_state = await self.ha.get_state(entity_id) or {}
+                old_state = {}
             await self._handle_state_change(entity_id, old_state, new_state)
 
     async def _handle_state_change(
@@ -73,12 +78,17 @@ class GroupChangeFeature(Feature):
         if previous == groups:
             return
         # A failed calendar request must not turn into an empty-schedule claim.
-        events = await self.calendar_snapshot(self._fetch_outage_events)
+        groups_only = False
+        try:
+            events = await self.calendar_snapshot(self._fetch_outage_events)
+        except (ValueError, TimeoutError, ConnectionError):
+            # A verified assignment change is useful even before its daily schedule is published.
+            events, groups_only = [], True
         if self.state_get("current_groups") != groups:
             return
         lines = build_schedule_lines(events, header_group=display, group_labels=self.schedule_display_labels())
         start = now_kyiv().replace(hour=0, minute=0, second=0, microsecond=0)
-        complete = self.has_schedule_coverage(start, start + timedelta(days=2))
+        complete = not groups_only and self.has_schedule_coverage(start, start + timedelta(days=2))
         text = self.render(
             "group_change",
             old_group=", ".join(previous),
@@ -87,7 +97,8 @@ class GroupChangeFeature(Feature):
             schedule_complete=complete,
         )
         if await self.send_message(
-            text, disable_notification=self.config.group_change.silent
+            text, disable_notification=self.config.group_change.silent,
+            group_notice=tuple(groups) if groups_only else None
         ):
             self.state_set("notified_groups", groups)
             if lines or complete:

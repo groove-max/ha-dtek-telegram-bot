@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from groups import display_group
-
 import asyncio
 import time
 from datetime import datetime
@@ -89,6 +87,7 @@ class StatusMessageFeature(Feature):
 
     async def on_start(self) -> None:
         """Send or update status message on startup."""
+        self.state_set("status_pinned_message_id", None)
         await self._update_status_message()
 
     async def on_stop(self) -> None:
@@ -160,7 +159,7 @@ class StatusMessageFeature(Feature):
                     msg_id = await self.send_message(
                         text,
                         disable_notification=silent,
-                        pin=self.config.status_message.pin,
+                        pin=False,
                     )
                     if msg_id:
                         self.state_set("status_message_id", msg_id)
@@ -168,6 +167,9 @@ class StatusMessageFeature(Feature):
                         updated = True
 
             if updated:
+                if delivery_mode == "pinned_edit" and self.config.status_message.pin and self.state_get("status_pinned_message_id") != msg_id:
+                    if await self.tg.pin_message(msg_id, chat_id=self.telegram_chat_id, disable_notification=True):
+                        self.state_set("status_pinned_message_id", msg_id)
                 self._last_update_ts = time.monotonic()
                 self.log.debug(
                     "Status updated (power=%s, mode=%s, msg_id=%s)",
@@ -202,7 +204,21 @@ class StatusMessageFeature(Feature):
             return await self._build_partial_text(short_name, group)
         if house_state == "off":
             return await self._build_off_text(short_name, group)
-        return f"⚡️ {short_name}\n🔵 {display_group(group, self.state_get('groups_snapshot'))}\n❔ Стан живлення невідомий: немає актуальних вимірювань."
+        return self.render(
+            "status_unknown", short_name=short_name, group=group,
+            next_outage=await self._next_outage_text(),
+        )
+
+    async def render_current(self) -> str:
+        """Render on demand, respecting the same confirmed power state and templates."""
+        house_state = await self._power_monitor.get_power_state() if self._power_monitor else "unknown"
+        return await self._build_status_text(house_state)
+
+    async def _next_outage_text(self) -> str | None:
+        try:
+            return await self._get_next_outage()
+        except (ValueError, TimeoutError, ConnectionError):
+            return "Графік тимчасово недоступний"
 
     async def _build_on_text(self, short_name: str, group: str) -> str:
         """Build status text when power is on."""
@@ -211,10 +227,7 @@ class StatusMessageFeature(Feature):
         if self._power_monitor:
             snapshot = await self._power_monitor.get_voltage_snapshot()
 
-        try:
-            next_outage = await self._get_next_outage()
-        except (ValueError, TimeoutError, ConnectionError):
-            next_outage = "Графік тимчасово недоступний"
+        next_outage = await self._next_outage_text()
 
         return self.render(
             "status_on",
@@ -231,10 +244,7 @@ class StatusMessageFeature(Feature):
         if self._power_monitor:
             snapshot = await self._power_monitor.get_voltage_snapshot()
 
-        try:
-            next_outage = await self._get_next_outage()
-        except (ValueError, TimeoutError, ConnectionError):
-            next_outage = "Графік тимчасово недоступний"
+        next_outage = await self._next_outage_text()
 
         return self.render(
             "status_partial",
@@ -307,6 +317,8 @@ class StatusMessageFeature(Feature):
 
     async def _resolve_current_group(self) -> str:
         """Get the current schedule group, falling back to live HA state when needed."""
+        if getattr(self.config, "mode", "building") == "personal" and self.state_get("groups_available") is False:
+            return "група кабінету недоступна"
         stored = str(self.state_get("current_group", "")).strip()
         if stored and stored not in ("unknown", "unavailable"):
             return stored

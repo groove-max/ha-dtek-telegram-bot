@@ -7,7 +7,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from state_store import atomic_write
@@ -19,7 +19,7 @@ OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/data/config.yaml")
 CONFIG_PATH_HA = Path("/homeassistant/dtek_telegram_bot.yaml")  # accessible via File Editor / VS Code
 DEFAULT_CONFIG_PATH = Path("/app/default_config.yaml")
-RUNTIME_CONFIG_KEYS = ("ha_token", "export_default_templates", "addresses")
+RUNTIME_CONFIG_KEYS = ("receive_commands", "welcome_enabled", "ha_token", "export_default_templates", "addresses")
 
 
 def runtime_config_revision(payload: dict | None = None) -> str:
@@ -94,9 +94,44 @@ class VoltageConfig(BaseModel):
         return v
 
 
+class PowerSourceConfig(BaseModel):
+    """A city-grid observation, independent of voltage quality monitoring."""
+
+    entity: str
+    kind: Literal["binary", "voltage", "frequency"]
+    present_state: Literal["on", "off"] = "on"
+    present_above: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    availability: Literal["always_on", "mains_powered"] = "always_on"
+    freshness: Literal["state", "heartbeat"] = "heartbeat"
+    max_age_seconds: int = Field(default=180, gt=0)
+    mqtt_topic: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def binary_freshness(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("kind") == "binary":
+            return {"freshness": "state", **data}
+        return data
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "PowerSourceConfig":
+        domain = "binary_sensor." if self.kind == "binary" else "sensor."
+        if not self.entity.startswith(domain) or not self.entity.removeprefix(domain):
+            raise ValueError(f"power source must use a {domain} entity")
+        if self.kind != "binary" and self.freshness != "heartbeat":
+            raise ValueError("Measurements require heartbeat freshness")
+        if any(c in self.mqtt_topic for c in ("#", "+", "\x00")):
+            raise ValueError("Power source MQTT topic must be exact")
+        self.mqtt_topic = self.mqtt_topic.strip()
+        if self.present_above is None:
+            self.present_above = 50.0 if self.kind == "voltage" else 1.0
+        return self
+
+
 class PowerConfig(BaseModel):
     enabled: bool = False
     mode: str = "dtek_only"
+    sources: list[PowerSourceConfig] = Field(default_factory=list, max_length=2)
     loss_entity: str = ""
     loss_mqtt_topic: str = ""
     loss_state: str = "0"
@@ -123,7 +158,7 @@ class PowerConfig(BaseModel):
             "dual_sensor": "loss_plus_voltage",
         }
         v = aliases.get(v, v)
-        allowed = ("dtek_only", "voltage_only", "loss_plus_voltage")
+        allowed = ("dtek_only", "voltage_only", "loss_plus_voltage", "sources")
         if v not in allowed:
             msg = f"power.mode must be one of {allowed}, got '{v}'"
             raise ValueError(msg)
@@ -144,6 +179,13 @@ class PowerConfig(BaseModel):
             raise ValueError(
                 "power.loss_entity is required for power.mode='loss_plus_voltage'"
             )
+        if self.mode == "sources":
+            if not self.sources:
+                raise ValueError("Choose at least one power source")
+            if len({s.entity for s in self.sources}) != len(self.sources):
+                raise ValueError("Power sources must use different entities")
+            if self.sources[0].availability != "always_on":
+                raise ValueError("The primary source must report grid loss while powered")
         return self
 
 
@@ -200,7 +242,37 @@ class StatusMessageConfig(BaseModel):
 class AddressConfig(BaseModel):
     """Per-address configuration with nested feature settings."""
 
-    entity_prefix: str
+    entity_prefix: str = ""
+    profile_id: str = ""
+    mode: Literal["building", "personal"] = "building"
+    account_entity: str = ""
+    telegram_user_id: int = Field(default=0, ge=0)
+    allow_readings: bool = False
+    reading_reminders: bool = False
+
+    @property
+    def key(self) -> str:
+        return self.profile_id or self.entity_prefix
+
+    @model_validator(mode="after")
+    def personal_identity(self):
+        if self.profile_id and (len(self.profile_id) > 64 or not all(c.isalnum() or c in "_-" for c in self.profile_id)):
+            raise ValueError("Invalid profile ID")
+        if self.mode == "personal":
+            if not self.account_entity.startswith("sensor.") or self.telegram_user_id <= 0:
+                raise ValueError("Personal profiles require an account entity and Telegram user ID")
+            if self.selected_group:
+                raise ValueError("Personal groups are supplied by the cabinet")
+            if self.telegram_chat_id and self.telegram_chat_id != str(self.telegram_user_id):
+                raise ValueError("Personal account data can only be sent to its authorized private chat")
+            self.telegram_chat_id = str(self.telegram_user_id)
+            if not self.profile_id:
+                self.profile_id = "personal_" + hashlib.sha256(f"{self.account_entity}:{self.telegram_bot_id}:{self.telegram_user_id}".encode()).hexdigest()[:20]
+            self.entity_prefix = self.profile_id
+        elif not self.entity_prefix:
+            raise ValueError("Building profiles require an entity prefix")
+        return self
+
     display_name: str = ""
     telegram_chat_id: str = ""
     telegram_bot_id: str = "default"
@@ -306,14 +378,16 @@ class FullConfig(BaseModel):
     feedback_enabled: bool = False
 
     # From config.yaml
+    receive_commands: bool = True
+    welcome_enabled: bool = True
     export_default_templates: bool = False
     addresses: list[AddressConfig] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def unique_addresses(self) -> "FullConfig":
-        prefixes = [address.entity_prefix for address in self.addresses]
+        prefixes = [address.key for address in self.addresses]
         if len(prefixes) != len(set(prefixes)):
-            raise ValueError("Each entity_prefix must appear only once")
+            raise ValueError("Each profile ID (or legacy entity_prefix) must appear only once")
         return self
 
 
@@ -352,6 +426,8 @@ def load_runtime_config_payload() -> dict[str, Any]:
             config_yaml = yaml.safe_load(f) or {}
         return {
             "ha_token": config_yaml.get("ha_token", ""),
+            "receive_commands": config_yaml.get("receive_commands", True),
+            "welcome_enabled": config_yaml.get("welcome_enabled", True),
             "export_default_templates": config_yaml.get(
                 "export_default_templates", False
             ),
@@ -394,6 +470,8 @@ def build_runtime_config_payload(config: FullConfig) -> dict[str, Any]:
     return {
         "ha_token": config.ha_token,
         "export_default_templates": config.export_default_templates,
+        "receive_commands": config.receive_commands,
+        "welcome_enabled": config.welcome_enabled,
         "addresses": [address.model_dump() for address in config.addresses],
     }
 
@@ -428,6 +506,8 @@ def save_runtime_config_payload(payload: dict[str, Any], path: Path | None = Non
     normalized = {
         "ha_token": payload.get("ha_token", ""),
         "export_default_templates": bool(payload.get("export_default_templates", False)),
+        "receive_commands": payload.get("receive_commands", True),
+        "welcome_enabled": payload.get("welcome_enabled", True),
         "addresses": payload.get("addresses", []),
     }
     atomic_write(target, yaml.safe_dump(normalized, sort_keys=False, allow_unicode=True,
