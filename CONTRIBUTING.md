@@ -63,3 +63,7 @@ Personal conversation tests use synthetic Telegram updates and mocked account op
 ## Release verification
 
 `python scripts/release.py v0.5.0-rc2` checks the version, dated notes and publication channel. Set the exact version and boolean `prerelease` in `.github/release-channel.json`; a mismatch stops publication. RC2 explicitly uses `false`, so GitHub publishes a regular release and marks it Latest. The RC suffix does not override that choice. CI publishes only after all checks pass. Without a channel file, alpha/beta/RC suffixes default to prereleases.
+
+## Documentation website
+
+Edit the existing bilingual Markdown guides; `website/pages.json` selects the published pages. Install `website/requirements.txt`, then run `python scripts/build_docs.py` and `python scripts/check_docs.py`. Check desktop/mobile layouts, search and language switching when changing navigation or styling. Generated HTML stays in the ignored `build/` directory and outside the app image.

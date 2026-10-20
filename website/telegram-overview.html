@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="uk">
+<meta charset="utf-8">
+<title>DTEK Telegram Bot — illustrative conversations</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eaf3f7;color:#153746;font:19px system-ui,-apple-system,sans-serif;width:1280px;height:720px;padding:36px 50px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}header strong{font-size:23px}header span{font-size:14px;color:#526e7c}
+.columns{display:grid;grid-template-columns:1fr 1fr;gap:34px}h1{font-size:30px;margin:0 0 6px;letter-spacing:-.8px}.caption{margin:0 0 18px;color:#526e7c;font-size:17px}
+.chat{height:520px;background:#d9e9ed;border:1px solid #c6dce3;border-radius:18px;overflow:hidden;box-shadow:0 8px 24px #15374612}.bar{background:#fff;padding:16px 22px;border-bottom:1px solid #d9e9ed;display:flex;align-items:center;gap:12px}.avatar{display:grid;place-items:center;border-radius:50%;background:#0b789e;color:#fff;width:38px;height:38px;font-size:23px}.bar strong{font-size:18px}.bar small{display:block;color:#526e7c;font-size:13px}.body{padding:20px}.message{background:#fff;border-radius:12px;padding:18px 20px;box-shadow:0 2px 4px #15374610;line-height:1.65}.message p{margin:0 0 8px}.message p:last-child{margin:0}.pin{font-size:14px;color:#08749b;letter-spacing:.2px;margin-bottom:10px}.fine{font-size:14px;color:#526e7c}.green{color:#157447;font-weight:650}.buttons{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.button{border-radius:8px;background:#edf7fb;color:#00658e;text-align:center;font-weight:600;font-size:15px;padding:13px 6px}.wide{grid-column:1/-1}.notice{margin-top:14px;background:#ffffffb3;border-radius:10px;padding:14px 18px;font-size:17px}.tag{font-size:13px;background:#e8f5f0;color:#157447;border-radius:5px;padding:3px 7px;float:right}
+</style>
+<header><strong>DTEK Telegram Bot · Home Assistant</strong><span>Ілюстрація · вигадані дані / Illustrative example</span></header>
+<div class="columns">
+  <section><h1>Для будинку</h1><p class="caption">Спільний статус і важливі сповіщення</p>
+    <div class="chat"><div class="bar"><span class="avatar">⌂</span><div><strong>Наш будинок</strong><small>Група · сповіщення ДТЕК</small></div></div><div class="body">
+      <div class="message"><div class="pin">📌 Закріплений статус <span class="tag">Оновлюється</span></div><p><strong>Одеса · Прикладна, 12</strong><br>🔵 Група GPV3.1</p><p><span class="green">● Електропостачання: норма</span><br>🔌 Напруга: 230 В</p><p>📅 Найближче планове:<br><strong>20.10 · 19:00–22:00</strong></p><p class="fine">Оновлено о 18:00</p></div>
+      <div class="notice">⏳ Планове відключення через 10 хв.<br><span class="fine">Окреме повідомлення у потрібний момент</span></div>
+    </div></div>
+  </section>
+  <section><h1>Для себе</h1><p class="caption">Особистий кабінет у приватній розмові</p>
+    <div class="chat"><div class="bar"><span class="avatar">ϟ</span><div><strong>Мій бот ДТЕК</strong><small>Особистий чат</small></div></div><div class="body">
+      <div class="message"><div class="pin">📌 Мій статус</div><p><strong>Моя квартира · ••••0001</strong><br>🔵 Група GPV3.1 · 🟢 Живлення є</p><p class="fine">Покази, датчики й кабінет підключені в HA</p></div>
+      <div class="message" style="margin-top:14px;padding:14px 20px">Оберіть дію:</div>
+      <div class="buttons"><div class="button">📅 Графік на сьогодні</div><div class="button">🗓 Графік на завтра</div><div class="button wide">📝 Передати покази</div></div>
+      <div class="notice">Передача — після вашого підтвердження.<br><span class="fine">Приватні дані доступні лише призначеному користувачеві</span></div>
+    </div></div>
+  </section>
+</div>
+</html>

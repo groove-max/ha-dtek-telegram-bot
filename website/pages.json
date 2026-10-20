@@ -1,0 +1,97 @@
+{
+  "site_url": "https://groove-max.github.io/ha-dtek-telegram-bot/",
+  "repository": "https://github.com/groove-max/ha-dtek-telegram-bot",
+  "installation_url": "https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot",
+  "pages": [
+    {
+      "slug": "",
+      "en": {
+        "source": "README.md",
+        "label": "Overview",
+        "title": "DTEK Telegram bot for Home Assistant: alerts and meter readings",
+        "description": "DTEK outage alerts, pinned power status and personal meter readings in Telegram. Set up a building feed or your own private bot with Home Assistant."
+      },
+      "uk": {
+        "source": "README.uk.md",
+        "label": "Огляд",
+        "title": "Telegram-бот ДТЕК для Home Assistant: відключення й покази",
+        "description": "Сповіщення про відключення ДТЕК, закріплений статус і особисті покази в Telegram. Налаштуйте бота для будинку або приватного кабінету через Home Assistant."
+      }
+    },
+    {
+      "slug": "installation",
+      "en": {
+        "source": "docs/UPGRADING.md",
+        "label": "Install & update",
+        "title": "Install and update the DTEK Telegram Bot Home Assistant app",
+        "description": "Install the DTEK Telegram Bot app, choose compatible Monitor versions and update safely while preserving recipients, sensors and templates."
+      },
+      "uk": {
+        "source": "docs/UPGRADING.uk.md",
+        "label": "Встановлення й оновлення",
+        "title": "Як встановити й оновити Telegram-бот ДТЕК у Home Assistant",
+        "description": "Встановлення застосунку DTEK Telegram Bot, сумісні версії інтеграції, оновлення зі збереженням чатів, датчиків і шаблонів та повернення попередньої версії."
+      }
+    },
+    {
+      "slug": "building",
+      "en": {
+        "source": "docs/BUILDING.md",
+        "label": "For your building",
+        "title": "DTEK outage notifications for a Telegram group, channel or private chat",
+        "description": "Connect a building address to your Telegram bot. Select all building groups, configure alerts, keep a pinned status and test delivery before inviting neighbours."
+      },
+      "uk": {
+        "source": "docs/BUILDING.uk.md",
+        "label": "Для будинку",
+        "title": "Сповіщення ДТЕК для будинку: група, канал або особистий чат",
+        "description": "Підключіть адресу будинку до Telegram-бота. Оберіть групи, налаштуйте сповіщення й закріплений статус та перевірте доставку до запуску чату мешканців."
+      }
+    },
+    {
+      "slug": "personal",
+      "en": {
+        "source": "docs/PERSONAL.md",
+        "label": "For yourself",
+        "title": "Your DTEK personal account in Telegram: history and meter readings",
+        "description": "Authorize your private Telegram user for DTEK cabinet notifications, schedule images, reading history, reminders and confirmed meter submissions."
+      },
+      "uk": {
+        "source": "docs/PERSONAL.uk.md",
+        "label": "Для себе",
+        "title": "Особистий кабінет ДТЕК у Telegram: історія й передача показів",
+        "description": "Налаштуйте приватний доступ до кабінету ДТЕК у Telegram: група квартири, PNG-графіки, історія, нагадування й передача показів після підтвердження."
+      }
+    },
+    {
+      "slug": "power-sensors",
+      "en": {
+        "source": "docs/POWER.md",
+        "label": "Power & voltage sensors",
+        "title": "Power outage detection with Home Assistant binary, voltage or frequency sensors",
+        "description": "Choose a binary power status, voltage or frequency sensor, or two independent sources. Set freshness, delays and separate voltage quality alerts."
+      },
+      "uk": {
+        "source": "docs/POWER.uk.md",
+        "label": "Датчики живлення й напруги",
+        "title": "Визначення відключень за датчиками живлення в Home Assistant",
+        "description": "Оберіть бінарний статус мережі, напругу, частоту або два незалежні джерела. Налаштуйте актуальність даних, затримки й окремі сповіщення про якість напруги."
+      }
+    },
+    {
+      "slug": "reference",
+      "en": {
+        "source": "DOCS.md",
+        "label": "Settings & troubleshooting",
+        "title": "DTEK Telegram Bot settings, recipients, templates and troubleshooting",
+        "description": "Configure multiple addresses and Telegram bots, discover chat IDs, customize message templates and diagnose missing schedules or delivery problems."
+      },
+      "uk": {
+        "source": "DOCS.uk.md",
+        "label": "Налаштування й діагностика",
+        "title": "Налаштування Telegram-бота ДТЕК: чати, шаблони й діагностика",
+        "description": "Кілька адрес і ботів Telegram, пошук ID чатів, власні шаблони повідомлень, резервні копії та розв’язання проблем із графіками й доставкою."
+      }
+    }
+  ]
+}

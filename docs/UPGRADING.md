@@ -1,10 +1,18 @@
-# Upgrade to DTEK Telegram Bot 0.5.0-rc2
+# Install and update DTEK Telegram Bot
 
 **English** · [Українська](UPGRADING.uk.md) · [Installation](../README.md#installation)
 
-**0.5.0-rc2 is a regular GitHub release**, without the Pre-release flag. Its name retains RC2. Install the bot through the HA app store, which reads the version from this repository; HACS is used for the DTEK Monitor integration.
+Install the bot through the **Home Assistant app store**; HACS is used for the DTEK Monitor integration. [Latest bot release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest) · [Latest integration release](https://github.com/groove-max/ha-dtek-monitor/releases/latest).
+
+## First installation
+
+Use **Home Assistant OS**, HA **2026.3.0+** and `amd64` or `aarch64`. [Add the app repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot), install DTEK Telegram Bot, enter your BotFather token and open its web UI. The [step-by-step installation](../README.md#installation) covers creating the bot and discovering your chat.
+
+Choose [building mode](BUILDING.md) for address alerts or [personal mode](PERSONAL.md) for your cabinet. A group/channel and physical sensors are optional. A private chat is enough to get started.
 
 ## Choose the matching versions
+
+The versions below are minimums for the current personal features; use the latest compatible releases for a new installation. RC2 releases are available in the regular release channel.
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
@@ -19,10 +27,10 @@ Public schedules and personal household cabinets cover the four operators listed
 1. Back up the app **and HA configuration**, including
    `dtek_telegram_bot.yaml`. The app data contains private bot credentials,
    templates, message IDs and delivery history. Keep the backup private.
-2. For personal mode, first [update DTEK Monitor to 2.0.0-rc2](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md),
+2. For personal mode, first [update DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md),
    restart HA and check that the cabinet loads. Existing building-only setups
    can keep their compatible integration version.
-3. In **Settings → Apps → DTEK Telegram Bot**, install **0.5.0-rc2** and wait for
+3. In **Settings → Apps → DTEK Telegram Bot**, install the current version and wait for
    the app to start. If the update is missing, check for updates in the app store.
 4. Reload the web editor. Existing recipients, sensor bindings, custom templates
    and notification choices are retained. Existing power modes are not converted
