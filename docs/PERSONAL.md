@@ -6,7 +6,7 @@
 
 > Requires **bot 0.5.0-rc1** and **DTEK Monitor 2.0.0-rc1**. Both are prereleases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
-Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor calibration and scheduled-check settings remain in **My DTEK** in Home Assistant.
+Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. The development version also lets you confirm a calibration correction during reading entry.
 
 ## Choose a profile
 
@@ -40,7 +40,9 @@ The reading-entry and history buttons appear when **Allow reading submission** i
 
 When a source is configured, the first submission screen shows the proposed cumulative reading, its observation time and whether it uses the saved calibration or a direct meter reading. Use the proposal or enter your own value; the existing HA confirmation and calibration rules apply. Unavailable, stale, reset or changed sensors are explained instead of silently dropping the proposal. The source may be any supported cumulative energy sensor, not just ATORCH.
 
-The initial reading flow supports the integration's existing single-meter, one-zone or day/night scope. Corrections to a sensor suggestion retain the integration's calibration behavior. Starting over, editing, `/cancel`, expired confirmation or a restart invalidates unfinished Telegram confirmations. After rejection, a partial result or an unknown result, inspect **My DTEK** before retrying. The bot never automatically repeats a submission whose outcome is uncertain.
+With the matching development integration, manual reading review offers **📏 Зберегти поправку калібрування (Save calibration correction)** for an estimate binding. Check each tariff's official reading, sensor sample/time and correction, then confirm **Знято одночасно — зберегти (Taken together — save)** only if you read the physical meter at those times. Samples must be no more than three minutes old, including availability mode. Day/Night requires separate cumulative sensor values. Older physical readings must not be paired with current samples. Saving updates HA's reference pairs and does **not** submit anything to DTEK; return to reading review to send separately. Canceling leaves references unchanged. Editing a number alone does not save a correction. This feature is not in the published RC1 releases.
+
+The reading flow supports one consumption meter, with one zone or Day/Night. Starting over, editing, `/cancel`, expired confirmation or a restart invalidates unfinished Telegram confirmations. After rejection, a partial result or an unknown result, inspect **My DTEK** before retrying. The bot never automatically repeats a submission whose outcome is uncertain.
 
 Replies include **🏠 Меню (Menu)**. Only the latest menu screen is retained: after successfully sending a new screen, the bot removes its previous screen, including a schedule image. The pinned status, automatic notifications, reading reminders and your own messages remain. The bot remembers its last screen across restarts. Returning to the menu cancels an unfinished reading confirmation. Navigation buttons are reusable; submission confirmation is single-use. After a restart, open `/start` for fresh buttons.
 

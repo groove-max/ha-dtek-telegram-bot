@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Offer a separate calibration correction during manual reading review, using the integration's captured per-tariff sensor samples and reference store. Require explicit confirmation that physical readings were taken at the displayed sample times; saving never submits to DTEK. Requires the matching development integration.
 - Show modern DTEK Day/Night tariff codes as readable names in private reading entry, confirmations, history and reminders without changing the values or codes passed to the integration.
 - Document Kyiv city personal profiles with the matching development version of DTEK Monitor; Kyiv oblast remains a separate, unverified cabinet region.
 

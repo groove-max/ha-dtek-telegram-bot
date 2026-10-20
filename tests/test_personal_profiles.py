@@ -79,6 +79,55 @@ class ProfileConfigTests(unittest.TestCase):
 
 
 class ConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_two_zone_calibration_has_separate_confirmation_and_never_submits(self):
+        session = {
+            "profile": self.profile.key, "expires": time.time() + 300,
+            "context": {"revision": "meter-revision", "address": "Example"},
+            "values": {"DAY_2_ZONE": "1030", "NIGHT_2_ZONE": "1012"},
+            "energy": {"binding": {"mode": "offset", "revision": "reference"}},
+        }
+        self.app.ha.command.return_value = {
+            "confirmation": "local-token", "change": {"changes": {
+                zone: {"actual": value, "source": "125", "source_at": "2026-10-20T12:00:00+03:00", "correction": "5"}
+                for zone, value in session["values"].items()
+            }},
+        }
+        await self.router.action(123, self.profile, "calibration_preview", session)
+        self.assertEqual(self.app.ha.command.call_args.kwargs["action"], "calibration_preview")
+        self.assertEqual(self.app.ha.command.call_args.kwargs["values"], session["values"])
+        text = self.bot.send_message.call_args.kwargs["text"]
+        self.assertIn("День", text)
+        self.assertIn("Ніч", text)
+        self.assertNotIn("_2_ZONE", text)
+        self.assertIn("одночасно", text)
+        button = next(v for v in self.router.buttons.values() if v["action"] == "calibration_save")
+        self.app.ha.command.reset_mock()
+        self.app.ha.command.return_value = {"saved": True}
+        await self.router.action(123, self.profile, "calibration_save", button["payload"])
+        calls = [c.kwargs for c in self.app.ha.command.call_args_list]
+        self.assertEqual(calls[0]["action"], "calibration_save")
+        self.assertTrue(calls[0]["contemporaneous"])
+        self.assertNotIn("confirm", [c["action"] for c in calls])
+        self.assertIn("ще не передані", self.bot.send_message.call_args.kwargs["text"])
+
+    async def test_calibration_actions_require_reading_permission(self):
+        self.profile.allow_readings = False
+        for action in ("calibration_preview", "calibration_save"):
+            with self.assertRaises(HACommandError):
+                await self.router.cabinet(self.profile, 123, action)
+        self.app.ha.command.assert_not_awaited()
+
+    async def test_cancel_or_back_removes_old_calibration_confirmation_buttons(self):
+        self.router.keyboard(123, self.profile, [
+            ("Save", "calibration_save", {"confirmation": "private-token"}),
+            ("Back", "review", {}),
+            ("Preview", "calibration_preview", {}),
+            ("Menu", "menu", None),
+        ])
+        self.router.cancel_reading(123)
+        self.assertEqual({b["action"] for b in self.router.buttons.values()}, {"menu"})
+        self.app.ha.command.assert_not_awaited()
+
     async def test_modern_day_night_history_uses_readable_labels(self):
         result = {"latest": [
             {"date_time": "2026-10-18T00:00:00+03:00", "energy": "ACTIVE", "zone": zone,

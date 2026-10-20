@@ -81,7 +81,7 @@ class Conversations:
                 "action": action,
                 "payload": payload,
                 "expires": now
-                + (300 if action in ("confirm", "manual", "estimate") else 604800),
+                + (300 if action in ("confirm", "manual", "estimate", "review", "calibration_preview", "calibration_save") else 604800),
             }
             rows.append(
                 [InlineKeyboardButton(text=label, callback_data="dtek:" + token)]
@@ -240,7 +240,7 @@ class Conversations:
         if profile not in self.profiles(user) or profile.mode != "personal":
             raise HACommandError("unauthorized")
         if (
-            action in ("context", "energy", "prepare", "confirm", "readback", "history")
+            action in ("context", "energy", "prepare", "confirm", "readback", "history", "calibration_preview", "calibration_save")
             and not profile.allow_readings
         ):
             raise HACommandError("unauthorized")
@@ -260,12 +260,15 @@ class Conversations:
             (k, v)
             for k, v in self.buttons.items()
             if not (
-                v["user"] == user and v["action"] in ("confirm", "manual", "estimate")
+                v["user"] == user and v["action"] in (
+                    "confirm", "manual", "estimate", "review",
+                    "calibration_preview", "calibration_save",
+                )
             )
         )
 
     async def action(self, user, profile, action, payload):
-        if action in ("menu", "profile", "readings", "manual", "estimate"):
+        if action in ("menu", "profile", "readings", "manual", "estimate", "review"):
             # Editing, starting over or switching accounts invalidates old confirmations.
             self.cancel_reading(user)
         if action == "menu":
@@ -338,6 +341,7 @@ class Conversations:
             energy = {}
             try:
                 energy = await self.cabinet(profile, user, "energy")
+                session["energy"] = energy
                 if energy.get("ready") and energy.get("proposal"):
                     actions.insert(0,
                         (
@@ -380,6 +384,52 @@ class Conversations:
             session["source_token"] = energy["proposal"]
             self.sessions[user] = session
             await self.review(user, profile, session)
+            return
+        if action == "review":
+            await self.review(user, profile, payload)
+            return
+        if action == "calibration_preview":
+            session = payload
+            self.buttons = OrderedDict(
+                (k, v) for k, v in self.buttons.items()
+                if not (v["user"] == user and v["profile"] == profile.key)
+            )
+            draft = await self.cabinet(
+                profile, user, "calibration_preview",
+                revision=session["context"]["revision"], values=dict(session["values"]),
+                binding_revision=session["energy"]["binding"]["revision"],
+            )
+            lines = ["Це локальне коригування. Воно не передає показів у ДТЕК.\n"]
+            for zone, row in draft["change"]["changes"].items():
+                lines.append(
+                    f"🔢 {escape(ZONE_LABELS.get(zone, zone))}: <b>{escape(str(row['actual']))} кВт·год</b>\n"
+                    f"Датчик: {escape(str(row['source']))} кВт·год\n"
+                    f"🕒 {escape(format_datetime(row['source_at']))}\n"
+                    f"Поправка: {escape(str(row['correction']))} кВт·год\n"
+                )
+            lines.append("Зберігайте лише якщо покази кожного тарифу фізичного лічильника зняті одночасно з наведеним відліком датчика. Давніші покази не підходять.")
+            await self.reply(user, profile, "📏 Перевірте калібрування", "\n".join(lines), [
+                ("✅ Знято одночасно — зберегти", "calibration_save", {"session": session, "confirmation": draft["confirmation"]}),
+                ("↩️ Назад без збереження", "review", session),
+            ], address=session["context"].get("address"))
+            return
+        if action == "calibration_save":
+            session = payload["session"]
+            self.buttons = OrderedDict(
+                (k, v) for k, v in self.buttons.items()
+                if not (v["user"] == user and v["profile"] == profile.key)
+            )
+            await self.cabinet(profile, user, "calibration_save",
+                               confirmation=payload["confirmation"], contemporaneous=True)
+            session.pop("source_token", None)
+            session.pop("energy", None)
+            try:
+                session["energy"] = await self.cabinet(profile, user, "energy")
+            except HACommandError:
+                pass
+            await self.reply(user, profile, "✅ Калібрування збережено",
+                             "Наступні розрахунки врахують поправку. Покази у ДТЕК ще не передані.",
+                             [("📝 Перевірити передачу показів", "review", session)])
             return
         if action == "confirm":
             self.sessions.pop(user, None)
@@ -520,6 +570,8 @@ class Conversations:
             await self.review(user, profile, session)
 
     async def review(self, user, profile, session):
+        if session.get("expires", 0) <= time.time():
+            raise HACommandError("confirmation_expired")
         payload = {
             "revision": session["context"]["revision"],
             "values": session["values"],
@@ -538,13 +590,16 @@ class Conversations:
         lines.append(
             "ℹ️ Це не обов’язково споживання за календарний місяць.\n\nПередати ці покази у ДТЕК?"
         )
+        actions = [
+            ("✅ Підтвердити й передати у ДТЕК", "confirm", draft["confirmation"]),
+            ("✏️ Виправити вручну", "manual", session),
+        ]
+        if not session.get("source_token") and (session.get("energy", {}).get("binding") or {}).get("mode") == "offset":
+            actions.append(("📏 Зберегти поправку калібрування", "calibration_preview", session))
         await self.reply(
             user, profile, "📝 Підтвердження показів",
             "\n".join(lines),
-            [
-                ("✅ Підтвердити й передати у ДТЕК", "confirm", draft["confirmation"]),
-                ("✏️ Виправити вручну", "manual", session),
-            ], address=session["context"].get("address"),
+            actions, address=session["context"].get("address"),
         )
 
     async def failure(self, user, error, profile=None, *, action=None, payload=None):
@@ -555,6 +610,10 @@ class Conversations:
             "invalid_readings": "Покази некоректні: перевірте всі зони та попереднє значення. Почніть з /start.",
             "confirmation_expired": "Підтвердження прострочене. Відкрийте /start та перевірте покази знову.",
             "context_changed": "Дані лічильника змінилися. Почніть з /start.",
+            "energy_changed": "Прив’язка або відлік датчика змінилися. Почніть передачу знову, щоб отримати актуальні дані.",
+            "source_stale": "Для коригування потрібні свіжі відліки датчиків (до 3 хвилин). Оновіть їх і зніміть покази фізичного лічильника одночасно.",
+            "energy_confirmation_expired": "Підтвердження калібрування прострочене або вже використане. Перевірте збережену опорну пару в HA.",
+            "calibration_time_required": "Підтвердьте одночасне зняття показів фізичного лічильника й датчиків.",
             "auth_required": "Потрібно повторно увійти до ДТЕК у Home Assistant.",
             "check_cabinet": "Попередня передача має невідомий результат. Перевірте кабінет у HA.",
             "rate_limited": "ДТЕК обмежив частоту запитів. Спробуйте пізніше.",
