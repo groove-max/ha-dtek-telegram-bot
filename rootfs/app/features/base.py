@@ -123,8 +123,14 @@ class Feature(ABC):
         return self.entity_candidates(suffix)[0]
 
     async def read_groups(self, *, require_schedule: bool = False) -> list[str]:
+        explicitly_unverified = False
         for entity in self.entity_candidates("schedule_group"):
             state = await self.ha.get_state(entity)
+            attrs = (state or {}).get("attributes", {})
+            explicitly_unverified |= (
+                attrs.get("schedule_notifications_ready") is False
+                or attrs.get("cabinet_group_status") == "unavailable"
+            )
             groups = state_groups(state)
             if groups:
                 attrs = state.get("attributes", {})
@@ -150,6 +156,8 @@ class Feature(ABC):
                 )
                 return groups
         self.state_set("groups_available", False)
+        if explicitly_unverified:
+            raise ScheduleUnavailable("Address groups have not been verified")
         raise ValueError("Address groups are unavailable")
 
     async def calendar_snapshot(self, fetch) -> list[dict]:

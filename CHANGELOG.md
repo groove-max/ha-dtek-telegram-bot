@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [0.5.0-rc2] - 2026-10-20
+
+**Published as a regular GitHub release**, without the Pre-release flag. Install through the Home Assistant app store; the bot is an app, not a HACS integration. Requires HA 2026.3.0+, amd64/aarch64.
+
+Version 0.5 adds private cabinet profiles alongside building alerts, private menus and history, confirmed readings, reminders, detected Telegram recipients, configurable power sources and a simpler settings wizard. Building alerts remain compatible with Monitor 1.7.0/2.0.0b1; use **Monitor 2.0.0-rc2** for the complete private workflow.
+
+**Upgrade:** back up app data and HA configuration, update the integration first, then the app. Existing bot tokens, chats, templates, sensor bindings, status pins and delivery history are preserved. No readings are sent automatically.
+
+- Offer a separate calibration correction during manual reading review, using the integration's captured per-tariff sensor samples and reference store. Require explicit confirmation that physical readings were taken at the displayed sample times; saving never submits to DTEK. Requires Monitor 2.0.0-rc2.
+- Show modern DTEK Day/Night tariff codes as readable names in private reading entry, confirmations, history and reminders without changing the values or codes passed to the integration.
+- Document regional personal profiles with the Monitor 2.0.0-rc2: Kyiv oblast and Dnipropetrovsk oblast cabinets and group lookup are experimental. The integration also supplies verified Kyiv private groups when public labels are hidden; building-mode labels remain independent.
+- Treat explicitly unverified cabinet groups as a temporary notification pause instead of repeated worker errors. Preserve acknowledged schedules and resume checks when verified groups return; never substitute building groups.
+
+[Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md)
+
+[Private mode](docs/PERSONAL.md) · [Особистий режим](docs/PERSONAL.uk.md)
+
 ## [0.5.0-rc1] - 2026-10-20
 
 **Release candidate — for testing before the final 0.5.0 release.** Requires Home Assistant OS, HA 2026.3.0+, and amd64/aarch64. Personal mode and PNG menus require **DTEK Monitor 2.0.0-rc1**; existing building notifications also work with Monitor 1.7.0 and 2.0.0b1.

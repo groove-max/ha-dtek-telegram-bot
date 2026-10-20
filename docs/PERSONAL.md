@@ -2,9 +2,9 @@
 
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
-> Requires **bot 0.5.0-rc1** and **DTEK Monitor 2.0.0-rc1**. Both are prereleases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
+> Requires **bot 0.5.0-rc2** and **DTEK Monitor 2.0.0-rc2**. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
-Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor calibration and scheduled-check settings remain in **My DTEK** in Home Assistant.
+Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
 
 ## Choose a profile
 
@@ -19,7 +19,7 @@ A verified assignment change can be announced before its schedule is published. 
 
 ## Set up a personal profile
 
-1. In [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor), sign in to the cabinet and select the account. Check its building link in **My DTEK → Settings → Building and outage group**. Cabinet group lookup must be enabled and return current data for group notifications. Currently this lookup is supported for Odesa accounts.
+1. In [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor), sign in to the cabinet and select the account. Check its building link in **My DTEK → Settings → Building and outage group**. Cabinet group lookup must be enabled and return current data for group notifications. Lookup is enabled for all four operators. Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental and have not been checked with real linked accounts. Kyiv city and Kyiv oblast are separate operators. Hidden labels on the public website do not block private notifications when the cabinet supplies a current group that belongs to the building. If that assignment is unavailable or conflicting, schedule notifications wait for valid data; the bot never substitutes another group.
 2. Open your Telegram bot and press **Start**. Before access is configured, its introduction shows your numeric **Telegram ID**. This does not give access to any account. If introductions are disabled, use the [chat ID instructions](../DOCS.md#telegram).
 3. In the add-on web editor, add a profile and choose **Особистий кабінет**. Select the account by its masked number and address, choose the Telegram bot, then select yourself from the detected recipients or enter your numeric Telegram user ID. After `/start`, press **Refresh** in the editor to update the list. Verify the name, username and ID before saving. The destination is automatically this user's private chat; a username, channel or group cannot be substituted.
 4. Enable the notifications you need. Enable **reading reminders** and **allow reading submission** separately. Both are off by default. Link physical power sensors only if they measure this account's home; they are optional.
@@ -38,7 +38,9 @@ The reading-entry and history buttons appear when **Allow reading submission** i
 
 When a source is configured, the first submission screen shows the proposed cumulative reading, its observation time and whether it uses the saved calibration or a direct meter reading. Use the proposal or enter your own value; the existing HA confirmation and calibration rules apply. Unavailable, stale, reset or changed sensors are explained instead of silently dropping the proposal. The source may be any supported cumulative energy sensor, not just ATORCH.
 
-The initial reading flow supports the integration's existing single-meter, one-zone or day/night scope. Corrections to a sensor suggestion retain the integration's calibration behavior. Starting over, editing, `/cancel`, expired confirmation or a restart invalidates unfinished Telegram confirmations. After rejection, a partial result or an unknown result, inspect **My DTEK** before retrying. The bot never automatically repeats a submission whose outcome is uncertain.
+With the Monitor 2.0.0-rc2, manual reading review offers **📏 Зберегти поправку калібрування (Save calibration correction)** for an estimate binding. Check each tariff's official reading, sensor sample/time and correction, then confirm **Знято одночасно — зберегти (Taken together — save)** only if you read the physical meter at those times. Samples must be no more than three minutes old, including availability mode. Day/Night requires separate cumulative sensor values. Older physical readings must not be paired with current samples. Saving updates HA's reference pairs and does **not** submit anything to DTEK; return to reading review to send separately. Canceling leaves references unchanged. Editing a number alone does not save a correction.
+
+The reading flow supports one consumption meter, with one zone or Day/Night. Starting over, editing, `/cancel`, expired confirmation or a restart invalidates unfinished Telegram confirmations. After rejection, a partial result or an unknown result, inspect **My DTEK** before retrying. The bot never automatically repeats a submission whose outcome is uncertain.
 
 Replies include **🏠 Меню (Menu)**. Only the latest menu screen is retained: after successfully sending a new screen, the bot removes its previous screen, including a schedule image. The pinned status, automatic notifications, reading reminders and your own messages remain. The bot remembers its last screen across restarts. Returning to the menu cancels an unfinished reading confirmation. Navigation buttons are reusable; submission confirmation is single-use. After a restart, open `/start` for fresh buttons.
 

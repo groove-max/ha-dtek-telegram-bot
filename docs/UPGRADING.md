@@ -1,34 +1,28 @@
-# Upgrade to DTEK Telegram Bot 0.5.0-rc1
+# Upgrade to DTEK Telegram Bot 0.5.0-rc2
 
 **English** · [Українська](UPGRADING.uk.md) · [Installation](../README.md#installation)
 
-**RC means release candidate:** this version is available for wider testing before
-the final 0.5.0 release. The HA app store reads the version in this repository;
-GitHub's “Pre-release” label does not hide the update from the app store. If you
-want to stay on 0.4.1, do not install this update and disable automatic updates for
-this app while testing continues.
+**0.5.0-rc2 is a regular GitHub release**, without the Pre-release flag. Its name retains RC2. Install the bot through the HA app store, which reads the version from this repository; HACS is used for the DTEK Monitor integration.
 
 ## Choose the matching versions
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
-| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc1 | 0.5.0-rc1 |
-| Personal cabinet, readings and history | **2.0.0-rc1** | **0.5.0-rc1** |
-| Today/tomorrow PNG schedule menu | **2.0.0-rc1** | **0.5.0-rc1** |
+| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc2 |
+| Personal cabinet, readings and history | **2.0.0-rc2** | **0.5.0-rc2** |
+| Today/tomorrow PNG schedule menu | **2.0.0-rc2** | **0.5.0-rc2** |
 
-Public schedules support the four operators listed in the integration. Personal
-cabinets currently support **Odesa household accounts only**. Other regions'
-cabinet support is not enabled by installing this release.
+Public schedules and personal household cabinets cover the four operators listed in Monitor 2.0.0-rc2. **Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental** and await real-account validation. Odesa and Kyiv city cabinet reads have been checked live; actual Day/Night submission has automated tests only.
 
 ## Update an existing installation
 
 1. Back up the app **and HA configuration**, including
    `dtek_telegram_bot.yaml`. The app data contains private bot credentials,
    templates, message IDs and delivery history. Keep the backup private.
-2. For personal mode, first [update DTEK Monitor to 2.0.0-rc1](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md),
+2. For personal mode, first [update DTEK Monitor to 2.0.0-rc2](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md),
    restart HA and check that the cabinet loads. Existing building-only setups
    can keep their compatible integration version.
-3. In **Settings → Apps → DTEK Telegram Bot**, install **0.5.0-rc1** and wait for
+3. In **Settings → Apps → DTEK Telegram Bot**, install **0.5.0-rc2** and wait for
    the app to start. If the update is missing, check for updates in the app store.
 4. Reload the web editor. Existing recipients, sensor bindings, custom templates
    and notification choices are retained. Existing power modes are not converted

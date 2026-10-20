@@ -79,6 +79,66 @@ class ProfileConfigTests(unittest.TestCase):
 
 
 class ConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_two_zone_calibration_has_separate_confirmation_and_never_submits(self):
+        session = {
+            "profile": self.profile.key, "expires": time.time() + 300,
+            "context": {"revision": "meter-revision", "address": "Example"},
+            "values": {"DAY_2_ZONE": "1030", "NIGHT_2_ZONE": "1012"},
+            "energy": {"binding": {"mode": "offset", "revision": "reference"}},
+        }
+        self.app.ha.command.return_value = {
+            "confirmation": "local-token", "change": {"changes": {
+                zone: {"actual": value, "source": "125", "source_at": "2026-10-20T12:00:00+03:00", "correction": "5"}
+                for zone, value in session["values"].items()
+            }},
+        }
+        await self.router.action(123, self.profile, "calibration_preview", session)
+        self.assertEqual(self.app.ha.command.call_args.kwargs["action"], "calibration_preview")
+        self.assertEqual(self.app.ha.command.call_args.kwargs["values"], session["values"])
+        text = self.bot.send_message.call_args.kwargs["text"]
+        self.assertIn("День", text)
+        self.assertIn("Ніч", text)
+        self.assertNotIn("_2_ZONE", text)
+        self.assertIn("одночасно", text)
+        button = next(v for v in self.router.buttons.values() if v["action"] == "calibration_save")
+        self.app.ha.command.reset_mock()
+        self.app.ha.command.return_value = {"saved": True}
+        await self.router.action(123, self.profile, "calibration_save", button["payload"])
+        calls = [c.kwargs for c in self.app.ha.command.call_args_list]
+        self.assertEqual(calls[0]["action"], "calibration_save")
+        self.assertTrue(calls[0]["contemporaneous"])
+        self.assertNotIn("confirm", [c["action"] for c in calls])
+        self.assertIn("ще не передані", self.bot.send_message.call_args.kwargs["text"])
+
+    async def test_calibration_actions_require_reading_permission(self):
+        self.profile.allow_readings = False
+        for action in ("calibration_preview", "calibration_save"):
+            with self.assertRaises(HACommandError):
+                await self.router.cabinet(self.profile, 123, action)
+        self.app.ha.command.assert_not_awaited()
+
+    async def test_cancel_or_back_removes_old_calibration_confirmation_buttons(self):
+        self.router.keyboard(123, self.profile, [
+            ("Save", "calibration_save", {"confirmation": "private-token"}),
+            ("Back", "review", {}),
+            ("Preview", "calibration_preview", {}),
+            ("Menu", "menu", None),
+        ])
+        self.router.cancel_reading(123)
+        self.assertEqual({b["action"] for b in self.router.buttons.values()}, {"menu"})
+        self.app.ha.command.assert_not_awaited()
+
+    async def test_modern_day_night_history_uses_readable_labels(self):
+        result = {"latest": [
+            {"date_time": "2026-10-18T00:00:00+03:00", "energy": "ACTIVE", "zone": zone,
+             "value": value, "status": "active"}
+            for zone, value in (("DAY_2_ZONE", "150"), ("NIGHT_2_ZONE", "120"))
+        ]}
+        rendered = Conversations.history_text(result)
+        self.assertIn("День: <b>150", rendered)
+        self.assertIn("Ніч: <b>120", rendered)
+        self.assertNotIn("_2_ZONE", rendered)
+
     async def asyncSetUp(self):
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -495,20 +555,27 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.app.ha.command.assert_not_awaited()
 
     async def test_manual_day_night_inputs_prepare_only_then_explicit_confirm(self):
+        await self._manual_two_zone_input("DAY", "NIGHT")
+
+    async def test_modern_day_night_inputs_keep_raw_codes_and_explicit_confirmation(self):
+        await self._manual_two_zone_input("DAY_2_ZONE", "NIGHT_2_ZONE")
+        self.assertNotIn("_2_ZONE", self.bot.send_message.call_args.kwargs["text"])
+
+    async def _manual_two_zone_input(self, day, night):
         context = {
             "account": "••••0001",
             "address": "Приклад",
             "revision": "rev",
             "zones": [
-                {"zone": "DAY", "previous": "100"},
-                {"zone": "NIGHT", "previous": "50"},
+                {"zone": day, "previous": "100"},
+                {"zone": night, "previous": "50"},
             ],
         }
         self.app.ha.command.return_value = {
             "confirmation": "draft",
             "readings": [
-                {"zone": "DAY", "previous": "100", "value": 110, "increase": "10"},
-                {"zone": "NIGHT", "previous": "50", "value": 55, "increase": "5"},
+                {"zone": day, "previous": "100", "value": 110, "increase": "10"},
+                {"zone": night, "previous": "50", "value": 55, "increase": "5"},
             ],
         }
         await self.router.action(
@@ -524,7 +591,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.app.ha.command.call_args.kwargs["action"], "prepare")
         self.assertEqual(
             self.app.ha.command.call_args.kwargs["values"],
-            {"DAY": "110", "NIGHT": "55"},
+            {day: "110", night: "55"},
         )
         self.assertIn(
             "Різниця між показами", self.bot.send_message.call_args.kwargs["text"]
@@ -688,6 +755,47 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
                 f"calendar.{self.profile.entity_prefix}_outage_schedule",
                 {},
             )
+
+    async def test_unverified_cabinet_groups_pause_notifications_and_recover(self):
+        from features.schedule_change import ScheduleChangeFeature
+        from features.upcoming_outage import UpcomingOutageFeature
+        from outage_calendar import ScheduleUnavailable
+
+        with TemporaryDirectory() as directory:
+            state = StateStore(Path(directory) / "state.json")
+            self.addAsyncCleanup(state.flush)
+            telegram = SimpleNamespace(send_message=AsyncMock())
+            features = [
+                cls(self.profile, self.source, telegram, state, TemplateEngine())
+                for cls in (ScheduleChangeFeature, UpcomingOutageFeature)
+            ]
+            features[0].state_set("power_state", "on")
+            features[0].state_set("notified_groups", ["GPV3.1"])
+            features[0].state_set("current_groups", ["GPV3.1"])
+            self.snapshot["groups"] = []
+            self.snapshot["attributes"].update(
+                schedule_groups=[],
+                schedule_notifications_ready=False,
+                cabinet_group_status="cabinet_group_mismatch",
+            )
+            for feature in features:
+                with self.assertRaises(ScheduleUnavailable):
+                    await feature.on_tick()
+            telegram.send_message.assert_not_awaited()
+            self.assertIsNone(features[0].state_get("schedule_signature"))
+            self.assertEqual(features[0].state_get("notified_groups"), ["GPV3.1"])
+            self.assertFalse(features[0].state_get("groups_available"))
+
+            self.snapshot["groups"] = ["GPV3.1"]
+            self.snapshot["attributes"].update(
+                schedule_groups=["GPV3.1"],
+                schedule_notifications_ready=True,
+                cabinet_group_status="available",
+            )
+            await features[0].on_tick()
+            self.assertTrue(features[0].state_get("groups_available"))
+            self.assertTrue(features[0].state_get("schedule_signature"))
+            telegram.send_message.assert_not_awaited()
 
     async def test_independent_voltage_is_forwarded(self):
         await self.source.get_state("sensor.input_voltage")

@@ -80,7 +80,8 @@ class DirectoryTests(unittest.TestCase):
         return {"my_chat_member": {"date": 200, "chat": {"id": -1001, "type": "channel", "title": "House"},
                 "from": {"id": 987, "first_name": "Admin"}, "new_chat_member": {"user": {"id": bot_id}, "status": status}}}
 
-    def test_learns_actual_chat_not_group_senders_and_keeps_no_message_content(self):
+    @patch("telegram_directory.time.time", return_value=1792509876.0)
+    def test_learns_actual_chat_not_group_senders_and_keeps_no_message_content(self, _clock):
         self.directory.observe(self.message(), 99)
         self.directory.observe(self.message(-10, "group"), 99)
         self.directory.observe(self.membership("administrator"), 99)
@@ -88,7 +89,11 @@ class DirectoryTests(unittest.TestCase):
         self.assertEqual({p["id"] for p in peers}, {"123", "-10", "-1001"})
         self.assertNotIn("secret reading", json.dumps(peers))
         self.assertNotIn("phone_number", json.dumps(peers))
-        self.assertNotIn("987", json.dumps(peers))
+        for peer in peers:
+            self.assertEqual(
+                set(peer), {"id", "type", "name", "username", "available", "last_seen"}
+            )
+        self.assertNotIn("Admin", json.dumps(peers))
 
     def test_removed_chat_stays_unavailable_despite_older_edited_post(self):
         self.directory.observe(self.membership("kicked"), 99)
