@@ -62,4 +62,4 @@ Personal conversation tests use synthetic Telegram updates and mocked account op
 
 ## Release verification
 
-`python scripts/release.py v0.5.0-rc1` checks the tag, `config.yaml` and dated changelog notes. CI publishes only after tests, validation and amd64/aarch64 builds pass. Prereleases do not replace GitHub’s latest stable release.
+`python scripts/release.py v0.5.0-rc2` checks the version, dated notes and publication channel. Set the exact version and boolean `prerelease` in `.github/release-channel.json`; a mismatch stops publication. RC2 explicitly uses `false`, so GitHub publishes a regular release and marks it Latest. The RC suffix does not override that choice. CI publishes only after all checks pass. Without a channel file, alpha/beta/RC suffixes default to prereleases.

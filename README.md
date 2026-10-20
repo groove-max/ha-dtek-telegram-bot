@@ -2,7 +2,7 @@
 
 **English** · [Українська](README.uk.md)
 
-> **0.5.0-rc1 — release candidate.** Personal cabinet features require **DTEK Monitor 2.0.0-rc1**. [Upgrade and rollback](docs/UPGRADING.md).
+> **0.5.0-rc2 — regular GitHub release.** Personal cabinet features require **DTEK Monitor 2.0.0-rc2**. [Upgrade and rollback](docs/UPGRADING.md).
 
 [![Add the app repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial-blue.svg)](LICENSE)
@@ -50,7 +50,7 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 
 Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a configured DTEK Monitor building address, a Telegram bot token and a target chat ID.
 
-**Bot 0.5.0-rc1** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Install **Monitor 2.0.0-rc1** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
+**Bot 0.5.0-rc2** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Install **Monitor 2.0.0-rc2** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
 
 **Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for an assigned private user. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md).
 
@@ -64,7 +64,7 @@ Home Assistant now calls add-ons **apps**; older installations show **Add-ons** 
 1. Install [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor#installation). Add an address for building schedules, or connect your cabinet for personal mode.
 2. Create a bot with [@BotFather](https://t.me/BotFather), using `/newbot`. Keep its token.
 3. Open **Settings → Apps → Install app → ⋮ → Repositories**. Older versions call this **Add-ons → Add-on Store**.
-4. Add `https://github.com/groove-max/ha-dtek-telegram-bot` and install **DTEK Telegram Bot**. Check version **0.5.0-rc1**. This repository currently offers a release candidate; upgrade a stable installation deliberately.
+4. Add `https://github.com/groove-max/ha-dtek-telegram-bot` and install **DTEK Telegram Bot**. Check version **0.5.0-rc2**. This version is published without the GitHub Pre-release flag.
 5. In **Configuration**, enter `telegram_bot_token`. You can leave `telegram_chat_id` empty for now and choose a recipient in the editor. Start the app and choose **Open web UI**.
 6. Open your bot in Telegram and send `/start`. For a group, add the bot and send `/start@your_bot_username`; for a channel, make it an administrator with posting/editing rights. Group/channel pinning needs the corresponding permission.
 7. Follow the wizard below. On the **Telegram** step, press **Оновити (Refresh)** to select yourself or a chat. [If the list is empty](DOCS.md#telegram).

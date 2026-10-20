@@ -7,25 +7,25 @@
 <a id="dtek-monitor"></a>
 ## Connect DTEK Monitor
 
-Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 2.0.0-rc1. HA 2026.3.0+ is required. Address support covers Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
+Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 2.0.0-rc2. HA 2026.3.0+ is required. Address support covers Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
 
 | What you need | Configuration |
 | --- | --- |
 | Building channel/group or private address alerts | Building mode; select an address from discovery. |
 | Building linked to an account in My DTEK | Check the building link in cabinet settings, then select that building in the bot. |
-| Personal cabinet groups, readings and reminders | Personal profile; requires bot 0.5.0-rc1 and Monitor 2.0.0-rc1. [Complete setup guide](docs/PERSONAL.md). |
+| Personal cabinet groups, readings and reminders | Personal profile; requires bot 0.5.0-rc2 and Monitor 2.0.0-rc2. [Complete setup guide](docs/PERSONAL.md). |
 
 For a shared chat, leave `selected_group` empty: building mode keeps all address groups. You may manually choose a confirmed group in this mode; a selection in My DTEK does not change it. Personal mode instead uses only the cabinet API groups, without manual substitution or fallback to building groups.
 
 Building discovery uses the common entity ID prefix. Renaming individual IDs may break notifications; change the display name in the editor instead. Personal mode has a separate account selector; DTEK passwords are not stored in the bot.
 
 <a id="monitor-upgrade"></a>
-### Upgrade the integration to 2.0.0-rc1
+### Upgrade the integration to 2.0.0-rc2
 
-This is an optional release candidate. Working 1.7.0 installations can continue using the bot. However, 1.7.0 has a [known first-setup issue](https://github.com/groove-max/ha-dtek-monitor/issues/5): when no schedule is published, setup can retry indefinitely without creating the address entities. **2.0.0b1 fixes this case** and loads the address independently of schedule availability.
+This version is available through the normal HACS release channel. Working 1.7.0 installations can continue using the bot. However, 1.7.0 has a [known first-setup issue](https://github.com/groove-max/ha-dtek-monitor/issues/5): when no schedule is published, setup can retry indefinitely without creating the address entities. **2.0.0b1 fixes this case** and loads the address independently of schedule availability.
 
 1. Create a full HA backup that includes integration files, `.storage`, app data, `dtek_telegram_bot.yaml` and template overrides.
-2. In HACS, select **2.0.0-rc1** for DTEK Monitor and restart HA. If prereleases are hidden, follow the [installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md).
+2. In HACS, select **2.0.0-rc2** for DTEK Monitor and restart HA. No prerelease switch is needed; see the [installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md).
 3. Keep the existing integration entry and bot addresses. Existing entity IDs, destinations, sensor bindings and group selections should remain unchanged.
 4. Check that the integration entry is loaded, the bot reconnects to HA, and local sensors report fresh values. A missing published schedule alone is not an upgrade failure.
 5. If you change bot settings, use **Apply (Застосувати)**. For an optional delivery test, first choose a [test destination](#testing).
@@ -389,7 +389,7 @@ Explicit temporary send failures may be retried within a bounded window after re
 <a id="updates"></a>
 ## Backups, updates and moving to another HA
 
-[Upgrade to 0.5.0-rc1 and rollback](docs/UPGRADING.md). Update the integration first if you want personal mode.
+[Upgrade to 0.5.0-rc2 and rollback](docs/UPGRADING.md). Update the integration first if you want personal mode.
 
 - Back up the app data and HA configuration, including `dtek_telegram_bot.yaml` and template overrides.
 - Read the [changelog](CHANGELOG.md), update the app, then verify the active configuration and destination.

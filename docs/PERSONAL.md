@@ -1,12 +1,10 @@
 # Personal DTEK notifications and readings in Telegram
 
-> **Development branch:** Kyiv city, Kyiv oblast and Dnipropetrovsk oblast support needs the matching development integration; it is not in Monitor 2.0.0-rc1. Modern Day/Night codes are displayed as readable tariff names in this bot branch.
-
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
-> Requires **bot 0.5.0-rc1** and **DTEK Monitor 2.0.0-rc1**. Both are prereleases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
+> Requires **bot 0.5.0-rc2** and **DTEK Monitor 2.0.0-rc2**. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
-Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. The development version also lets you confirm a calibration correction during reading entry.
+Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
 
 ## Choose a profile
 
@@ -40,7 +38,7 @@ The reading-entry and history buttons appear when **Allow reading submission** i
 
 When a source is configured, the first submission screen shows the proposed cumulative reading, its observation time and whether it uses the saved calibration or a direct meter reading. Use the proposal or enter your own value; the existing HA confirmation and calibration rules apply. Unavailable, stale, reset or changed sensors are explained instead of silently dropping the proposal. The source may be any supported cumulative energy sensor, not just ATORCH.
 
-With the matching development integration, manual reading review offers **📏 Зберегти поправку калібрування (Save calibration correction)** for an estimate binding. Check each tariff's official reading, sensor sample/time and correction, then confirm **Знято одночасно — зберегти (Taken together — save)** only if you read the physical meter at those times. Samples must be no more than three minutes old, including availability mode. Day/Night requires separate cumulative sensor values. Older physical readings must not be paired with current samples. Saving updates HA's reference pairs and does **not** submit anything to DTEK; return to reading review to send separately. Canceling leaves references unchanged. Editing a number alone does not save a correction. This feature is not in the published RC1 releases.
+With the Monitor 2.0.0-rc2, manual reading review offers **📏 Зберегти поправку калібрування (Save calibration correction)** for an estimate binding. Check each tariff's official reading, sensor sample/time and correction, then confirm **Знято одночасно — зберегти (Taken together — save)** only if you read the physical meter at those times. Samples must be no more than three minutes old, including availability mode. Day/Night requires separate cumulative sensor values. Older physical readings must not be paired with current samples. Saving updates HA's reference pairs and does **not** submit anything to DTEK; return to reading review to send separately. Canceling leaves references unchanged. Editing a number alone does not save a correction.
 
 The reading flow supports one consumption meter, with one zone or Day/Night. Starting over, editing, `/cancel`, expired confirmation or a restart invalidates unfinished Telegram confirmations. After rejection, a partial result or an unknown result, inspect **My DTEK** before retrying. The bot never automatically repeats a submission whose outcome is uncertain.
 

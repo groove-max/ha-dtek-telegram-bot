@@ -1,6 +1,7 @@
-"""Prevent an RC being published as stable or with unrelated changelog notes."""
+"""Require deliberate release channels and version-scoped changelog notes."""
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -38,6 +39,24 @@ class ReleaseTests(unittest.TestCase):
         (self.root/'CHANGELOG.md').write_text('## [0.5.0-rc1] - 2026-10-20\n\n')
         with self.assertRaises(ValueError):
             release.metadata(self.root, 'v0.5.0-rc1')
+
+    def test_explicit_regular_rc_channel_is_scoped_to_exact_version(self):
+        self.prepare('0.5.0-rc2')
+        policy = self.root / '.github/release-channel.json'
+        policy.parent.mkdir()
+        policy.write_text(json.dumps({'version': '0.5.0-rc2', 'prerelease': False}))
+        self.assertFalse(release.metadata(self.root, 'v0.5.0-rc2')['prerelease'])
+        for channel in (
+            {'version': '0.5.0-rc3', 'prerelease': False},
+            {'version': '0.5.0-rc2', 'prerelease': 'false'},
+            {'version': '0.5.0-rc2'},
+            [],
+        ):
+            policy.write_text(json.dumps(channel))
+            with self.subTest(channel=channel), self.assertRaises(ValueError):
+                release.metadata(self.root, 'v0.5.0-rc2')
+        policy.unlink()
+        self.assertTrue(release.metadata(self.root, 'v0.5.0-rc2')['prerelease'])
 
     def test_release_documentation_links_point_to_the_tag(self):
         self.prepare('0.5.0-rc1')
