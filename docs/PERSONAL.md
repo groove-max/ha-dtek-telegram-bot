@@ -2,7 +2,7 @@
 
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
-> Requires **bot 0.5.0-rc2** and **DTEK Monitor 2.0.0-rc2**. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
+> Requires **bot 0.5.0-rc2 or newer** and **DTEK Monitor 2.0.0-rc2 or newer**. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
 Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
 

@@ -2,16 +2,30 @@
 
 **English** · [Українська](README.uk.md)
 
-> **0.5.0-rc2 — regular GitHub release.** Personal cabinet features require **DTEK Monitor 2.0.0-rc2**. [Upgrade and rollback](docs/UPGRADING.md).
-
 [![Add the app repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot)
+
+[![Latest release](https://img.shields.io/github/v/release/groove-max/ha-dtek-telegram-bot)](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest)
+[![Tests](https://github.com/groove-max/ha-dtek-telegram-bot/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/groove-max/ha-dtek-telegram-bot/actions/workflows/tests.yml)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial-blue.svg)](LICENSE)
 
-Send **DTEK outage schedules and electricity alerts to Telegram** from Home Assistant. Keep yourself in a private chat, a building group or a channel informed with schedule changes, advance warnings and one updated pinned status message.
+**DTEK outage alerts, a current power status and personal meter readings — in Telegram.** Notify your building group or channel, or use a private conversation for your own account. One Home Assistant app supports both modes, several addresses and several bot tokens.
 
-This app uses [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) to obtain the address's DTEK data. Optional local voltage sensors can confirm actual power loss and restoration. Supported operators currently cover **Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city** through that integration.
+Works with [DTEK Monitor](https://groove-max.github.io/ha-dtek-monitor/en/) for **Odesa oblast, Kyiv city, Kyiv oblast and Dnipropetrovsk oblast**. Local power sensors are optional. Cabinet features for Kyiv oblast and Dnipropetrovsk oblast are experimental.
 
-[Install](#installation) · [First setup](#setup) · [Choose power detection](#power-detection) · [Troubleshoot](#troubleshooting) · [Full guide](DOCS.md)
+**[Install](#installation)** · [Documentation](https://groove-max.github.io/ha-dtek-telegram-bot/en/) · [Latest release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest) · [DTEK Monitor integration](https://github.com/groove-max/ha-dtek-monitor)
+
+![Illustration of a building's pinned status and a private DTEK menu, with fictional data](docs/images/telegram-overview.png)
+
+## Choose how you want to use the bot
+
+| I want | Start here |
+| --- | --- |
+| Schedule and power alerts for a building, group or channel | [Building mode](docs/BUILDING.md); no DTEK cabinet login needed. |
+| Only address alerts, sent privately to me | The same [building mode](docs/BUILDING.md), with a private recipient. |
+| My apartment's cabinet group, reading history and meter submission | [Personal mode](docs/PERSONAL.md); connect the cabinet in DTEK Monitor and authorize your private Telegram user. |
+| Actual power and voltage alerts | Add suitable [HA sensors](docs/POWER.md) to either mode. |
+
+You create your own bot with BotFather and control its recipients in Home Assistant. Writing to someone else's bot does not subscribe you to an address or grant access to an account. The web editor and default Telegram messages use Ukrainian; English and Ukrainian setup guides are available.
 
 <a id="features"></a>
 ## What it does
@@ -24,6 +38,9 @@ This app uses [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) to o
 - Supports one phase or multiple voltage sensors, including partial outages.
 - Optionally alerts on low/high voltage and recovery.
 - Updates a pinned status instead of filling the chat with status posts.
+- Shows today’s or tomorrow’s all-group schedule as a PNG from the personal menu.
+- Shows DTEK reading history, sends optional reminders and submits your cumulative readings after explicit confirmation in private mode.
+- Uses compatible energy-sensor suggestions and calibration from My DTEK; a sensor is not required for manual entry.
 - Provides a web editor for addresses, notifications, templates, previews and diagnostics.
 
 Example pinned message — illustrative address, readings and schedule:
@@ -48,9 +65,9 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 | [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor) | Fetches DTEK data and creates HA sensors/calendars | HACS custom integration or manual copy |
 | **DTEK Telegram Bot** — this repository | Sends Telegram messages using those entities and optional local sensors | Home Assistant app repository, not HACS |
 
-Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a configured DTEK Monitor building address, a Telegram bot token and a target chat ID.
+Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a DTEK Monitor building or connected cabinet and your own Telegram bot token. Select your recipient from detected users/chats after `/start`, or enter the numeric ID manually.
 
-**Bot 0.5.0-rc2** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Install **Monitor 2.0.0-rc2** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
+**Bot 0.5.0-rc2** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Use **bot 0.5.0-rc2 or newer** and **Monitor 2.0.0-rc2 or newer** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
 
 **Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for an assigned private user. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md).
 
@@ -64,7 +81,7 @@ Home Assistant now calls add-ons **apps**; older installations show **Add-ons** 
 1. Install [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor#installation). Add an address for building schedules, or connect your cabinet for personal mode.
 2. Create a bot with [@BotFather](https://t.me/BotFather), using `/newbot`. Keep its token.
 3. Open **Settings → Apps → Install app → ⋮ → Repositories**. Older versions call this **Add-ons → Add-on Store**.
-4. Add `https://github.com/groove-max/ha-dtek-telegram-bot` and install **DTEK Telegram Bot**. Check version **0.5.0-rc2**. This version is published without the GitHub Pre-release flag.
+4. Add `https://github.com/groove-max/ha-dtek-telegram-bot` and install **DTEK Telegram Bot**. Use the current version shown by the app store; [latest release notes](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest).
 5. In **Configuration**, enter `telegram_bot_token`. You can leave `telegram_chat_id` empty for now and choose a recipient in the editor. Start the app and choose **Open web UI**.
 6. Open your bot in Telegram and send `/start`. For a group, add the bot and send `/start@your_bot_username`; for a channel, make it an administrator with posting/editing rights. Group/channel pinning needs the corresponding permission.
 7. Follow the wizard below. On the **Telegram** step, press **Оновити (Refresh)** to select yourself or a chat. [If the list is empty](DOCS.md#telegram).
@@ -127,7 +144,7 @@ Standalone telemetry-loss/recovery notices are **off by default** (`power.teleme
 | Address is missing from discovery | Check the building's entities and HA connection. With Monitor 2.0, verify the account's building link; the account itself is not a bot address. [Connection guide](DOCS.md#dtek-monitor). |
 | Monitor 1.7.0 says “Current schedule coverage is missing” during setup | This known integration issue can prevent entity creation. Monitor 2.0.0b1 fixes it; see [upgrade and rollback](DOCS.md#monitor-upgrade). |
 | Recipient list is empty | Check **Receive commands**, send a new `/start` after startup, then refresh. Only new Telegram updates are discoverable. [Recipient guide](docs/PERSONAL.md#detected-telegram-recipients). |
-| Personal menu or history is unavailable | Install both RC versions, select your account and private user, Apply, then send `/start`. Check that the cabinet is connected in HA. |
+| Personal menu or history is unavailable | Check the [compatible versions](docs/UPGRADING.md), select your account and private user, Apply, then send `/start`. Check that the cabinet is connected in HA. |
 | No Telegram messages | Verify token, full chat ID and bot permissions; try a labeled template test and inspect the app log. |
 | Settings appear saved but behavior is unchanged | Use **Apply (Застосувати)** and check the pending-restart indicator. |
 | Power is `unknown` | Inspect the sensor's availability, reporting time and configured maximum age. A stale number does not prove power. |
@@ -138,10 +155,11 @@ Standalone telemetry-loss/recovery notices are **off by default** (`power.teleme
 <a id="support"></a>
 ## Guides and support
 
+- [Building setup](docs/BUILDING.md) · [Personal cabinet](docs/PERSONAL.md) · [Power sensors](docs/POWER.md).
 - [Full user guide](DOCS.md): Telegram setup, configuration examples, sensor requirements, templates, backups and test routing.
 - [Report an issue](https://github.com/groove-max/ha-dtek-telegram-bot/issues): include versions, mode and sanitized diagnostics. English and Ukrainian are welcome.
 - [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor): report missing addresses or incorrect upstream entities there.
-- [Changelog](CHANGELOG.md) · [Releases](https://github.com/groove-max/ha-dtek-telegram-bot/releases).
+- [Changelog](CHANGELOG.md) · [Latest release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest).
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md).
 
 This is an independent community project, not an official DTEK or Telegram product. Licensed under [PolyForm Noncommercial 1.0.0](LICENSE). Noncommercial use, modification and redistribution are permitted under its terms; commercial use is not granted. This is source-available software, not an OSI open-source license. Earlier MIT releases retain their original terms. Dependencies keep their own licenses. See [NOTICE](NOTICE).
