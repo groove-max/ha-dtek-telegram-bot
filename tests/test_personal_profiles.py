@@ -462,6 +462,16 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("На цьому кроці покази не надсилаються", text)
         self.assertNotIn("Результат передачі", text)
 
+    async def test_api_change_has_update_and_support_links_without_false_reauth(self):
+        await self.router.failure(123, HACommandError("api_changed"), self.profile, action="readings")
+        text = self.bot.send_message.call_args.kwargs["text"]
+        self.assertIn("Виправлення", text)
+        self.assertIn("ha-dtek-monitor/releases/latest", text)
+        self.assertIn("ha-dtek-monitor/issues", text)
+        self.assertNotIn("повторно увійти", text)
+        self.assertIn("На цьому кроці покази не надсилаються", text)
+        self.app.ha.command.assert_not_called()
+
     async def test_sensor_proposal_is_visible_and_requires_explicit_confirmation(self):
         context = {"account": "••••0001", "revision": "rev", "zones": [{"zone": "GENERAL", "previous": "1000"}]}
         energy = {"binding": {"mode": "offset"}, "ready": True, "proposal": "source-token",

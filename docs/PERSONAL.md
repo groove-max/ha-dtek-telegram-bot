@@ -13,7 +13,7 @@ Use one bot for a building channel and your own private cabinet. Each profile se
 | Building (`building`, default) | Public building entities; optionally filter a confirmed group | Channel, group or private chat |
 | Personal (`personal`) | Current groups reported by the cabinet for the selected account | Only the explicitly authorized user's private chat |
 
-Personal notifications reuse the building mode's schedule-change, group-change and advance-warning logic, including publication checks and duplicate protection. Multiple cabinet groups are retained. A manual group chosen in My DTEK does not replace the cabinet's assignment in this mode. If the cabinet group is missing, expired, disabled or inconsistent with the building, schedule alerts pause instead of falling back to another group. Fresh physical power sensors continue working independently. DTEK's reported outage status still describes the linked building, not a measurement inside your apartment.
+Personal notifications reuse the building mode's schedule-change, group-change and advance-warning logic, including publication checks and duplicate protection. With Monitor 2.0.0-rc3 or newer, the bot uses cabinet groups confirmed by fresh building data. If DTEK also reports unconfirmed groups, My DTEK explains the mismatch; those extra groups do not stop alerts for the confirmed ones. A manual group chosen in My DTEK does not replace the cabinet's assignment in this mode. If the cabinet group is missing, expired, disabled or has no confirmed overlap with the building, schedule alerts pause instead of falling back to another group. Fresh physical power sensors continue working independently. DTEK's reported outage status still describes the linked building, not a measurement inside your apartment.
 
 A verified assignment change can be announced before its schedule is published. That message will not claim there are no outages.
 
@@ -107,3 +107,11 @@ Select the actual account entity from discovery instead of guessing its ID. Leav
 ## One token on several HA servers
 
 Both servers can send through the same bot. Keep `receive_commands: true` on the server with the personal cabinet. Set `receive_commands: false` on the others and restart the add-on. This disables incoming commands, introductions, personal reading reminders and feedback collection there; ordinary notifications continue. The switch is available in the editor. Never run two incoming collectors for the same token.
+
+## If DTEK data is unavailable
+
+Install **Monitor 2.0.0-rc3** and **Bot 0.5.0-rc3** for recovery from known meter-service authorization changes and clearer error messages. The integration checks supported formats automatically on reads; it never retries a meter submission automatically.
+
+If a service is incompatible, the bot links to the latest integration release and the issue tracker. Open **Settings → System → Repairs** in HA for details. Update the integration first; if it is already current, report the problem without passwords, tokens or full account details. Sign in again only if HA specifically asks for authentication.
+
+A failure of monthly consumption does not erase available reading history. Other account sections and verified schedule alerts continue when their own data is available. Missing data is shown as unavailable, not zero consumption or an empty history. If a submission result is uncertain, check its result before trying to send the readings again.

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0-rc3] - 2026-10-21
+
+**Regular GitHub release**, without the Pre-release flag. Install through the Home Assistant app store. Requires HA 2026.3.0+.
+
+- Explain DTEK API incompatibility separately from an expired login in private menus, with links to the latest integration release and support. Do not ask users to re-enter a working password for a meter-service failure.
+- Pair with **DTEK Monitor 2.0.0-rc3** to restore meter data after the authorization-format change and keep available account data usable during partial DTEK outages. Update the integration first.
+- Clarify partial service failures and confirmed cabinet-group selection in the English/Ukrainian private-mode guides. Add regression coverage for the new error response.
+
+**Upgrade:** update the integration and restart HA, then update the bot. Existing tokens, recipients, templates, sensor bindings, pinned statuses and delivery history are preserved. No meter readings are submitted automatically.
+
+[Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md)
+
 ## [0.5.0-rc2] - 2026-10-20
 
 **Published as a regular GitHub release**, without the Pre-release flag. Install through the Home Assistant app store; the bot is an app, not a HACS integration. Requires HA 2026.3.0+, amd64/aarch64.
