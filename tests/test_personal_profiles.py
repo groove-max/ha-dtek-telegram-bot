@@ -756,6 +756,47 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
                 {},
             )
 
+    async def test_unverified_cabinet_groups_pause_notifications_and_recover(self):
+        from features.schedule_change import ScheduleChangeFeature
+        from features.upcoming_outage import UpcomingOutageFeature
+        from outage_calendar import ScheduleUnavailable
+
+        with TemporaryDirectory() as directory:
+            state = StateStore(Path(directory) / "state.json")
+            self.addAsyncCleanup(state.flush)
+            telegram = SimpleNamespace(send_message=AsyncMock())
+            features = [
+                cls(self.profile, self.source, telegram, state, TemplateEngine())
+                for cls in (ScheduleChangeFeature, UpcomingOutageFeature)
+            ]
+            features[0].state_set("power_state", "on")
+            features[0].state_set("notified_groups", ["GPV3.1"])
+            features[0].state_set("current_groups", ["GPV3.1"])
+            self.snapshot["groups"] = []
+            self.snapshot["attributes"].update(
+                schedule_groups=[],
+                schedule_notifications_ready=False,
+                cabinet_group_status="cabinet_group_mismatch",
+            )
+            for feature in features:
+                with self.assertRaises(ScheduleUnavailable):
+                    await feature.on_tick()
+            telegram.send_message.assert_not_awaited()
+            self.assertIsNone(features[0].state_get("schedule_signature"))
+            self.assertEqual(features[0].state_get("notified_groups"), ["GPV3.1"])
+            self.assertFalse(features[0].state_get("groups_available"))
+
+            self.snapshot["groups"] = ["GPV3.1"]
+            self.snapshot["attributes"].update(
+                schedule_groups=["GPV3.1"],
+                schedule_notifications_ready=True,
+                cabinet_group_status="available",
+            )
+            await features[0].on_tick()
+            self.assertTrue(features[0].state_get("groups_available"))
+            self.assertTrue(features[0].state_get("schedule_signature"))
+            telegram.send_message.assert_not_awaited()
+
     async def test_independent_voltage_is_forwarded(self):
         await self.source.get_state("sensor.input_voltage")
         self.ha.get_state.assert_awaited_once_with("sensor.input_voltage")

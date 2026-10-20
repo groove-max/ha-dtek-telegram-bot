@@ -15,6 +15,7 @@ Version 0.5 adds private cabinet profiles alongside building alerts, private men
 - Offer a separate calibration correction during manual reading review, using the integration's captured per-tariff sensor samples and reference store. Require explicit confirmation that physical readings were taken at the displayed sample times; saving never submits to DTEK. Requires Monitor 2.0.0-rc2.
 - Show modern DTEK Day/Night tariff codes as readable names in private reading entry, confirmations, history and reminders without changing the values or codes passed to the integration.
 - Document regional personal profiles with the Monitor 2.0.0-rc2: Kyiv oblast and Dnipropetrovsk oblast cabinets and group lookup are experimental. The integration also supplies verified Kyiv private groups when public labels are hidden; building-mode labels remain independent.
+- Treat explicitly unverified cabinet groups as a temporary notification pause instead of repeated worker errors. Preserve acknowledged schedules and resume checks when verified groups return; never substitute building groups.
 
 [Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md)
 
