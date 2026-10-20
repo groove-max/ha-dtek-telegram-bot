@@ -79,6 +79,17 @@ class ProfileConfigTests(unittest.TestCase):
 
 
 class ConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_modern_day_night_history_uses_readable_labels(self):
+        result = {"latest": [
+            {"date_time": "2026-10-18T00:00:00+03:00", "energy": "ACTIVE", "zone": zone,
+             "value": value, "status": "active"}
+            for zone, value in (("DAY_2_ZONE", "150"), ("NIGHT_2_ZONE", "120"))
+        ]}
+        rendered = Conversations.history_text(result)
+        self.assertIn("День: <b>150", rendered)
+        self.assertIn("Ніч: <b>120", rendered)
+        self.assertNotIn("_2_ZONE", rendered)
+
     async def asyncSetUp(self):
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -495,20 +506,27 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.app.ha.command.assert_not_awaited()
 
     async def test_manual_day_night_inputs_prepare_only_then_explicit_confirm(self):
+        await self._manual_two_zone_input("DAY", "NIGHT")
+
+    async def test_modern_day_night_inputs_keep_raw_codes_and_explicit_confirmation(self):
+        await self._manual_two_zone_input("DAY_2_ZONE", "NIGHT_2_ZONE")
+        self.assertNotIn("_2_ZONE", self.bot.send_message.call_args.kwargs["text"])
+
+    async def _manual_two_zone_input(self, day, night):
         context = {
             "account": "••••0001",
             "address": "Приклад",
             "revision": "rev",
             "zones": [
-                {"zone": "DAY", "previous": "100"},
-                {"zone": "NIGHT", "previous": "50"},
+                {"zone": day, "previous": "100"},
+                {"zone": night, "previous": "50"},
             ],
         }
         self.app.ha.command.return_value = {
             "confirmation": "draft",
             "readings": [
-                {"zone": "DAY", "previous": "100", "value": 110, "increase": "10"},
-                {"zone": "NIGHT", "previous": "50", "value": 55, "increase": "5"},
+                {"zone": day, "previous": "100", "value": 110, "increase": "10"},
+                {"zone": night, "previous": "50", "value": 55, "increase": "5"},
             ],
         }
         await self.router.action(
@@ -524,7 +542,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.app.ha.command.call_args.kwargs["action"], "prepare")
         self.assertEqual(
             self.app.ha.command.call_args.kwargs["values"],
-            {"DAY": "110", "NIGHT": "55"},
+            {day: "110", night: "55"},
         )
         self.assertIn(
             "Різниця між показами", self.bot.send_message.call_args.kwargs["text"]

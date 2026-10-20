@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Show modern DTEK Day/Night tariff codes as readable names in private reading entry, confirmations, history and reminders without changing the values or codes passed to the integration.
+- Document Kyiv city personal profiles with the matching development version of DTEK Monitor; Kyiv oblast remains a separate, unverified cabinet region.
+
 ## [0.5.0-rc1] - 2026-10-20
 
 **Release candidate — for testing before the final 0.5.0 release.** Requires Home Assistant OS, HA 2026.3.0+, and amd64/aarch64. Personal mode and PNG menus require **DTEK Monitor 2.0.0-rc1**; existing building notifications also work with Monitor 1.7.0 and 2.0.0b1.

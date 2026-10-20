@@ -14,7 +14,10 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from ha_client import HACommandError
 from utils import format_datetime
 logger = logging.getLogger(__name__)
-ZONE_LABELS = {"GENERAL": "Загальні", "DAY": "День", "NIGHT": "Ніч"}
+ZONE_LABELS = {
+    "GENERAL": "Загальні", "DAY": "День", "NIGHT": "Ніч",
+    "DAY_2_ZONE": "День", "NIGHT_2_ZONE": "Ніч",
+}
 
 
 class Conversations:

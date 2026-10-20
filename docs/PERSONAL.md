@@ -1,5 +1,7 @@
 # Personal DTEK notifications and readings in Telegram
 
+> **Development branch:** Kyiv city support needs the matching development integration; it is not in Monitor 2.0.0-rc1. Modern Day/Night codes are displayed as readable tariff names in this bot branch.
+
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
 > Requires **bot 0.5.0-rc1** and **DTEK Monitor 2.0.0-rc1**. Both are prereleases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
@@ -19,7 +21,7 @@ A verified assignment change can be announced before its schedule is published. 
 
 ## Set up a personal profile
 
-1. In [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor), sign in to the cabinet and select the account. Check its building link in **My DTEK → Settings → Building and outage group**. Cabinet group lookup must be enabled and return current data for group notifications. Currently this lookup is supported for Odesa accounts.
+1. In [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor), sign in to the cabinet and select the account. Check its building link in **My DTEK → Settings → Building and outage group**. Cabinet group lookup must be enabled and return current data for group notifications. This lookup supports Odesa oblast and Kyiv city accounts. Kyiv oblast is a separate operator and is not enabled yet.
 2. Open your Telegram bot and press **Start**. Before access is configured, its introduction shows your numeric **Telegram ID**. This does not give access to any account. If introductions are disabled, use the [chat ID instructions](../DOCS.md#telegram).
 3. In the add-on web editor, add a profile and choose **Особистий кабінет**. Select the account by its masked number and address, choose the Telegram bot, then select yourself from the detected recipients or enter your numeric Telegram user ID. After `/start`, press **Refresh** in the editor to update the list. Verify the name, username and ID before saving. The destination is automatically this user's private chat; a username, channel or group cannot be substituted.
 4. Enable the notifications you need. Enable **reading reminders** and **allow reading submission** separately. Both are off by default. Link physical power sensors only if they measure this account's home; they are optional.
