@@ -153,6 +153,20 @@ class UIConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         self.server._delayed_restart.assert_awaited_once()
 
+    async def test_restart_failure_preserves_save_and_is_visible_to_later_poll(self):
+        async def denied(): self.server._restart_failed("permission_denied")
+        self.server._delayed_restart.side_effect = denied
+        changed = copy.deepcopy(self.payload)
+        changed['addresses'][0]['status_message']['enabled'] = False
+        response = await self.save(changed, config.runtime_config_revision(), restart=True)
+        saved = await response.json()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(config.load_runtime_config_payload(), changed)
+        self.orchestrator.get_editor_config.return_value = {'revision':saved['revision'], 'restart_required':True}
+        status = await (await self.client.get('/api/config')).json()
+        self.assertEqual(status['process_id'], saved['process_id'])
+        self.assertEqual(status['restart_status'], {'state':'failed','reason':'permission_denied'})
+
     async def test_template_save_and_reset_reject_stale_source(self):
         name = "power_off"
         original = self.orchestrator.templates.get_template_details(name)["source"]

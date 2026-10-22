@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fix Apply: restart through Supervisor's permitted self endpoint, show restart failures, and confirm the new process loaded the saved settings before reporting success. Preserve drafts and progress across page reloads.
 - Add optional per-tariff meter photos to private reading review, with local optimization, preview, permission checks and single-use confirmation through HA.
 - Add private DTEK document downloads and optional new-document PDF notifications, with an initial baseline and persistent delivery deduplication.
 - Require the matching development integration for these features; real act availability after photo submission remains to be verified.

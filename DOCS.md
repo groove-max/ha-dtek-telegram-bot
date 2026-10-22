@@ -203,6 +203,8 @@ On the **Telegram** step, choose an existing bot or **Add another bot**. Enter i
 
 The **Review** step shows the account/address, bot, recipient name and ID, notifications, power sensors and their roles, voltage monitoring and reading-submission permissions. **Apply** saves all profiles and restarts the app. Save or discard an unfinished bot-token form first. Old power schemes remain under **Advanced: compatibility with older schemes**; existing settings are preserved. **All sections** opens the expanded editor when you need it.
 
+After **Apply**, wait for **Settings applied**: the editor confirms that the app restarted with your saved settings. **Saved** alone does not mean they are running yet. If restarting fails or is not confirmed within three minutes, the editor keeps an error visible; your settings remain saved. You can retry **Apply** or restart **DTEK Telegram Bot** from HA's app page. You do not need to restart Home Assistant. You may reload the editor while waiting; new unsaved edits remain separate from the settings being applied.
+
 Navigation, background refresh and a page reload preserve profile drafts. Unsaved bot tokens stay only in the current form and are never stored in browser storage. Selecting a discovered Telegram user does not grant access until you apply the profile.
 
 

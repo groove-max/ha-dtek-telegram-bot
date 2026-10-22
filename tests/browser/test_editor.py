@@ -50,6 +50,9 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             "runtime": [],
         }
         self.revision = 1
+        self.process_id = 'process-before-restart'
+        self.restart_status = {'state':'idle'}
+        self.restart_required = False
         self.templates = [
             {"name": name, "source": text, "group": "Живлення", "origin": "default"}
             for name, text in [("power_off", "Немає світла"), ("power_on", "Є світло")]
@@ -96,7 +99,9 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             "options": {"default_chat_id": "123456789"},
             "config_path": "/data/config.yaml",
             "preview": {"addresses": [], "generated_at": "2026-01-01T12:00:00Z"},
-            "restart_required": False,
+            "restart_required": self.restart_required,
+            "process_id": self.process_id,
+            "restart_status": copy.deepcopy(self.restart_status),
         }
 
     async def route(self, route):
@@ -176,7 +181,8 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             self.bot_profiles["restart_required"] = True
             payload = {**copy.deepcopy(self.bot_profiles), "profile": profile}
         elif endpoint == "bots/activate":
-            payload = {"restart_scheduled": True}
+            self.restart_status = {'state':'scheduled'}
+            payload = {"restart_scheduled": True, 'process_id':self.process_id}
         elif endpoint == "bots/delete":
             self.bot_profiles["profiles"] = [p for p in self.bot_profiles["profiles"] if p["id"] != body["id"]]
             self.bot_profiles["revision"] = "bots-3"
@@ -185,11 +191,14 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             if endpoint.endswith("/save"):
                 self.config = copy.deepcopy(body["config"])
                 self.revision += 1
+                self.restart_required = True
             payload = {
                 "ok": True,
                 "config": body["config"],
                 "revision": str(self.revision),
                 "preview": {"addresses": []},
+                "process_id": self.process_id,
+                "restart_scheduled": bool(body.get("restart")),
             }
         elif endpoint in ("templates/preview", "templates/send-test"):
             payload = {
@@ -964,7 +973,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await expect(form.locator('.addr-bot-id')).to_have_value('bot_654321')
         await expect(form.locator('.telegram-progress')).to_contain_text('збережений')
         await form.locator('[data-action="activate-bots"]').click()
-        await expect(self.page.locator('#editor-status')).to_contain_text('чернетку не застосовано')
+        await expect(self.page.locator('#editor-status')).to_contain_text('чернетці ще не застосовано')
         self.assertFalse(any(e == 'config/save' for e,_ in self.calls))
         self.assertNotIn('secret-for-browser-test', await self.page.evaluate('JSON.stringify(sessionStorage)'))
         self.bot_profiles.update(restart_required=False, receiving=True,
@@ -1023,3 +1032,57 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.page.locator('#save-restart-button').click()
         await expect(self.page.locator('#editor-status')).to_contain_text('Токен ще не збережений')
         self.assertFalse(any(e == 'config/save' for e,_ in self.calls))
+
+    async def test_apply_waits_for_new_process_and_matching_config_without_erasing_draft(self):
+        field = self.page.locator('.addr-display-name').first
+        await field.fill('Збережена версія')
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        await expect(self.page.locator('#save-restart-button')).to_be_disabled()
+        self.restart_status = {'state':'accepted'}
+        self.restart_required = False  # Even identical settings need a new process.
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        await field.fill('Наступна незбережена чернетка')
+        self.process_id = 'process-after-restart'
+        self.restart_status = {'state':'idle'}
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Налаштування застосовано')
+        await expect(self.page.locator('#editor-status')).to_contain_text('чернетці ще не застосовано')
+        await expect(field).to_have_value('Наступна незбережена чернетка')
+        self.assertEqual(self.config['addresses'][0]['display_name'], 'Збережена версія')
+        await expect(self.page.locator('#save-restart-button')).to_be_enabled()
+
+    async def test_apply_failure_remains_visible_after_refresh_and_page_reload(self):
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        self.restart_status = {'state':'failed','reason':'permission_denied'}
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('перезапуск не вдався')
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('перезапуск не вдався')
+        await self.page.reload()
+        await expect(self.page.locator('#editor-status')).to_contain_text('перезапуск не вдався')
+        await expect(self.page.locator('#save-restart-button')).to_be_enabled()
+        self.assertEqual(sum(e == 'config/save' for e,_ in self.calls), 1)
+
+    async def test_apply_timeout_does_not_resubmit_and_newer_saved_version_is_not_success(self):
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        await self.page.clock.run_for(181000)
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('застосування не підтверджено')
+        self.assertEqual(sum(e == 'config/save' for e,_ in self.calls), 1)
+        self.process_id = 'new-process';self.revision += 1;self.restart_required = False
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Вашу версію не підтверджено')
+
+    async def test_apply_survives_page_reload_while_app_restarts(self):
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        await self.page.reload()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        self.process_id = 'new-process';self.restart_required = False
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Налаштування застосовано')
+        self.assertEqual(sum(e == 'config/save' for e,_ in self.calls), 1)

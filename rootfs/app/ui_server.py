@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,9 @@ class UIServer:
         self._app = web.Application(middlewares=[ingress_only_middleware])
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
+        self._process_id = secrets.token_hex(16)
+        self._restart_status = {"state": "idle"}
+        self._restart_task: asyncio.Task | None = None
         self._configure_routes()
 
     def _configure_routes(self) -> None:
@@ -86,6 +90,9 @@ class UIServer:
 
     async def stop(self) -> None:
         """Stop the ingress UI server."""
+        if self._restart_task and not self._restart_task.done():
+            self._restart_task.cancel()
+            await asyncio.gather(self._restart_task, return_exceptions=True)
         if self._runner is None:
             return
 
@@ -105,7 +112,8 @@ class UIServer:
         return web.Response(text="ok")
 
     async def _config(self, request: web.Request) -> web.Response:
-        return web.json_response(await self._orchestrator.get_editor_config())
+        payload = await self._orchestrator.get_editor_config()
+        return web.json_response({**payload, **self._activation_snapshot()}, headers={"Cache-Control": "no-store"})
 
     async def _overview(self, request: web.Request) -> web.Response:
         return web.json_response(await self._orchestrator.get_overview())
@@ -181,8 +189,8 @@ class UIServer:
                 {"message": "Збережені профілі потребують виправлення. Перевірте їх і натисніть «Застосувати»."},
                 status=400,
             )
-        asyncio.create_task(self._delayed_restart())
-        return web.json_response({"restart_scheduled": True})
+        self._schedule_restart()
+        return web.json_response({"restart_scheduled": True, **self._activation_snapshot()})
 
     async def _save_config(self, request: web.Request) -> web.Response:
         body = await self._read_json_body(request)
@@ -219,7 +227,7 @@ class UIServer:
             return web.json_response({"message": str(exc)}, status=400)
         target = save_runtime_config_payload(normalized)
         if restart:
-            asyncio.create_task(self._delayed_restart())
+            self._schedule_restart()
 
         return web.json_response(
             {
@@ -229,6 +237,7 @@ class UIServer:
                 "preview": preview,
                 "path": str(target),
                 "restart_scheduled": restart,
+                **self._activation_snapshot(),
             }
         )
 
@@ -365,11 +374,6 @@ class UIServer:
         return body
 
     @staticmethod
-    def _addon_slug() -> str:
-        hostname = os.environ.get("HOSTNAME", "local-dtek-telegram-bot")
-        return hostname.replace("-", "_")
-
-    @staticmethod
     def _file_response(path: Path) -> web.FileResponse:
         response = web.FileResponse(path)
         response.headers["Cache-Control"] = (
@@ -393,26 +397,46 @@ class UIServer:
             "HASSIO_TOKEN", ""
         )
 
+    def _activation_snapshot(self) -> dict:
+        return {"process_id": self._process_id, "restart_status": dict(self._restart_status)}
+
+    def _schedule_restart(self) -> None:
+        if self._restart_task and not self._restart_task.done():
+            return
+        self._restart_status = {"state": "scheduled"}
+        self._restart_task = asyncio.create_task(self._delayed_restart())
+
+    def _restart_failed(self, reason: str) -> None:
+        self._restart_status = {"state": "failed", "reason": reason}
+        logger.error("Add-on restart could not be confirmed: %s", reason)
+
     async def _delayed_restart(self) -> None:
         await asyncio.sleep(0.75)
         token = self._supervisor_token()
         if not token:
-            logger.error("Cannot restart add-on from UI: supervisor token is missing")
+            self._restart_failed("missing_token")
             return
 
-        slug = self._addon_slug()
-        url = f"http://supervisor/addons/{slug}/restart"
+        # The default Supervisor role permits self/restart, not <slug>/restart.
+        # Do not request broad manager permissions just to restart this app.
+        url = "http://supervisor/addons/self/restart"
         headers = {"Authorization": f"Bearer {token}"}
+        self._restart_status = {"state": "requested"}
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=45)) as session:
                 async with session.post(url, headers=headers) as resp:
-                    if resp.status >= 400:
-                        logger.error(
-                            "Supervisor restart request failed for %s with %d",
-                            slug,
-                            resp.status,
-                        )
-                    else:
-                        logger.info("Restart requested via UI for %s", slug)
+                    if not 200 <= resp.status < 300:
+                        self._restart_failed("permission_denied" if resp.status in (401, 403) else "supervisor_rejected")
+                        return
+                    result = await resp.json()
+                    if not isinstance(result, dict) or result.get("result") != "ok":
+                        self._restart_failed("supervisor_rejected")
+                        return
+                    # Acceptance is not proof of a new process or applied config.
+                    self._restart_status = {"state": "accepted"}
+                    logger.info("Supervisor accepted the app's restart request")
+        except TimeoutError:
+            self._restart_failed("timeout")
         except Exception:
-            logger.exception("Failed to restart add-on via Supervisor API")
+            # Never log response bodies/headers, which may contain credentials.
+            self._restart_failed("unavailable")

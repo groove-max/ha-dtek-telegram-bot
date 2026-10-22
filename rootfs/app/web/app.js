@@ -29,6 +29,7 @@ const UI_STORAGE_PREFIX = `dtek-telegram-bot-ui:${new URL(".", window.location.h
 const ACTIVE_TAB_STORAGE_KEY = `${UI_STORAGE_PREFIX}:active-tab`;
 const EDITOR_DRAFT_STORAGE_KEY = `${UI_STORAGE_PREFIX}:editor-draft`;
 const TEMPLATE_DRAFT_STORAGE_KEY = `${UI_STORAGE_PREFIX}:template-draft`;
+const ACTIVATION_STORAGE_KEY = `${UI_STORAGE_PREFIX}:activation`;
 const TONE_LABELS = {
   good: "норма",
   warn: "увага",
@@ -72,6 +73,7 @@ const state = {
   discovery: null,
   diagnostics: null,
   configPayload: null,
+  activation: null,
   templatesPayload: null,
   draftConfig: null,
   editorDirty: false,
@@ -201,6 +203,10 @@ function persistTemplateDraftSnapshot() {
 }
 
 function restorePersistedUiState() {
+  const activation = readSessionJson(ACTIVATION_STORAGE_KEY);
+  if (isPlainObject(activation) && typeof activation.processId === "string" && Number.isFinite(activation.startedAt)) {
+    state.activation = activation;
+  }
   state.profileSteps = readSessionJson(`${UI_STORAGE_PREFIX}:steps`) || {};
   state.showAll = readSessionValue(`${UI_STORAGE_PREFIX}:show-all`) === "true";
   const savedTab = readSessionValue(ACTIVE_TAB_STORAGE_KEY);
@@ -243,8 +249,49 @@ function restorePersistedUiState() {
   }
 }
 
+function beginActivation(result, revision, botsRevision) {
+  state.activation = {processId: result.process_id || state.configPayload?.process_id || "",
+    revision, botsRevision, startedAt: Date.now(), status: "pending"};
+  writeSessionJson(ACTIVATION_STORAGE_KEY, state.activation);
+  reconcileActivation();
+}
+
+function reconcileActivation(snapshot = null) {
+  const activation = state.activation;
+  if (!activation) {
+    if (snapshot?.restart_status?.state === "failed") {
+      setEditorStatus("Налаштування збережено, але перезапуск не вдався. Натисніть «Застосувати» ще раз або перезапустіть застосунок у HA.", "status-bad");
+      return true;
+    }
+    return false;
+  }
+  if (snapshot && activation.processId && snapshot.process_id && snapshot.process_id !== activation.processId) {
+    if (snapshot.revision !== activation.revision || snapshot.bots?.revision !== activation.botsRevision) {
+      activation.status = "superseded";
+    } else if (!snapshot.restart_required && !snapshot.bots?.restart_required && state.overview?.runtime?.running) {
+      activation.status = "applied";
+    }
+  } else if (snapshot?.restart_status?.state === "failed") {
+    activation.status = "failed";
+  }
+  if (activation.status === "pending" && Date.now() - activation.startedAt > 180000) activation.status = "unconfirmed";
+  const suffix = state.editorDirty ? " Нові зміни в чернетці ще не застосовано." : "";
+  const messages = {
+    pending: ["Налаштування збережено. Очікуємо перезапуск і перевіряємо застосування…", "status-warn"],
+    applied: ["Налаштування застосовано. Застосунок перезапущено з цією версією.", "status-good"],
+    failed: ["Налаштування збережено, але перезапуск не вдався. Натисніть «Застосувати» ще раз або перезапустіть застосунок у HA.", "status-bad"],
+    unconfirmed: ["Налаштування збережено, але застосування не підтверджено. Перевірте стан застосунку в HA; за потреби перезапустіть його.", "status-bad"],
+    superseded: ["Після збереження налаштування змінилися. Вашу версію не підтверджено; перевірте збережені налаштування. Чернетку збережено.", "status-warn"],
+  };
+  const [text, tone] = messages[activation.status] || messages.unconfirmed;
+  setEditorStatus(text + suffix, tone);
+  writeSessionJson(ACTIVATION_STORAGE_KEY, activation);
+  updateBusyControls();
+  return true;
+}
+
 function updateBusyControls() {
-  const unavailable = !state.configPayload;
+  const unavailable = !state.configPayload || state.activation?.status === "pending";
   [validateButton, saveButton, saveRestartButton].forEach((button) => {
     button.disabled = unavailable || state.configBusy || state.botBusy;
   });
@@ -2687,7 +2734,7 @@ async function validateConfig() {
 }
 
 async function saveConfig({ restart }) {
-  if (state.configBusy || state.botBusy || !state.configPayload) return;
+  if (state.configBusy || state.botBusy || !state.configPayload || state.activation?.status === "pending") return;
   if (state.botDirty) { setEditorStatus("Спочатку збережіть або скасуйте зміни у формі бота. Токен ще не збережений.", "status-warn"); return; }
   const config = collectEditorConfig();
   const revision = state.editorRevision;
@@ -2703,7 +2750,8 @@ async function saveConfig({ restart }) {
       throw new Error("Сервер не підтвердив збережену версію. Чернетку не змінено.");
     }
     state.configPayload = { ...state.configPayload, config: result.config,
-      preview: result.preview, revision: result.revision, restart_required: true };
+      preview: result.preview, revision: result.revision, restart_required: true,
+      process_id: result.process_id || state.configPayload.process_id, restart_status: result.restart_status };
     state.baseRevision = result.revision;
     if (revision === state.editorRevision) {
       state.draftConfig = cloneJson(result.config);
@@ -2720,6 +2768,12 @@ async function saveConfig({ restart }) {
       : restart ? "Налаштування збережено. Перезапуск запланований."
         : "Налаштування збережено. Для застосування натисніть «Застосувати».",
       state.editorDirty || restart ? "status-warn" : "status-good");
+    if (restart) {
+      beginActivation(result, result.revision, state.configPayload.bots?.revision);
+    } else {
+      state.activation = null;
+      removeSessionValue(ACTIVATION_STORAGE_KEY);
+    }
   } finally {
     state.configBusy = false;
     state.writeEpoch += 1;
@@ -3069,7 +3123,7 @@ async function loadDashboard({ background = false } = {}) {
     setActiveTab(state.activeTab);
 
     lastUpdated.textContent = `Оновлено о ${new Date().toLocaleTimeString(UI_LOCALE)}`;
-    if (!state.editorDirty) {
+    if (!reconcileActivation(config) && !state.editorDirty) {
       setEditorStatus("Редактор готовий.", "muted");
     }
     if (!state.templateSourceDirty) {
@@ -3083,6 +3137,7 @@ async function loadDashboard({ background = false } = {}) {
     }
   } catch (error) {
     diagnosticsOutput.textContent = `Не вдалося завантажити dashboard:\n${error}`;
+    reconcileActivation();
     lastUpdated.textContent = "Помилка оновлення";
     setEditorStatus(String(error), "status-bad");
     setTemplateStatus(String(error), "status-bad");
@@ -3601,13 +3656,14 @@ document.getElementById("bot-dialog").addEventListener("close", () => {
 });
 document.getElementById("bot-dialog-close").addEventListener("click", () => document.getElementById("bot-dialog").close());
 async function activateBots() {
-  if (state.botBusy || state.configBusy) return;
+  if (state.botBusy || state.configBusy || state.activation?.status === "pending") return;
   if (state.botDirty) { setEditorStatus("Спочатку збережіть токен у формі бота.", "status-warn"); return; }
   if (state.editorDirty) persistEditorDraftSnapshot();
   state.configBusy = true; state.writeEpoch++; updateBusyControls();
   try {
-    await fetchJson("./api/bots/activate", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({expected_revision:state.configPayload.bots.revision, config_revision:state.configPayload.revision})});
-    setEditorStatus("Перезапуск заплановано. Збережені профілі відновлять роботу; чернетку не застосовано. Зачекайте й оновіть одержувачів.", "status-warn");
+    const revision = state.configPayload.revision, botsRevision = state.configPayload.bots.revision;
+    const result = await fetchJson("./api/bots/activate", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({expected_revision:botsRevision, config_revision:revision})});
+    beginActivation(result, revision, botsRevision);
   } catch (error) { setEditorStatus(error.message, "status-bad"); }
   finally { state.configBusy=false; state.writeEpoch++; updateBusyControls(); }
 }
