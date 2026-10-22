@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from ha_client import HACommandError
 from utils import format_datetime
+from reading_photos import ReadingPhotos, PHOTO_ACTIONS
+from personal_documents import PersonalDocuments
 logger = logging.getLogger(__name__)
 ZONE_LABELS = {
     "GENERAL": "Загальні", "DAY": "День", "NIGHT": "Ніч",
@@ -20,7 +22,7 @@ ZONE_LABELS = {
 }
 
 
-class Conversations:
+class Conversations(ReadingPhotos, PersonalDocuments):
     def __init__(self, orchestrator, profile_id, telegram):
         self.app, self.bot_id, self.tg = orchestrator, profile_id, telegram
         self.buttons = OrderedDict()
@@ -81,7 +83,7 @@ class Conversations:
                 "action": action,
                 "payload": payload,
                 "expires": now
-                + (300 if action in ("confirm", "manual", "estimate", "review", "calibration_preview", "calibration_save") else 604800),
+                + (300 if action in PHOTO_ACTIONS | {"confirm", "manual", "estimate", "review", "calibration_preview", "calibration_save"} else 604800),
             }
             rows.append(
                 [InlineKeyboardButton(text=label, callback_data="dtek:" + token)]
@@ -117,13 +119,15 @@ class Conversations:
         if self.tg._test_chat_id and str(chat) != self.tg._test_chat_id:
             return
         if not callback and (
-            time.time() - message.get("date", 0) > 300 or not message.get("text")
+            time.time() - message.get("date", 0) > 300
+            or not (message.get("text") or message.get("photo") or message.get("document"))
         ):
             return
         async with self._lock:
             self.sessions = {
                 k: v for k, v in self.sessions.items() if v["expires"] > time.time()
             }
+            self.buttons = OrderedDict((k,v) for k,v in self.buttons.items() if v["expires"] > time.time())
             profiles = self.profiles(user)
             if not profiles:
                 if callback:
@@ -160,7 +164,7 @@ class Conversations:
                     await self.send(chat, "ℹ️ Профіль більше недоступний.")
                     return
                 # Navigation remains reusable; only workflow actions are consumed.
-                if button["action"] not in {"menu", "profile", "status", "grid", "result", "history", "readback"}:
+                if button["action"] not in {"menu", "profile", "status", "grid", "result", "history", "readback", "documents", "document"}:
                     self.buttons.pop(token, None)
                 try:
                     await self.action(
@@ -168,6 +172,19 @@ class Conversations:
                     )
                 except Exception as exc:
                     await self.failure(user, exc, profile, action=button["action"], payload=button["payload"])
+                return
+            if message.get("photo") or message.get("document"):
+                session = self.sessions.get(user)
+                profile = next((p for p in profiles if session and p.key == session["profile"]), None)
+                if not profile or profile.mode != "personal" or not profile.allow_readings:
+                    await self.menu(user, profiles)
+                    return
+                if not self.tg.journal.claim_interaction(f"photo:{user}:{message.get('message_id')}", 300):
+                    return
+                try:
+                    await self.input_photo(user, profile, message)
+                except Exception as exc:
+                    await self.failure(user, exc, profile, action="photo")
                 return
             if not self.tg.journal.claim_interaction(f"input:{user}", 1):
                 return
@@ -220,6 +237,8 @@ class Conversations:
                     ("📝 Передати покази", "readings", None),
                     ("📋 Покази в ДТЕК", "history", None),
                 ]
+            if profile.mode == "personal":
+                actions.append(("📄 Документи ДТЕК", "documents", None))
             if len(self.profiles(user)) > 1:
                 actions.append(("🔀 Обрати рахунок", "menu", None))
             await self.send(
@@ -256,18 +275,28 @@ class Conversations:
 
     def cancel_reading(self, user):
         self.sessions.pop(user, None)
+        self.invalidate_reading_buttons(user)
+
+    def invalidate_reading_buttons(self, user):
         self.buttons = OrderedDict(
             (k, v)
             for k, v in self.buttons.items()
             if not (
-                v["user"] == user and v["action"] in (
+                v["user"] == user and v["action"] in PHOTO_ACTIONS | {
                     "confirm", "manual", "estimate", "review",
                     "calibration_preview", "calibration_save",
-                )
+                }
             )
         )
 
     async def action(self, user, profile, action, payload):
+        if action in PHOTO_ACTIONS:
+            await self.photo_action(user, profile, action, payload)
+            return
+        if action in ("documents", "document"):
+            self.cancel_reading(user)
+            await self.document_action(user, profile, action, payload)
+            return
         if action in ("menu", "profile", "readings", "manual", "estimate", "review"):
             # Editing, starting over or switching accounts invalidates old confirmations.
             self.cancel_reading(user)
@@ -373,6 +402,7 @@ class Conversations:
                 "input": True,
             }
             self.sessions[user].pop("source_token", None)
+            self.sessions[user].pop("photos", None)
             await self.prompt(user, profile, self.sessions[user])
             return
         if action == "estimate":
@@ -448,6 +478,10 @@ class Conversations:
                 result.get("status"),
                 "❔ Результат передачі невідомий. Перевірте кабінет у HA; повторно не надсилаємо.",
             )
+            if result.get("photos"):
+                text += "\n📷 Запит містив фото. Прийняття показів не підтверджує видачу акта."
+            if result.get("reason") == "photo_required":
+                text += "\n📷 ДТЕК просить фото для перевірки показів. Перевірте результат у кабінеті перед новою спробою."
             await self.reply(user, profile, "📨 Передача показів", text)
             return
         if action == "dismiss_reminder":
@@ -578,6 +612,11 @@ class Conversations:
         }
         if session.get("source_token"):
             payload["source_token"] = session["source_token"]
+        if session.get("photos"):
+            payload["photos"] = session["photos"]
+        self.invalidate_reading_buttons(user)
+        self.sessions[user] = session
+        session.pop("photo_zone", None)
         draft = await self.cabinet(profile, user, "prepare", **payload)
         lines = [
             f"🧾 Рахунок: {escape(session['context'].get('account', ''))}\n",
@@ -594,6 +633,10 @@ class Conversations:
             ("✅ Підтвердити й передати у ДТЕК", "confirm", draft["confirmation"]),
             ("✏️ Виправити вручну", "manual", session),
         ]
+        if session["context"].get("photo_submission"):
+            actions.append(("📷 Змінити фото" if session.get("photos") else "📷 Додати фото", "photos", None))
+        if session.get("photos"):
+            lines.append("\n📷 Додано фото: " + ", ".join(escape(ZONE_LABELS.get(z,z)) for z in session["photos"]))
         if not session.get("source_token") and (session.get("energy", {}).get("binding") or {}).get("mode") == "offset":
             actions.append(("📏 Зберегти поправку калібрування", "calibration_preview", session))
         await self.reply(
@@ -618,17 +661,31 @@ class Conversations:
             "api_changed": "Цей сервіс ДТЕК недоступний або несумісний з інтеграцією. Відкрийте Налаштування → Система → Виправлення у HA. Перевірте оновлення: https://github.com/groove-max/ha-dtek-monitor/releases/latest\nЯкщо вже встановлено останню версію, повідомте про проблему: https://github.com/groove-max/ha-dtek-monitor/issues",
             "check_cabinet": "Попередня передача має невідомий результат. Перевірте кабінет у HA.",
             "rate_limited": "ДТЕК обмежив частоту запитів. Спробуйте пізніше.",
+            "invalid_photo": "Не вдалося прочитати фото. Надішліть JPEG, PNG або WebP.",
+            "photo_too_large": "Фото завелике. Надішліть менший знімок із чіткими показами (до 20 МБ, до 30 мегапікселів).",
+            "photo_album": "Надішліть одне фото окремим повідомленням, без альбому.",
+            "photos_incomplete": "Додайте фото кожної тарифної зони або приберіть усі фото.",
+            "photos_unsupported": "Оновіть інтеграцію DTEK Monitor у HA, щоб передавати покази з фото.",
+            "document_format": "Цей формат документа поки не підтримується. Відкрийте документ в офіційному кабінеті ДТЕК.",
+            "document_too_large": "Документ перевищує 2 МБ. Завантажте його в офіційному кабінеті ДТЕК.",
+            "document_missing": "Документ більше недоступний у списку ДТЕК. Оновіть список.",
         }.get(
             code,
             "Не вдалося отримати відповідь від Home Assistant або сервісу ДТЕК. Спробуйте пізніше.",
         )
         title = "⚠️ Дію не завершено"
         actions = []
-        if action in ("history", "result", "readback"):
+        if action in ("documents", "document"):
+            title = "⚠️ Документи зараз недоступні"
+            actions = [("📄 Оновити документи", "documents", None)]
+        elif action in ("history", "result", "readback"):
             title = ("⚠️ Не вдалося перевірити покази" if action == "readback"
                      else "⚠️ Історія показів недоступна")
             actions = [("🔄 Спробувати ще раз", "readback" if action == "readback" else "history",
                         payload if action in ("history", "result") else None)]
+        elif action == "photo":
+            text += "\n\nПокази ще не передано. Можна надіслати інше фото або повернутися до вибору тарифу."
+            actions = [("📷 До фото", "photos", None)]
         elif action in ("readings", "manual", "estimate", "prepare"):
             title = "⚠️ Не вдалося підготувати передачу"
             text += "\n\nℹ️ На цьому кроці покази не надсилаються у ДТЕК."
@@ -695,22 +752,30 @@ class Conversations:
 
     async def on_tick(self):
         async with self._lock:
+            for user in list(self.sessions):
+                if self.sessions[user]["expires"] <= time.time():
+                    self.cancel_reading(user)
             for profile in self.app.config.addresses:
                 if (
                     profile.telegram_bot_id != self.bot_id
                     or profile.mode != "personal"
-                    or not profile.reading_reminders
                 ):
                     continue
                 user = profile.telegram_user_id
                 if profile not in self.profiles(user):
                     continue
                 try:
-                    await self.remind(profile, user)
+                    if profile.reading_reminders:
+                        await self.remind(profile, user)
                 except Exception as exc:
                     logger.warning(
                         "Personal reminder unavailable: %s", type(exc).__name__
                     )
+                try:
+                    if profile.document_notifications:
+                        await self.check_documents(profile, user)
+                except Exception as exc:
+                    logger.warning("Personal documents unavailable: %s", type(exc).__name__)
 
     async def remind(self, profile, user):
         reminder = await self.cabinet(profile, user, "reminder")

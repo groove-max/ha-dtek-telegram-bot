@@ -249,6 +249,7 @@ class AddressConfig(BaseModel):
     telegram_user_id: int = Field(default=0, ge=0)
     allow_readings: bool = False
     reading_reminders: bool = False
+    document_notifications: bool = False
 
     @property
     def key(self) -> str:

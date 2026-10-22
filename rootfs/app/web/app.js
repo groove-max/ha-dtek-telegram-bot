@@ -460,7 +460,7 @@ async function fetchJson(url, options = {}) {
 function createBlankAddress(prefill = {}) {
   return {
     entity_prefix: prefill.entity_prefix ?? "",
-    profile_id: "", mode: "building", account_entity: "", telegram_user_id: 0, allow_readings: false, reading_reminders: false,
+    profile_id: "", mode: "building", account_entity: "", telegram_user_id: 0, allow_readings: false, reading_reminders: false, document_notifications: false,
     display_name: prefill.display_name ?? prefill.friendly_name ?? "",
     telegram_chat_id: "",
     telegram_bot_id: "default",
@@ -1779,6 +1779,7 @@ function renderAddressEditor(address, index) {
           <label class="field personal-only"><span>Telegram ID власника</span><input class="addr-user-id" type="text" inputmode="numeric" value="${address.telegram_user_id || ""}" />${recipientPicker(".addr-user-id", true)}<small>Напишіть /start обраному боту, натисніть «Оновити» й оберіть себе зі списку або введіть ID вручну. Перевірте ім’я, @username та ID: збереження надасть цій людині доступ до рахунку.</small></label>
           <label class="toggle personal-only"><input class="addr-allow-readings" type="checkbox" ${address.allow_readings ? "checked" : ""}/><span>Дозволити передачу показів із підтвердженням</span></label>
           <label class="toggle personal-only"><input class="addr-reminders" type="checkbox" ${address.reading_reminders ? "checked" : ""}/><span>Нагадувати про покази</span></label>
+          <label class="toggle personal-only"><input class="addr-documents" type="checkbox" ${address.document_notifications ? "checked" : ""}/><span>Нові документи й акти ДТЕК (перевірка кожні 30 хв)</span></label>
           <label class="field building-only">
             <span>Адреса з DTEK Monitor</span>
             <select class="addr-entity-prefix">
@@ -2298,7 +2299,7 @@ function reviewProfile(address) {
   const account = state.discovery?.accounts?.find(a => a.entity_id === address.account_entity);
   const house = getCandidateForPrefix(address.entity_prefix);
   const source = address.mode === "personal" ? account ? `${account.masked} · ${account.address}` : "Рахунок недоступний у Home Assistant" : house?.friendly_name || address.entity_prefix || "Адресу не обрано";
-  const names = [address.schedule_change.enabled && "зміни графіка", address.group_change.enabled && "зміни групи", address.emergency.enabled && "екстрені відключення", address.upcoming_outage.enabled && `нагадування за ${address.upcoming_outage.minutes} хв`, address.power.enabled && "наявність світла", address.voltage.enabled && "якість напруги", address.status_message.enabled && "статус", address.mode === "personal" && address.reading_reminders && "нагадування про покази"].filter(Boolean);
+  const names = [address.schedule_change.enabled && "зміни графіка", address.group_change.enabled && "зміни групи", address.emergency.enabled && "екстрені відключення", address.upcoming_outage.enabled && `нагадування за ${address.upcoming_outage.minutes} хв`, address.power.enabled && "наявність світла", address.voltage.enabled && "якість напруги", address.status_message.enabled && "статус", address.mode === "personal" && address.reading_reminders && "нагадування про покази", address.mode === "personal" && address.document_notifications && "нові документи ДТЕК"].filter(Boolean);
   const sources = address.power?.sources || [];
   let power = "Без локального визначення живлення";
   if (address.power.enabled) {
@@ -2386,6 +2387,7 @@ function collectEditorConfig() {
       telegram_user_id: Number(form.querySelector(".addr-user-id").value) || 0,
       allow_readings: form.querySelector(".addr-allow-readings").checked,
       reading_reminders: form.querySelector(".addr-reminders").checked,
+      document_notifications: form.querySelector(".addr-documents").checked,
       entity_prefix: form.querySelector(".addr-entity-prefix").value.trim(),
       display_name: form.querySelector(".addr-display-name").value.trim(),
       telegram_chat_id: personal ? String(Number(form.querySelector(".addr-user-id").value) || "") : form.querySelector(".addr-chat-id").value.trim(),

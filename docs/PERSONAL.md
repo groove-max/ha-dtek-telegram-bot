@@ -115,3 +115,17 @@ Install **Monitor 2.0.0-rc3** and **Bot 0.5.0-rc3** for recovery from known mete
 If a service is incompatible, the bot links to the latest integration release and the issue tracker. Open **Settings → System → Repairs** in HA for details. Update the integration first; if it is already current, report the problem without passwords, tokens or full account details. Sign in again only if HA specifically asks for authentication.
 
 A failure of monthly consumption does not erase available reading history. Other account sections and verified schedule alerts continue when their own data is available. Missing data is shown as unavailable, not zero consumption or an empty history. If a submission result is uncertain, check its result before trying to send the readings again.
+
+## Meter photos and DTEK documents
+
+These features are in the **unreleased development version** and require the matching update of both DTEK Monitor and this app. Update the integration first.
+
+After entering readings (or choosing a sensor estimate), press **📷 Додати фото** on the review screen. Select a tariff, then send one photo or a JPEG, PNG or WebP file. Check the preview and repeat for the second tariff if applicable. Albums are not accepted. If you use photos, every tariff needs its own photo; otherwise remove all photos to submit numerical readings only. The numbers must match the official meter in the photos, even when a sensor provided the estimate.
+
+Originals may be up to 20 MB and 30 megapixels. The app removes EXIF metadata and converts each photo to JPEG, at most 2560 pixels on its longest side and 1 MB. Check that readings, tariff labels and the meter serial number remain legible. Return to photo selection to replace or remove a photo, then review and explicitly confirm the submission. Replacing photos invalidates previous confirmation buttons. Drafts expire after five minutes; cancellation, switching profiles or restarting the app discards them. Image bytes are not saved in the app's journal; Telegram retains the photos sent in chat under its own rules.
+
+**📄 Документи ДТЕК** lists documents published in the selected account's official cabinet. Choose one to download its PDF. In HA, the same list is under **My DTEK → Readings → DTEK documents**. Only listed document IDs for that account can be downloaded. Downloading does not sign or accept an act.
+
+Enable **Нові документи й акти ДТЕК** in a personal profile to check every 30 minutes and receive new PDFs in your private chat. Existing documents form the initial baseline and are not sent as new. Automatic notifications remain in chat when you navigate the menu. HA has a separate switch under **My DTEK → Settings → Meter notifications**. Files over 2 MB or unsupported formats produce a notification directing you to the official cabinet. Unknown Telegram delivery results are not automatically repeated; the document remains available from the menu.
+
+The list and file endpoints were identified in DTEK's official legacy cabinet. The list was checked against a real Odesa account, but was empty; a real act download and the appearance of an act after photo submission still need verification. An empty list is different from a service failure. An accepted photo submission does not itself prove that the controller's inspection is complete or an act has been issued. A document published only through DTEK's own chat bot may not appear in the cabinet list.

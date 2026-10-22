@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Add optional per-tariff meter photos to private reading review, with local optimization, preview, permission checks and single-use confirmation through HA.
+- Add private DTEK document downloads and optional new-document PDF notifications, with an initial baseline and persistent delivery deduplication.
+- Require the matching development integration for these features; real act availability after photo submission remains to be verified.
+
 ## [0.5.0-rc3] - 2026-10-21
 
 **Regular GitHub release**, without the Pre-release flag. Install through the Home Assistant app store. Requires HA 2026.3.0+.
