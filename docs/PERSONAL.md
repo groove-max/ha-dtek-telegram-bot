@@ -118,7 +118,7 @@ A failure of monthly consumption does not erase available reading history. Other
 
 ## Meter photos and DTEK documents
 
-These features are in the **unreleased development version** and require the matching update of both DTEK Monitor and this app. Update the integration first.
+Available with **DTEK Monitor 2.0.0-rc4** and **Telegram Bot 0.5.0-rc4** or newer. Update the integration first. Document retrieval remains experimental; the availability of a controller’s act through the cabinet is not yet verified.
 
 After entering readings (or choosing a sensor estimate), press **📷 Додати фото** on the review screen. Select a tariff, then send one photo or a JPEG, PNG or WebP file. Check the preview and repeat for the second tariff if applicable. Albums are not accepted. If you use photos, every tariff needs its own photo; otherwise remove all photos to submit numerical readings only. The numbers must match the official meter in the photos, even when a sensor provided the estimate.
 
@@ -128,4 +128,4 @@ Originals may be up to 20 MB and 30 megapixels. The app removes EXIF metadata an
 
 Enable **Нові документи й акти ДТЕК** in a personal profile to check every 30 minutes and receive new PDFs in your private chat. Existing documents form the initial baseline and are not sent as new. Automatic notifications remain in chat when you navigate the menu. HA has a separate switch under **My DTEK → Settings → Meter notifications**. Files over 2 MB or unsupported formats produce a notification directing you to the official cabinet. Unknown Telegram delivery results are not automatically repeated; the document remains available from the menu.
 
-The list and file endpoints were identified in DTEK's official legacy cabinet. The list was checked against a real Odesa account, but was empty; a real act download and the appearance of an act after photo submission still need verification. An empty list is different from a service failure. An accepted photo submission does not itself prove that the controller's inspection is complete or an act has been issued. A document published only through DTEK's own chat bot may not appear in the cabinet list.
+A real single-zone Odesa reading with a photo was accepted and confirmed in DTEK history. Live multi-zone photo submission remains unverified. The list and file endpoints were identified in DTEK's official legacy cabinet. The list was checked against a real Odesa account, but was empty; a real act download and the appearance of an act after photo submission still need verification. An empty list is different from a service failure. An accepted photo submission does not itself prove that the controller's inspection is complete or an act has been issued. A document published only through DTEK's own chat bot may not appear in the cabinet list.

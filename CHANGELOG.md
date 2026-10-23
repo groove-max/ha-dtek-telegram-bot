@@ -4,10 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Fix Apply: restart through Supervisor's permitted self endpoint, show restart failures, and confirm the new process loaded the saved settings before reporting success. Preserve drafts and progress across page reloads.
-- Add optional per-tariff meter photos to private reading review, with local optimization, preview, permission checks and single-use confirmation through HA.
-- Add private DTEK document downloads and optional new-document PDF notifications, with an initial baseline and persistent delivery deduplication.
-- Require the matching development integration for these features; real act availability after photo submission remains to be verified.
+## [0.5.0-rc4] - 2026-10-23
+
+**Regular GitHub release**, without the Pre-release flag. Install through the Home Assistant app store. Requires HA 2026.3.0+; private photos and documents require **DTEK Monitor 2.0.0-rc4**.
+
+- Attach optional per-tariff meter photos in a private reading review. Choose a tariff, send a photo or image file, check the optimized preview and explicitly confirm through HA. Replacing a photo invalidates old confirmation buttons; expired or cancelled drafts cannot submit. Image bytes are not stored in the delivery journal.
+- Open **DTEK documents** in the private menu and optionally receive new PDFs automatically. The 30-minute check starts with a silent baseline and preserves delivery deduplication across restarts. Protected downloads are limited to the assigned account; unsupported files direct the user to the official cabinet. Real inspection-act availability and download remain unverified; this feature is experimental.
+- Fix **Apply** saving settings without restarting the app: use Supervisor's permitted self-restart endpoint, show restart failures and report success only after a new process loads the saved settings. Preserve drafts and activation progress across page reloads.
+- Update English/Ukrainian setup, compatibility, photo and document instructions. Cover photos, account permissions, document delivery and delayed restarts with backend and browser tests.
+
+**Upgrade:** update Monitor to **2.0.0-rc4**, restart HA, then update the app and reload its editor. Send `/start` for the current private menu. Tokens, recipients, templates, sensor bindings, pinned statuses and delivery history are preserved. Document notifications are initially off. No readings are submitted automatically.
+
+**Verified:** a real single-zone Odesa photo submission was accepted and confirmed in DTEK history. Live multi-zone photo submission and the resulting inspection act still need validation.
+
+[Private mode](docs/PERSONAL.md) · [Особистий режим](docs/PERSONAL.uk.md) · [Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md)
 
 ## [0.5.0-rc3] - 2026-10-21
 

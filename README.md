@@ -67,7 +67,7 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 
 Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a DTEK Monitor building or connected cabinet and your own Telegram bot token. Select your recipient from detected users/chats after `/start`, or enter the numeric ID manually.
 
-**Bot 0.5.0-rc2** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Use **bot 0.5.0-rc2 or newer** and **Monitor 2.0.0-rc2 or newer** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
+**Bot 0.5.0-rc4** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Use **bot 0.5.0-rc4 or newer** and **Monitor 2.0.0-rc4 or newer** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
 
 **Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for an assigned private user. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md).
 

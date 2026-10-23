@@ -12,13 +12,14 @@ Choose [building mode](BUILDING.md) for address alerts or [personal mode](PERSON
 
 ## Choose the matching versions
 
-The versions below are minimums for the current personal features; use the latest compatible releases for a new installation. RC2 releases are available in the regular release channel.
+The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC4 releases are available in the regular release channel.
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
-| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc2 |
-| Personal cabinet, readings and history | **2.0.0-rc2** | **0.5.0-rc2** |
-| Today/tomorrow PNG schedule menu | **2.0.0-rc2** | **0.5.0-rc2** |
+| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc4 |
+| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc4** |
+| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc4** |
+| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc4** |
 
 Public schedules and personal household cabinets cover the four operators listed in Monitor 2.0.0-rc2. **Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental** and await real-account validation. Odesa and Kyiv city cabinet reads have been checked live; actual Day/Night submission has automated tests only.
 
@@ -48,7 +49,7 @@ them off in the editor. No new automatic reading submission is introduced.
 ## What changes in everyday use
 
 - **Apply** validates, saves and restarts. **Save** alone does not change the
-  running notification rules. Background refresh preserves your draft.
+  running notification rules. Success is shown only after a new process loads the saved settings. A failed restart remains visible; retry Apply or restart the app from HA. Background refresh preserves your draft.
 - Choose recipients from the detected list after `/start`; numeric IDs still work.
   Detection does not grant account access until the HA administrator selects you.
 - The personal menu keeps only its latest screen. Status, notifications and
