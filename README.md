@@ -69,7 +69,7 @@ Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarc
 
 **Bot 0.5.0-rc4** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Use **bot 0.5.0-rc4 or newer** and **Monitor 2.0.0-rc4 or newer** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
 
-**Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for an assigned private user. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md).
+**Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for an assigned private user. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md). Attach optional meter photos during reading review and open cabinet documents from the same private menu. Document retrieval is experimental; [photo and document instructions](docs/PERSONAL.md#meter-photos-and-dtek-documents).
 
 **Several addresses, chats or bots? Use one installation.** Each address has its own notifications, sensors, group selection and Telegram bot profile. Keep the default bot or add another token once in **Telegram bots** and reuse that profile for several addresses. See [addresses, chats and bots](DOCS.md#destinations).
 
