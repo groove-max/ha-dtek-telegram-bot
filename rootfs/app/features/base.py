@@ -14,7 +14,7 @@ from ha_client import HAClient
 from state_store import StateStore
 from telegram_service import TelegramService
 from template_engine import TemplateEngine
-from groups import state_groups, select_events, presentation_context, display_labels
+from groups import state_groups, select_events, presentation_context
 from utils import format_datetime, now_kyiv
 from outage_calendar import ScheduleUnavailable, verified_coverage_end
 
@@ -237,9 +237,6 @@ class Feature(ABC):
             self.state_set(f"delivery_revision_{self.name}", revision)
         self._delivery_key = f"{fingerprint}:{revision}"
         return self.templates.render(template_name, **presentation_context(ctx, self.state_get("groups_snapshot")))
-
-    def schedule_display_labels(self) -> dict[str, str] | None:
-        return display_labels(self.state_get("groups_snapshot"))
 
     def state_get(self, key: str, default: Any = None) -> Any:
         """Get a value from persistent state for this address."""

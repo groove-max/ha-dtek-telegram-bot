@@ -63,33 +63,15 @@ def select_events(
     return result
 
 
-def public_groups(state: dict | None) -> bool:
-    """Old integrations expose public groups; new ones explicitly declare visibility."""
-    return (state or {}).get("attributes", {}).get("group_labels_visible", True) is True
-
-
-def display_labels(state: dict | None) -> dict[str, str] | None:
-    """Local variant numbers are not public queue numbers or stable identities."""
-    if public_groups(state):
-        return None
-    return {g: f"Варіант {index + 1}" for index, g in enumerate(state_groups(state))}
-
-
-def display_group(value: str, state: dict | None) -> str:
-    labels = display_labels(state)
-    if labels is None:
-        return value
-    return ", ".join(labels.get(g, "Графік адреси") for g in canonical_groups(value))
-
-
 def presentation_context(context: dict, state: dict | None) -> dict:
-    """Replace opaque IDs only at the presentation boundary, including overrides."""
+    """Display source group IDs; website visibility is separate metadata."""
     result = dict(context)
-    result["groups_public"] = public_groups(state)
-    if not result["groups_public"]:
-        for key in ("group", "old_group", "new_group", "selected_group"):
-            if key in result:
-                result[key] = display_group(result[key], state)
-        if "groups" in result:
-            result["groups"] = [display_group(g, state) for g in result["groups"]]
+    # Keep this presentation switch for saved/default templates: group headings
+    # and old -> new transitions now apply to every operator, including Kyiv.
+    # It does not claim that the website publishes these IDs as queue numbers.
+    result["groups_public"] = True
+    attrs = (state or {}).get("attributes", {})
+    result["group_labels_visible"] = (
+        attrs.get("source_group_labels_visible", attrs.get("group_labels_visible", True)) is True
+    )
     return result

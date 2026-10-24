@@ -343,7 +343,6 @@ class StatusMessageFeature(Feature):
         return format_next_outage(
             events,
             header_group=await self._resolve_current_group(),
-            group_labels=self.schedule_display_labels(),
             now=now_kyiv(), group_state=self.state_get("groups_snapshot"),
             groups=[selected] if selected else groups,
         )

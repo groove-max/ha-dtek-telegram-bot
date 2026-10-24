@@ -158,7 +158,7 @@ class ScheduleChangeFeature(Feature):
         Returns lines like: "📅 05.03 — 14:00–18:00, 20:00–00:00"
         """
         return build_schedule_lines(
-            events, header_group=self.state_get("current_group", ""), group_labels=self.schedule_display_labels()
+            events, header_group=self.state_get("current_group", "")
         )
 
     def _had_recent_schedule(self) -> bool:

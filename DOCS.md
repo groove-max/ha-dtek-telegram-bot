@@ -188,7 +188,7 @@ If another tab or a file edit changes the saved version, saving reports a confli
 
 Example: for `sensor.dtek_krem_0123456789abcdef_outage_status`, the prefix is `dtek_krem_0123456789abcdef`. If a saved selected group disappears from the address, schedule processing waits for a valid selection rather than guessing.
 
-For operators with hidden group IDs, normally leave `selected_group` empty and use the displayed variants. Regional HTTP access and operator selection belong to [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor), not this app.
+For Kyiv and other operators, source group IDs remain visible even when the DTEK website hides group labels. Leave `selected_group` empty to follow every building group, or select the ID you know serves the apartment. The bot does not invent local variant numbers; when DTEK changes the assignment, the message shows the previous and new IDs. Regional HTTP access and operator selection belong to [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor), not this app.
 
 <a id="power"></a>
 ## Configure actual power detection
@@ -357,7 +357,7 @@ Open **Templates**, choose a template, preview it, edit and save an override. Re
 
 The public introduction is the **Привітання · welcome** template: replace its text and links as desired. It is shared by all bots on this add-on and receives only `telegram_user_id`, never private account data. Its switch is under **General and service settings → Greeting for new users**; the standard GitHub introduction is enabled by default.
 
-Templates use Jinja. Available context is shown in the editor and depends on the message. For group presentation, `group`, `groups`, `selected_group`, `old_group`, `new_group` already respect hidden labels; `groups_public` indicates whether public group numbers exist.
+Templates use Jinja. Available context is shown in the editor and depends on the message. `group`, `groups`, `selected_group`, `old_group` and `new_group` contain the source IDs, including for Kyiv. `groups_public` stays `true` as a compatibility switch so existing templates show group headings and old/new IDs. To check whether DTEK itself displays labels on its website, use `group_labels_visible`; this metadata does not hide groups. Saved custom templates are not overwritten.
 
 For `upcoming_outage`, `end_confirmed` tells whether the published schedule confirms
 the end of that interval. When false, `end` contains `невідомо` instead of a

@@ -86,7 +86,7 @@ class GroupChangeFeature(Feature):
             events, groups_only = [], True
         if self.state_get("current_groups") != groups:
             return
-        lines = build_schedule_lines(events, header_group=display, group_labels=self.schedule_display_labels())
+        lines = build_schedule_lines(events, header_group=display)
         start = now_kyiv().replace(hour=0, minute=0, second=0, microsecond=0)
         complete = not groups_only and self.has_schedule_coverage(start, start + timedelta(days=2))
         text = self.render(

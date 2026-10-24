@@ -28,7 +28,7 @@ from features.status_message import StatusMessageFeature
 from ha_client import HAClient
 from personal_source import PersonalSource
 from conversations import Conversations
-from groups import state_groups, select_events, presentation_context, display_labels
+from groups import state_groups, select_events, presentation_context
 from messages import DEFAULT_TEMPLATES
 from outage_calendar import build_schedule_lines, extract_calendar_events, upcoming_schedule_events, parse_event_time, format_next_outage, calendar_query_end
 from power_monitor import PowerMonitor
@@ -1075,7 +1075,7 @@ class Orchestrator:
             events = []
 
         if template_name == "schedule_change":
-            context["schedule_lines"] = build_schedule_lines(events, header_group=group, group_labels=display_labels(group_state)) or ["📅 09.03 — 12:00–16:00"]
+            context["schedule_lines"] = build_schedule_lines(events, header_group=group) or ["📅 09.03 — 12:00–16:00"]
         elif template_name == "schedule_empty":
             pass
         elif template_name == "emergency_start":
@@ -1115,7 +1115,7 @@ class Orchestrator:
                     pass
             context["duration"] = duration
         elif template_name == "group_change":
-            schedule_lines = build_schedule_lines(events, header_group=group, group_labels=display_labels(group_state))
+            schedule_lines = build_schedule_lines(events, header_group=group)
             context.update(
                 old_group=self.state.get(address.key, "current_group", "—"),
                 new_group=group,
@@ -1180,7 +1180,7 @@ class Orchestrator:
                 detected_power=detected_power,
             )
             next_outage = format_next_outage(
-                events, header_group=group, group_labels=display_labels(group_state),
+                events, header_group=group,
                 group_state=group_state,
                 groups=[address.selected_group] if address.selected_group else state_groups(group_state),
             )
@@ -1209,7 +1209,7 @@ class Orchestrator:
                 if phase.get("available") is None
             ]
             next_outage = format_next_outage(
-                events, header_group=group, group_labels=display_labels(group_state),
+                events, header_group=group,
                 group_state=group_state,
                 groups=[address.selected_group] if address.selected_group else state_groups(group_state),
             )
@@ -1222,7 +1222,7 @@ class Orchestrator:
             )
         elif template_name == "status_unknown":
             context["next_outage"] = format_next_outage(
-                events, header_group=group, group_labels=display_labels(group_state),
+                events, header_group=group,
                 group_state=group_state,
                 groups=[address.selected_group] if address.selected_group else state_groups(group_state),
             )

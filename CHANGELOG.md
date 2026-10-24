@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Display Kyiv source group IDs (for example, `GPV29.1`) instead of local variant numbers in statuses, schedule alerts, previews and old/new group changes. Keep notification identities, selected groups and private cabinet verification unchanged. Saved templates retain group headings through the compatibility context; website label visibility remains available separately.
+
 ## [0.5.0-rc4] - 2026-10-23
 
 **Regular GitHub release**, without the Pre-release flag. Install through the Home Assistant app store. Requires HA 2026.3.0+; private photos and documents require **DTEK Monitor 2.0.0-rc4**.

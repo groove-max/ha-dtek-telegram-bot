@@ -1,4 +1,4 @@
-"""Hidden operator IDs stay in provenance, not in Telegram presentation."""
+"""Website-hidden groups retain their source IDs in messages and provenance."""
 
 import sys
 from pathlib import Path
@@ -15,7 +15,7 @@ import test_group_change_feature as fixtures
 from features.schedule_change import ScheduleChangeFeature
 from features.status_message import StatusMessageFeature
 from features.upcoming_outage import UpcomingOutageFeature
-from groups import display_labels, presentation_context, select_events
+from groups import presentation_context, select_events
 from outage_calendar import build_schedule_lines
 from utils import now_kyiv
 import main
@@ -64,52 +64,56 @@ class HiddenGroupsTests(unittest.IsolatedAsyncioTestCase):
             self.group.config, self.group.ha, self.tg, self.state, self.group.templates
         )
 
-    async def test_schedule_and_group_change_hide_ids_but_keep_raw_identity(self):
+    async def test_schedule_and_group_change_show_source_ids_and_keep_identity(self):
         self.group.state_set("notified_groups", ["GPV30.1"])
         await self.group.on_tick()
         text = self.tg.messages[-1]
-        self.assertNotIn("GPV", text)
-        self.assertIn("Оновлено прив’язку", text)
-        self.assertIn("Варіант 1", text)
-        self.assertIn("Варіант 2", text)
+        self.assertIn("Група графіку змінена: GPV30.1 → GPV29.1, GPV35.1", text)
+        self.assertNotIn("Варіант", text)
         self.assertEqual(
             self.group.state_get("notified_groups"), ["GPV29.1", "GPV35.1"]
         )
         self.group.state_set("schedule_signature", "changed")
         await self.feature(ScheduleChangeFeature).on_tick()
-        self.assertNotIn("GPV", self.tg.messages[-1])
-        self.assertNotIn("Група Варіант", self.tg.messages[-1])
+        self.assertIn("Група GPV29.1, GPV35.1", self.tg.messages[-1])
+        self.assertNotIn("Варіант", self.tg.messages[-1])
         self.assertIn("уточнення.\n⛔", self.tg.messages[-1])
 
-    async def test_upcoming_uses_display_variant_and_internal_dedup_key(self):
+    async def test_upcoming_uses_same_group_for_display_and_dedup_key(self):
         feature = self.feature(UpcomingOutageFeature)
         await feature.on_tick()
         self.assertEqual(len(self.tg.messages), 1)
-        self.assertNotIn("GPV", self.tg.messages[0])
-        self.assertIn("Варіант 1", self.tg.messages[0])
+        self.assertIn("Група GPV29.1", self.tg.messages[0])
+        self.assertNotIn("Варіант", self.tg.messages[0])
         self.assertIn("GPV29.1", feature.state_get("warned_outage_start"))
+        self.snapshot["attributes"]["group_labels_visible"] = True
+        await feature.on_tick()
+        self.assertEqual(len(self.tg.messages), 2)  # The second group still needs its own warning.
+        self.assertIn("Група GPV35.1", self.tg.messages[1])
+        self.snapshot["attributes"]["group_labels_visible"] = False
+        await feature.on_tick()
+        self.assertEqual(len(self.tg.messages), 2)
 
-    async def test_status_unknown_and_next_outage_do_not_leak_ids(self):
+    async def test_status_unknown_and_next_outage_show_source_groups(self):
         feature = self.feature(StatusMessageFeature)
         text = await feature._build_status_text("unknown")
-        self.assertNotIn("GPV", text)
-        self.assertIn("Варіант 2", text)
+        self.assertIn("Група GPV29.1, GPV35.1", text)
         text = await feature._get_next_outage()
-        self.assertNotIn("GPV", text)
-        self.assertIn("Варіант 1", text)
+        self.assertIn("GPV29.1", text)
+        self.assertNotIn("Варіант", text)
 
-    def test_selected_variant_keeps_number_from_full_address_mapping(self):
+    def test_selected_group_keeps_source_id(self):
         chosen = select_events(self.events, ["GPV29.1", "GPV35.1"], "GPV35.1")
-        lines = build_schedule_lines(chosen, group_labels=display_labels(self.snapshot))
-        self.assertIn("🔵 Варіант 2", lines)
-        self.assertFalse(any("GPV" in line for line in lines))
+        lines = build_schedule_lines(chosen)
+        self.assertIn("🔵 GPV35.1", lines)
+        self.assertFalse(any("GPV29.1" in line for line in lines))
 
     def test_legacy_and_public_groups_keep_existing_presentation(self):
         for state in [
             {"state": "GPV5.1"},
             {"state": "GPV5.1", "attributes": {"group_labels_visible": True}},
+            {"state": "GPV5.1", "attributes": {"group_labels_visible": False}},
         ]:
-            self.assertIsNone(display_labels(state))
             self.assertEqual(
                 presentation_context({"group": "GPV5.1"}, state)["group"], "GPV5.1"
             )
@@ -125,11 +129,11 @@ class HiddenGroupsTests(unittest.IsolatedAsyncioTestCase):
         app._fetch_calendar_events_for_address = AsyncMock(return_value=self.events)
         context = await app._build_template_context(address, "schedule_change")
         text = self.group.templates.render("schedule_change", **context)
-        self.assertNotIn("GPV", text)
-        self.assertIn("Варіант 1", text)
-        self.assertIn("Варіант 2", text)
+        self.assertIn("Група GPV29.1, GPV35.1", text)
+        self.assertNotIn("Варіант", text)
+        self.assertFalse(context["group_labels_visible"])
 
-    async def test_same_variant_names_cannot_deduplicate_different_internal_groups(
+    async def test_different_source_groups_keep_distinct_notification_identities(
         self,
     ):
         self.group.state_set("notified_groups", ["GPV30.1"])
@@ -144,4 +148,44 @@ class HiddenGroupsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(
             self.group.state_get("delivery_identity_group_change"), first_identity
         )
-        self.assertNotIn("GPV", self.tg.messages[-1])
+        self.assertIn("GPV29.1, GPV35.1 → GPV41.1, GPV42.1", self.tg.messages[-1])
+
+    async def test_website_visibility_change_alone_does_not_send_group_change(self):
+        self.group.state_set("notified_groups", ["GPV29.1", "GPV35.1"])
+        for visible in (False, True, False):
+            self.snapshot["attributes"]["group_labels_visible"] = visible
+            await self.group.on_tick()
+        self.assertEqual(self.tg.messages, [])
+
+    async def test_previously_acknowledged_schedule_does_not_repeat_for_new_labels(self):
+        feature = self.feature(ScheduleChangeFeature)
+        feature.state_set("schedule_signature", feature._compute_signature(self.events, now=now_kyiv()))
+        for visible in (False, True):
+            self.snapshot["attributes"]["group_labels_visible"] = visible
+            await feature.on_tick()
+        self.assertEqual(self.tg.messages, [])
+
+    def test_saved_templates_use_group_headings_without_rewriting_user_content(self):
+        source = "{% if groups_public %}Група {{ old_group }} → {{ new_group }}{% else %}Приховано{% endif %}"
+        path = Path(self.temp.name) / 'group_change.j2'
+        path.write_text(source)
+        context = {"old_group": "GPV30.1", "new_group": "GPV29.1, GPV35.1"}
+        rendered = presentation_context(context, self.snapshot)
+        self.assertFalse(rendered["group_labels_visible"])
+        self.assertFalse(self.snapshot["attributes"]["group_labels_visible"])
+        self.assertEqual(context, {"old_group": "GPV30.1", "new_group": "GPV29.1, GPV35.1"})
+        self.assertEqual(
+            self.group.templates.render('group_change', **rendered),
+            'Група GPV30.1 → GPV29.1, GPV35.1',
+        )
+        self.assertEqual(path.read_text(), source)
+
+    def test_private_bridge_can_preserve_legacy_labels_and_report_website_visibility(self):
+        state = {"state": "GPV29.1", "attributes": {
+            "group_labels_visible": True,
+            "source_group_labels_visible": False,
+        }}
+        context = presentation_context({"group": "GPV29.1"}, state)
+        self.assertEqual(context["group"], "GPV29.1")
+        self.assertTrue(context["groups_public"])
+        self.assertFalse(context["group_labels_visible"])

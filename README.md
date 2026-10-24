@@ -130,7 +130,7 @@ Standalone telemetry-loss/recovery notices are **off by default** (`power.teleme
 
 - A schedule is a plan, not a measurement. DTEK emergency restrictions can override it.
 - Multiple address groups are kept separate. Selecting one does not prove that it is your apartment's group.
-- Operators that hide public group numbers are shown as **«Варіант 1», «Варіант 2»**. These are local labels, not official queue numbers.
+- Kyiv and other operators show **the group IDs returned by DTEK**, such as `GPV29.1`, including when DTEK hides labels on its public website. Statuses, schedule alerts and group-change messages use the same IDs. They identify the source schedules; they do not guarantee an official queue number or your apartment’s assignment.
 - Failed or inconsistent schedule checks pause schedule-related notifications. Saved display-only calendars cannot trigger alerts.
 - An unpublished date is not announced as “no outages.”
 - The default status mode edits one message. `send_new` is available if you intentionally want new status posts.

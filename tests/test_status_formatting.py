@@ -69,15 +69,16 @@ class StatusFormattingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text.count("GPV3.1"), 1)
         self.assertNotIn("GPV5.1", text)
 
-    async def test_hidden_variants_keep_labels_without_leaking_ids(self):
+    async def test_website_hidden_group_ids_are_not_duplicated_in_status(self):
         self.snapshot["attributes"]["group_labels_visible"] = False
         text = await self.render()
-        self.assertEqual(text.count("Варіант 1"), 1)
-        self.assertNotIn("GPV", text)
+        self.assertEqual(text.count("GPV3.1"), 1)
+        self.assertNotIn("Варіант", text)
         self.snapshot["attributes"]["schedule_groups"].append("GPV5.1")
         text = await self.render()
-        self.assertIn("📅 Найближче планове:\n🔵 Варіант 1\n", text)
-        self.assertNotIn("GPV", text)
+        self.assertIn("📅 Найближче планове:\n🔵 GPV3.1\n", text)
+        self.assertIn("Група GPV3.1, GPV5.1\n", text)
+        self.assertNotIn("Варіант", text)
 
     async def test_empty_and_unavailable_calendar_keep_separate_status_lines(self):
         self.events = []
