@@ -16,6 +16,8 @@ Works with [DTEK Monitor](https://groove-max.github.io/ha-dtek-monitor/en/) for 
 
 ![Illustration of a building's pinned status and a private DTEK menu, with fictional data](docs/images/telegram-overview.png)
 
+One personal profile can serve several family members, each with a private menu, status and account notifications. Schedules open with your groups; all groups remain available as pages and a full PNG. See [personal mode](docs/PERSONAL.md).
+
 ## Choose how you want to use the bot
 
 | I want | Start here |
@@ -95,7 +97,7 @@ For personal use, a conversation with the bot is enough: no group or channel is 
 
 1. In **Налаштування**, choose **Додати профіль** (Add profile). The wizard starts with **Графіки за адресою** (address schedules) or **Особистий кабінет** (personal cabinet). Address schedules can also be sent privately; they do not require a shared chat.
 2. Select your building or connected cabinet account and give the profile a recognizable name. Leave the building's group empty to follow every address group. Personal profiles use the cabinet's groups.
-3. Choose a bot and recipient. Select a discovered chat/user or enter its ID. A personal cabinet requires an explicitly selected private owner; discovery never grants access automatically.
+3. Choose a bot and recipient. Select a discovered chat/user or enter its ID. A personal cabinet requires explicitly selected private users; discovery never grants access automatically.
 4. Enable the notifications you need. Power sensors are optional; choose them using the guide below. Voltage display/quality alerts are separate from power detection.
 5. Review the destination and notifications, then press **Застосувати** (Apply). This validates, saves and restarts the app. Notifications start after the restart.
 6. Check **Поточний стан** (Current status). Optional template previews and test sends are under **Інструменти → Шаблони**. A test sends a real labeled message to the configured test destination.

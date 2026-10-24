@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from aiogram.types import Update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rootfs/app"))
-from config import AddressConfig, FullConfig
+from config import AddressConfig, FullConfig, delivery_profiles
 from conversations import Conversations
 from delivery_journal import DeliveryJournal
 from bot_profiles import BotProfileStore, validate_destinations
@@ -896,6 +896,7 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
             self.profile.voltage.entities = [VoltageEntityConfig(entity="sensor.grid_voltage")]
             self.profile.power.enabled = True
             app.config = FullConfig(addresses=[self.profile])
+            app.deliveries = list(delivery_profiles(app.config))
             app.ha, app.personal_sources = self.ha, {self.profile.key: self.source}
             app.state, app.templates = StateStore(Path(directory) / "state.json"), TemplateEngine()
             telegram = SimpleNamespace()

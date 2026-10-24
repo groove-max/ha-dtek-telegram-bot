@@ -9,6 +9,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from config import delivery_profiles
 from bot_profiles import BotProfileStore, default_profile
 from delivery_journal import DeliveryJournal
 from state_store import StateStore
@@ -82,7 +83,7 @@ class BotRuntime:
                 self.errors[profile.id] = (
                     "Некоректний токен. Перевірте налаштування бота."
                 )
-        for address in config.addresses:
+        for address in delivery_profiles(config):
             profile = self.profiles.get(address.telegram_bot_id)
             if profile:
                 chat = (
@@ -115,7 +116,7 @@ class BotRuntime:
         default = self.profiles["default"]
         migrate = legacy_owner in (None, default.bot_id) and "default" in self.clients
         if migrate:
-            for address in self.config.addresses:
+            for address in delivery_profiles(self.config):
                 if address.mode != "building" or address.profile_id or address.telegram_bot_id != "default":
                     continue
                 legacy_dir = self._legacy_dir(default)
@@ -153,7 +154,7 @@ class BotRuntime:
             client.journal = DeliveryJournal(path)
             client.allowed_routes = {
                 a.key: self.chat(a)
-                for a in self.config.addresses
+                for a in delivery_profiles(self.config)
                 if a.telegram_bot_id == profile_id
             }
             if config_receives(self.config) and (self.conversation_factory is not None or profile.feedback_enabled):

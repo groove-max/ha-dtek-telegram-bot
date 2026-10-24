@@ -11,6 +11,7 @@ from collections import OrderedDict
 from types import SimpleNamespace
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from config import delivery_profiles
 from ha_client import HACommandError
 from utils import format_datetime
 from reading_photos import ReadingPhotos, PHOTO_ACTIONS
@@ -34,7 +35,7 @@ class Conversations(ReadingPhotos, PersonalDocuments):
     def profiles(self, user_id):
         return [
             a
-            for a in self.app.config.addresses
+            for a in delivery_profiles(self.app.config)
             if a.telegram_bot_id == self.bot_id
             and (
                 (
@@ -703,16 +704,22 @@ class Conversations(ReadingPhotos, PersonalDocuments):
 
     async def grid(self, user, profile, offset):
         from schedule_image import render_grid
+        from schedule_pages import select_page, render_page, SCOPES
         from aiogram.types import BufferedInputFile
 
+        request = offset if isinstance(offset, dict) else {"offset": int(offset)}
+        navigating = "date" in request
+        offset = request.get("offset", 0)
+        scope, page = request.get("scope", "auto"), request.get("page", 0)
         try:
             if profile.mode == "personal":
-                data = await self.cabinet(profile, user, "refresh")
+                data = await self.cabinet(profile, user, "grid" if navigating else "refresh")
             else:
                 entity = f"sensor.{profile.entity_prefix}_schedule_status"
-                await self.app.ha.command(
-                    "dtek_monitor/schedule_refresh", entity_id=entity
-                )
+                if not navigating:
+                    await self.app.ha.command(
+                        "dtek_monitor/schedule_refresh", entity_id=entity
+                    )
                 data = await self.app.ha.command(
                     "dtek_monitor/schedule_grid", entity_id=entity
                 )
@@ -730,32 +737,56 @@ class Conversations(ReadingPhotos, PersonalDocuments):
                     "dtek_monitor/schedule_grid", entity_id=entity
                 )
             )
+        if navigating:
+            offset = next((i for i, day in enumerate(data.get("days", [])[:2]) if day["date"] == request["date"]), None)
+            if offset is None:
+                await self.reply(user, profile, "📅 Дата вже минула", "Оберіть актуальний графік у меню.")
+                return
+        actions = []
         try:
-            png = await asyncio.to_thread(
-                render_grid, data, int(offset), profile.mode == "personal"
-            )
+            view = select_page(data, offset, profile.mode == "personal", scope, page)
+            def target(selected_scope, selected_page=0, full=False):
+                return {"offset": offset, "date": view.day["date"], "scope": selected_scope, "page": selected_page, "full": full}
+            for name in ("mine", "home", "all"):
+                if name != view.scope and (name != "mine" or profile.mode == "personal"):
+                    actions.append((SCOPES[name], "grid", target(name)))
+            if view.page > 0:
+                actions.append((f"◀️ {view.page} із {view.pages}", "grid", target(view.scope, view.page - 1)))
+            if view.page + 1 < view.pages:
+                actions.append((f"{view.page + 2} із {view.pages} ▶️", "grid", target(view.scope, view.page + 1)))
+            actions.append(("📎 Повна таблиця PNG", "grid", target("all", full=True)))
+            if request.get("full"):
+                png = await asyncio.to_thread(render_grid, data, offset, profile.mode == "personal")
+            else:
+                png = await asyncio.to_thread(render_page, view)
         except ValueError:
             await self.reply(
                 user, profile, "📅 Графік ще недоступний",
-                "На цю дату таблиця недоступна або ще не опублікована. Це не означає, що відключень немає.",
+                "Для обраної дати або групи немає підтверджених даних. Це не означає, що відключень немає.", actions,
             )
             return
-        # A document preserves the full readable grid, without Telegram photo compression.
-        await self.tg.replace_menu(user, lambda: self.tg._bot.send_document(
-                chat_id=user,
-                document=BufferedInputFile(
-                    png, filename=f"dtek-schedule-{data['days'][int(offset)]['date']}.png"
-                ),
-                caption=f"📅 Графік на {data['days'][int(offset)]['date']}\nУсі групи; ваші виділено на таблиці.\n\n⚠️ При аварійних відключеннях графік може не діяти.",
-                reply_markup=self.navigation(user, profile),
-            ))
+        date = view.day["date"]
+        caption = f"📅 Графік на {date}\n{SCOPES[view.scope]} · {view.page + 1} із {view.pages}\n"
+        if request.get("full"):
+            caption = f"📅 Графік на {date}\nПовна таблиця · Усі групи\n"
+        caption += escape(str(data.get("address", ""))[:300])
+        if view.unassigned:
+            caption += "\nℹ️ Вашу групу ще не підтверджено."
+        caption += "\n\n⚠️ При аварійних відключеннях графік може не діяти."
+        async def send():
+            args = dict(chat_id=user, caption=caption, parse_mode="HTML", reply_markup=self.navigation(user, profile, actions))
+            file = BufferedInputFile(png, filename=f"dtek-schedule-{date}.png")
+            if request.get("full"):
+                return await self.tg._bot.send_document(document=file, **args)
+            return await self.tg._bot.send_photo(photo=file, **args)
+        await self.tg.replace_menu(user, send)
 
     async def on_tick(self):
         async with self._lock:
             for user in list(self.sessions):
                 if self.sessions[user]["expires"] <= time.time():
                     self.cancel_reading(user)
-            for profile in self.app.config.addresses:
+            for profile in delivery_profiles(self.app.config):
                 if (
                     profile.telegram_bot_id != self.bot_id
                     or profile.mode != "personal"

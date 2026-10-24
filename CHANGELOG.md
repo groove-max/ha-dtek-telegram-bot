@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Support several authorized Telegram users in one personal account profile. Keep independent delivery state, pinned statuses, menus, reminders, document delivery and reading confirmations. Preserve existing single-user routes; recipient discovery appends users without replacing editor drafts.
+- Open schedules with personal/building groups; browse all groups in readable 12-row pages with morning/afternoon scales, explicit unknown assignments and a separate full PNG download. Navigation replaces the previous menu screen and never changes a dated request into another day silently.
+
 - Display Kyiv source group IDs (for example, `GPV29.1`) instead of local variant numbers in statuses, schedule alerts, previews and old/new group changes. Keep notification identities, selected groups and private cabinet verification unchanged. Saved templates retain group headings through the compatibility context; website label visibility remains available separately.
 
 ## [0.5.0-rc4] - 2026-10-23

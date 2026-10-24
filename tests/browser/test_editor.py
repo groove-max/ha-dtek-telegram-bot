@@ -802,14 +802,14 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await expect(picker.locator('option[value="456"]')).to_have_attribute('disabled', '')
         await expect(form.locator('img')).to_have_count(0)
         await picker.select_option('123')
-        await expect(form.locator('.addr-user-id')).to_have_value('123')
+        await expect(form.locator('.addr-user-id')).to_have_value('999, 123')
         await form.locator('.addr-bot-id').select_option('bot_2')
         await expect(picker.locator('option[value="123"]')).to_have_count(0)
         await expect(picker.locator('option[value="789"]')).to_have_count(1)
-        await expect(form.locator('.addr-user-id')).to_have_value('123')
+        await expect(form.locator('.addr-user-id')).to_have_value('999, 123')
         await picker.select_option('789')
         await self.refresh()
-        await expect(form.locator('.addr-user-id')).to_have_value('789')
+        await expect(form.locator('.addr-user-id')).to_have_value('999, 123, 789')
         await form.locator('.addr-mode').select_option('building')
         await form.locator('.addr-bot-id').select_option('default')
         await form.locator('.recipient-picker[data-target=".addr-chat-id"]').select_option('-1001')
@@ -1013,6 +1013,41 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         for width in (320,375,768,1440):
             await self.page.set_viewport_size({'width':width,'height':900})
             self.assertTrue(await self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+
+    async def test_family_profile_preserves_five_users_and_explicit_removal(self):
+        self.accounts=[{'entity_id':'sensor.family_account','masked':'••••1111','address':'Приклад, 1'}]
+        self.bot_profiles['recipients']={'default':[
+            {'id':str(user),'name':f'Людина {user}','type':'private','available':True}
+            for user in (123,456,789,901,902)
+        ]}
+        await self.refresh()
+        await self.page.locator('#add-address-button').click()
+        form=self.page.locator('.wizard-profile')
+        await form.locator('.addr-mode').select_option('personal')
+        await form.locator('.addr-account').select_option('sensor.family_account')
+        await form.locator('[data-action="wizard-next"]').click()
+        picker=form.locator('.recipient-picker[data-target=".addr-user-id"]')
+        for user in (123,456,789,901,902,456):
+            await picker.select_option(str(user))
+        field=form.locator('.addr-user-id')
+        await expect(field).to_have_value('123, 456, 789, 901, 902')
+        await self.refresh()
+        await expect(field).to_have_value('123, 456, 789, 901, 902')
+        await field.fill('456, 789, 901, 902')
+        await self.refresh()
+        await expect(field).to_have_value('456, 789, 901, 902')
+        await form.locator('[data-action="wizard-next"]').click()
+        await form.locator('[data-action="wizard-next"]').click()
+        review=form.locator('.profile-review')
+        for user in (456,789,901,902):
+            await expect(review).to_contain_text(f'Людина {user}')
+        await expect(review).not_to_contain_text('Людина 123')
+        async with self.page.expect_request('**/api/config/validate') as request:
+            await self.page.locator('#validate-button').click()
+        payload=(await request.value).post_data_json['config']
+        personal=next(a for a in payload['addresses'] if a['mode']=='personal')
+        self.assertEqual(personal['telegram_user_ids'], [456,789,901,902])
+        AddressConfig.model_validate(personal)
 
     async def test_summary_refreshes_recipient_while_preserving_focused_draft(self):
         form=self.page.locator('.address-editor-card').first

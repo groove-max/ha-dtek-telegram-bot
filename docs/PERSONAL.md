@@ -2,26 +2,36 @@
 
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
-> Use **bot 0.5.0-rc4 or newer** and **DTEK Monitor 2.0.0-rc4 or newer** for all features in this guide. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
+> Use **bot 0.5.0-rc4 or newer** and **DTEK Monitor 2.0.0-rc4 or newer** for the existing cabinet, photo and document features. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
-Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipient; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
+> Multiple people in one profile and paged schedules are **Unreleased** features, not yet included in 0.5.0-rc4.
+
+Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipients; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
 
 ## Choose a profile
 
 | Mode | Source of outage groups | Destination |
 | --- | --- | --- |
 | Building (`building`, default) | Public building entities; optionally filter a confirmed group | Channel, group or private chat |
-| Personal (`personal`) | Current groups reported by the cabinet for the selected account | Only the explicitly authorized user's private chat |
+| Personal (`personal`) | Current groups reported by the cabinet for the selected account | Private chats of explicitly authorized users |
 
 Personal notifications reuse the building mode's schedule-change, group-change and advance-warning logic, including publication checks and duplicate protection. With Monitor 2.0.0-rc3 or newer, the bot uses cabinet groups confirmed by fresh building data. If DTEK also reports unconfirmed groups, My DTEK explains the mismatch; those extra groups do not stop alerts for the confirmed ones. A manual group chosen in My DTEK does not replace the cabinet's assignment in this mode. If the cabinet group is missing, expired, disabled or has no confirmed overlap with the building, schedule alerts pause instead of falling back to another group. Fresh physical power sensors continue working independently. DTEK's reported outage status still describes the linked building, not a measurement inside your apartment.
 
 A verified assignment change can be announced before its schedule is published. That message will not claim there are no outages.
 
+## One apartment, several people
+
+In the apartment profile, open **Telegram → Користувачі Telegram (Telegram users)**. Each family member must send `/start` to the bot. Press **Refresh recipients**, then add people from the dropdown or enter numeric IDs separated by commas. Selecting a person adds them without replacing previous recipients. Press **Apply** and wait for the confirmed restart.
+
+Each person gets their own private menu, status message, enabled notifications, reminders and new documents. The account, sensors and permission to submit readings are shared settings. Reading drafts, confirmation buttons and reminder dismissals belong to each person separately. Submitted readings belong to the same DTEK account; check its current readings before submitting again after someone else.
+
+To revoke access, remove the ID and apply the change. Discovery alone never grants access. You do not need a Telegram group or duplicate apartment profiles. The legacy single `telegram_user_id` remains compatible; use `telegram_user_ids` for new YAML configurations (up to 50 people).
+
 ## Set up a personal profile
 
 1. In [DTEK Monitor](https://github.com/groove-max/ha-dtek-monitor), sign in to the cabinet and select the account. Check its building link in **My DTEK → Settings → Building and outage group**. Cabinet group lookup must be enabled and return current data for group notifications. Lookup is enabled for all four operators. Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental and have not been checked with real linked accounts. Kyiv city and Kyiv oblast are separate operators. Hidden labels on the public website do not block private notifications when the cabinet supplies a current group that belongs to the building. If that assignment is unavailable or conflicting, schedule notifications wait for valid data; the bot never substitutes another group.
 2. Open your Telegram bot and press **Start**. Before access is configured, its introduction shows your numeric **Telegram ID**. This does not give access to any account. If introductions are disabled, use the [chat ID instructions](../DOCS.md#telegram).
-3. In the add-on web editor, add a profile and choose **Особистий кабінет**. Select the account by its masked number and address, choose the Telegram bot, then select yourself from the detected recipients or enter your numeric Telegram user ID. After `/start`, press **Refresh** in the editor to update the list. Verify the name, username and ID before saving. The destination is automatically this user's private chat; a username, channel or group cannot be substituted.
+3. In the add-on web editor, add a profile and choose **Особистий кабінет**. Select the account by its masked number and address, choose the Telegram bot, then add the authorized people from detected recipients or enter their numeric Telegram user IDs separated by commas. After `/start`, press **Refresh** in the editor to update the list. Verify the name, username and ID before saving. Each destination is automatically that user's private chat; a username, channel or group cannot be substituted.
 4. Enable the notifications you need. Enable **reading reminders** and **allow reading submission** separately. Both are off by default. Link physical power sensors only if they measure this account's home; they are optional.
 5. Validate, then **Apply (Застосувати)**. Open `/start` in Telegram. With several authorized accounts, choose an account first; each has its own status message. Choose a short, distinct display name for each account.
 
@@ -32,7 +42,7 @@ Only the HA administrator can assign an account to a Telegram user. DTEK login c
 The reading-entry and history buttons appear when **Allow reading submission** is enabled for this profile. That switch authorizes access to the reading workflow; it never sends values without your final confirmation. Leave it off for notifications and schedules only.
 
 - **Pinned status**: one automatically updated message with your address, cabinet group, power state, fresh voltage, next verified outage and update time. It uses the same templates and custom overrides as building profiles. Enable the status message, editing mode and pinning in the profile. The **⚡️ Стан (Status)** button is hidden only when the profile has an enabled, pinned message that is edited in place and refreshed periodically (interval greater than zero). The button is available if you disable status messages or pinning, choose a new message for each update, or set the refresh interval to `0`. It requests the current status using the same templates, even when automatic status messages are disabled. This choice is independent for each profile. After applying settings, open **🏠 Меню** or `/start` to see the updated buttons. Unknown power and unavailable schedules remain clearly labeled.
-- **📅 Графік на сьогодні / 🗓 Графік на завтра (Today's / tomorrow's schedule)**: a PNG document with all groups from the linked operator's schedule. Your cabinet group is highlighted; building profiles highlight all home groups. Publication/verification times and forecast/unknown cells remain visible. An unavailable day is not displayed as an all-clear day. The refresh uses the integration's shared cooldown.
+- **📅 Графік на сьогодні / 🗓 Графік на завтра (Today / tomorrow)**: opens your confirmed personal group or building groups. **My group / My building / All groups** change the scope. Large grids have 12 groups per page; arrow buttons replace the previous screen. Each page includes its date, morning/afternoon time scales, legend and verification time. **📎 Повна таблиця PNG (Full PNG)** sends all groups as one file. Unknown assignments and missing data remain explicit. Refresh uses the integration’s shared cooldown.
 - **Submit readings**: enter cumulative whole kWh for each supported tariff zone, or use an available calculation from the energy sensor configured in My DTEK. The bot shows previous/new readings and their difference. This difference is **not necessarily a calendar month's consumption**. Nothing is sent until you press **Confirm and submit to DTEK**.
 - **📋 Покази в ДТЕК (Readings in DTEK)**: see the latest published cumulative readings and their dates, even if you submitted them outside HA. The bot checks the current year, then the previous year if it finds no active-energy records. Repeated requests share a cache of at most one minute; the screen shows when DTEK was checked. Inactive records are hidden by default; blocked and unknown statuses remain visible as warnings. Use **🗂 Показати всі записи ДТЕК (Show all DTEK records)** to include inactive records for the displayed year, and the newer/older buttons to browse six records per page. Refresh preserves this choice. Identical values on different dates or tariff zones remain separate. The filter does not change DTEK data or submission verification. A failed request is shown as unavailable, not as empty history. If this HA has a submission record, its result is shown separately and **Check last submission** compares it against DTEK history. Matching values do not prove a final monthly settlement.
 
@@ -84,7 +94,7 @@ The add-on uses one incoming-update collector per bot for both commands and test
 
 ## Testing and YAML
 
-Keep building notification tests in a test group. For a **personal** profile, the bot's enforced test destination must be the same authorized private user, or testing mode must be off: configuration rejects routing cabinet details into a shared test channel. Template tests are real messages; review private content before choosing a destination. Prefer a dedicated test bot for account workflows. No readings are submitted by previewing a template or a schedule.
+Keep building notification tests in a test group. For a **personal** profile, the bot's enforced test destination must be one of the authorized private users, or testing mode must be off. In test mode, only that person receives account messages; the other recipients are paused: configuration rejects routing cabinet details into a shared test channel. Template tests are real messages; review private content before choosing a destination. Prefer a dedicated test bot for account workflows. No readings are submitted by previewing a template or a schedule.
 
 Normally use the editor. Equivalent minimal runtime YAML, with fictional identifiers:
 
@@ -95,7 +105,7 @@ addresses:
     mode: personal
     account_entity: sensor.example_account_updated
     telegram_bot_id: default
-    telegram_user_id: 123456789
+    telegram_user_ids: [123456789, 987654321]
     display_name: My apartment
     allow_readings: false
     reading_reminders: true

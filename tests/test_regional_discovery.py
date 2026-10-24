@@ -64,6 +64,7 @@ class RegionalDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(candidates[prefixes[0]]["configured"])
         self.assertFalse(candidates[prefixes[1]]["configured"])
         app.config.addresses = addresses
+        app.deliveries = addresses
         await app._resolve_display_names()
         self.assertEqual(addresses[0].display_name, "Одеса • вулиця Прикладна, 12А")
         self.assertEqual(

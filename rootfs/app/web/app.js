@@ -507,7 +507,7 @@ async function fetchJson(url, options = {}) {
 function createBlankAddress(prefill = {}) {
   return {
     entity_prefix: prefill.entity_prefix ?? "",
-    profile_id: "", mode: "building", account_entity: "", telegram_user_id: 0, allow_readings: false, reading_reminders: false, document_notifications: false,
+    profile_id: "", mode: "building", account_entity: "", telegram_user_id: 0, telegram_user_ids: [], telegram_route_owner: 0, allow_readings: false, reading_reminders: false, document_notifications: false,
     display_name: prefill.display_name ?? prefill.friendly_name ?? "",
     telegram_chat_id: "",
     telegram_bot_id: "default",
@@ -602,6 +602,7 @@ function normalizeImportedAddressPayload(payload) {
   const normalized = deepMerge(createBlankAddress(), rawAddress);
   normalized.entity_prefix = String(normalized.entity_prefix || "").trim();
   normalized.display_name = String(normalized.display_name || "").trim();
+  if (!("telegram_user_ids" in rawAddress)) normalized.telegram_user_ids = rawAddress.telegram_user_id ? [rawAddress.telegram_user_id] : [];
   normalized.telegram_chat_id = String(normalized.telegram_chat_id || "").trim();
   normalized.telegram_bot_id = String(normalized.telegram_bot_id || "default").trim();
   normalized.power.loss_entity = String(normalized.power?.loss_entity || "").trim();
@@ -1823,7 +1824,7 @@ function renderAddressEditor(address, index) {
         <div class="addr-identity-grid">
           <label class="field"><span>Режим профілю</span><select class="addr-mode"><option value="building" ${address.mode !== "personal" ? "selected" : ""}>Графіки за адресою</option><option value="personal" ${address.mode === "personal" ? "selected" : ""}>Особистий кабінет</option></select></label>
           <label class="field personal-only"><span>Особовий рахунок у HA</span><select class="addr-account"><option value="">Оберіть рахунок</option>${(state.discovery?.accounts || []).map(a => `<option value="${escapeHtml(a.entity_id)}" ${a.entity_id === address.account_entity ? "selected" : ""}>${escapeHtml(a.masked + " · " + a.address)}</option>`).join("")}${address.account_entity && !(state.discovery?.accounts || []).some(a => a.entity_id === address.account_entity) ? `<option selected value="${escapeHtml(address.account_entity)}">${escapeHtml(address.account_entity)} · недоступний</option>` : ""}</select><small>Підключіть кабінет через DTEK Monitor. Група береться тільки з API кабінету.</small></label>
-          <label class="field personal-only"><span>Telegram ID власника</span><input class="addr-user-id" type="text" inputmode="numeric" value="${address.telegram_user_id || ""}" />${recipientPicker(".addr-user-id", true)}<small>Напишіть /start обраному боту, натисніть «Оновити» й оберіть себе зі списку або введіть ID вручну. Перевірте ім’я, @username та ID: збереження надасть цій людині доступ до рахунку.</small></label>
+          <label class="field personal-only"><span>Користувачі Telegram</span><input class="addr-user-id" type="text" data-identity-user="${address.telegram_route_owner || address.telegram_user_id || 0}" value="${escapeHtml((address.telegram_user_ids || (address.telegram_user_id ? [address.telegram_user_id] : [])).join(", "))}" placeholder="123456789, 987654321" />${recipientPicker(".addr-user-id", true)}<small>Кожен користувач має написати боту /start. Додавайте людей зі списку нижче або введіть ID через кому. Перевірте ім’я, @username та ID: після застосування кожен отримає доступ до цього рахунку, власне меню й увімкнені сповіщення. Дозвіл на передачу показів спільний для всіх. Щоб забрати доступ, видаліть ID та застосуйте зміни.</small></label>
           <label class="toggle personal-only"><input class="addr-allow-readings" type="checkbox" ${address.allow_readings ? "checked" : ""}/><span>Дозволити передачу показів із підтвердженням</span></label>
           <label class="toggle personal-only"><input class="addr-reminders" type="checkbox" ${address.reading_reminders ? "checked" : ""}/><span>Нагадувати про покази</span></label>
           <label class="toggle personal-only"><input class="addr-documents" type="checkbox" ${address.document_notifications ? "checked" : ""}/><span>Нові документи й акти ДТЕК (перевірка кожні 30 хв)</span></label>
@@ -2227,7 +2228,7 @@ function decorateProfiles() {
     const summary = document.createElement("div");
     summary.className = "profile-summary";
     const bot = state.configPayload?.bots?.profiles?.find(b => b.id === (address.telegram_bot_id || "default"));
-    const recipient = address.mode === "personal" ? address.telegram_user_id : address.telegram_chat_id || bot?.chat_id || state.configPayload?.options?.default_chat_id;
+    const recipient = address.mode === "personal" ? (address.telegram_user_ids || [address.telegram_user_id]).join(", ") : address.telegram_chat_id || bot?.chat_id || state.configPayload?.options?.default_chat_id;
     const runtime = state.overview?.addresses?.find(a => a.profile_id === profileIdentity(address) || a.entity_prefix === address.entity_prefix);
     summary.innerHTML = `<div><h3>${escapeHtml(address.display_name || "Новий профіль")}</h3><p class="helper-copy">${address.mode === "personal" ? "Особистий кабінет" : "Графіки за адресою"} · ${escapeHtml(bot?.name || "Основний бот")} · ${escapeHtml(recipient || "Одержувача не обрано")}</p><small>${runtime ? (state.overview?.runtime?.ha_connected ? "Працює · " + escapeHtml(HOUSE_STATE_META[runtime.live_power]?.label || "дані оновлюються") : "Немає зв’язку з HA") : "Налаштування профілю"}</small></div><button type="button" class="secondary-button" data-action="edit-profile" data-index="${index}" aria-expanded="${index === state.activeProfile}">Налаштувати</button>`;
     const body = document.createElement("div");
@@ -2301,9 +2302,19 @@ editorContainer.addEventListener("toggle", event => {
 function selectedBot(address) {
   return state.configPayload?.bots?.profiles?.find(b => b.id === (address.telegram_bot_id || "default"));
 }
+function personalUsers(address) {
+  return address.telegram_user_ids ?? (address.telegram_user_id ? [address.telegram_user_id] : []);
+}
+function parseUserIds(value) {
+  return [...new Set(value.trim().split(/[\s,;]+/).filter(Boolean).map(v => /^[1-9][0-9]*$/.test(v) && Number.isSafeInteger(Number(v)) ? Number(v) : 0))];
+}
 function destination(address) {
   const bot = selectedBot(address);
-  const id = address.mode === "personal" ? address.telegram_user_id : address.telegram_chat_id || bot?.chat_id || (bot?.id === "default" ? state.configPayload?.options?.default_chat_id : "");
+  if (address.mode === "personal") {
+    const users = personalUsers(address), peers = state.configPayload?.bots?.recipients?.[bot?.id] || [];
+    return {id: users[0] || "", label: users.map(id => {const peer=peers.find(p => String(p.id)===String(id));return `${peer?.name || "Користувач"}${peer?.username ? " · @" + peer.username : ""} · ${id}`;}).join("; ") || "Одержувачів не обрано"};
+  }
+  const id = address.telegram_chat_id || bot?.chat_id || (bot?.id === "default" ? state.configPayload?.options?.default_chat_id : "");
   const peer = state.configPayload?.bots?.recipients?.[bot?.id]?.find(p => String(p.id) === String(id));
   return {id, peer, label: id ? `${peer?.name || (address.mode === "personal" ? "Власник" : "Чат")}${peer?.username ? " · @" + peer.username : ""} · ${id}` : "Одержувача не обрано"};
 }
@@ -2358,10 +2369,10 @@ function reviewProfile(address) {
   if (address.mode === "personal" && !account) warnings.push("Обраний рахунок зараз недоступний.");
   if (!bot || !dest.id) warnings.push("Оберіть бота та одержувача на кроці Telegram.");
   if (dest.peer?.available === false || dest.peer?.available === 0) warnings.push("Бот більше не має доступу до обраного чату.");
-  if (bot?.test_mode) warnings.push(address.mode === "personal" && String(bot.test_chat_id) !== String(dest.id) ? "Тестовий чат не збігається з власником. Особисті повідомлення заблоковані." : `Увімкнений тестовий режим: повідомлення → ${bot.test_chat_id}.`);
+  if (bot?.test_mode) warnings.push(address.mode === "personal" && !personalUsers(address).some(id => String(id) === String(bot.test_chat_id)) ? "Тестовий чат не належить жодному дозволеному користувачу. Особисті повідомлення заблоковані." : `Увімкнений тестовий режим: повідомлення → ${bot.test_chat_id}.`);
   if (address.mode === "personal" && getDraftConfig().receive_commands === false) warnings.push("Приймання команд вимкнено. Особисте меню недоступне.");
-  const rows = [["Джерело", source], ["Бот", bot ? `${bot.name}${bot.username ? " · @" + bot.username : ""}` : "не обрано"], ["Одержувач", dest.label], ["Сповіщення", names.join(", ") || "вимкнені"], ["Живлення", power], ["Якість напруги", address.voltage.enabled ? (address.voltage.entities || []).map(e => sensorLabel(e.entity)).join(", ") || "датчик не обрано" : "сповіщення вимкнені"]];
-  if (address.mode === "personal") rows.push(["Передача показів", address.allow_readings ? "Дозволена лише власнику, після окремого підтвердження в Telegram" : "Вимкнена"]);
+  const rows = [["Джерело", source], ["Бот", bot ? `${bot.name}${bot.username ? " · @" + bot.username : ""}` : "не обрано"], [address.mode === "personal" ? "Одержувачі" : "Одержувач", dest.label], ["Сповіщення", names.join(", ") || "вимкнені"], ["Живлення", power], ["Якість напруги", address.voltage.enabled ? (address.voltage.entities || []).map(e => sensorLabel(e.entity)).join(", ") || "датчик не обрано" : "сповіщення вимкнені"]];
+  if (address.mode === "personal") rows.push(["Передача показів", address.allow_readings ? "Дозволена всім указаним користувачам, після окремого підтвердження в Telegram" : "Вимкнена"]);
   return `<h3>Перевірте перед запуском</h3><dl class="profile-review">${rows.map(([k,v])=>`<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>${warnings.map(w=>`<p class="status-warn">${escapeHtml(w)}</p>`).join("")}<p class="helper-copy">«Застосувати» перевірить і збереже всі профілі та перезапустить застосунок. Увімкнені повідомлення надходитимуть указаним одержувачам. Незбережені поля токена потрібно спершу зберегти у формі бота.</p><button type="button" class="primary-button" data-action="wizard-apply">Застосувати</button>`;
 }
 function updateWizard() {
@@ -2396,8 +2407,8 @@ function wizardStep(next, form) {
     if (next > 1 && !destination(address).id) {
       setEditorStatus("Оберіть одержувача у Telegram.", "status-warn"); return;
     }
-    if (next > 1 && address.mode === "personal" && !/^[1-9][0-9]*$/.test(String(address.telegram_user_id || ""))) {
-      setEditorStatus("Оберіть власника особистого кабінету в Telegram.", "status-warn"); return;
+    if (next > 1 && address.mode === "personal" && (!personalUsers(address).length || personalUsers(address).some(id => !Number.isSafeInteger(id) || id <= 0))) {
+      setEditorStatus("Додайте користувачів особистого кабінету з коректними Telegram ID.", "status-warn"); return;
     }
   }
   if (state.editorDirty) persistEditorDraftSnapshot();
@@ -2427,17 +2438,21 @@ function collectEditorConfig() {
   const addressForms = editorContainer.querySelectorAll(".address-editor-card");
   for (const form of addressForms) {
     const personal = form.querySelector(".addr-mode").value === "personal";
+    const userInput = form.querySelector(".addr-user-id"), users = parseUserIds(userInput.value);
+    const identityUser = Number(userInput.dataset.identityUser) || users[0] || 0;
     config.addresses.push({
       profile_id: form.dataset.profileId || "",
       mode: personal ? "personal" : "building",
       account_entity: form.querySelector(".addr-account").value,
-      telegram_user_id: Number(form.querySelector(".addr-user-id").value) || 0,
+      telegram_user_id: users[0] || 0,
+      telegram_route_owner: identityUser,
+      telegram_user_ids: personal ? users : [],
       allow_readings: form.querySelector(".addr-allow-readings").checked,
       reading_reminders: form.querySelector(".addr-reminders").checked,
       document_notifications: form.querySelector(".addr-documents").checked,
       entity_prefix: form.querySelector(".addr-entity-prefix").value.trim(),
       display_name: form.querySelector(".addr-display-name").value.trim(),
-      telegram_chat_id: personal ? String(Number(form.querySelector(".addr-user-id").value) || "") : form.querySelector(".addr-chat-id").value.trim(),
+      telegram_chat_id: personal ? String(users[0] || "") : form.querySelector(".addr-chat-id").value.trim(),
       telegram_bot_id: form.querySelector(".addr-bot-id").value,
       selected_group: personal ? "" : form.querySelector(".addr-selected-group").value.trim(),
       schedule_change: {
@@ -3530,7 +3545,7 @@ document.addEventListener("change", (event) => {
   const root = select.closest(".address-editor-card") || document.getElementById("bot-form");
   const target = root.querySelector(select.dataset.target);
   if (!target) return;
-  target.value = select.value;
+  target.value = target.classList.contains("addr-user-id") ? [...new Set([...target.value.split(/[\s,;]+/).filter(Boolean), select.value])].join(", ") : select.value;
   select.value = "";
   target.dispatchEvent(new Event("input", {bubbles: true}));
   target.dispatchEvent(new Event("change", {bubbles: true}));

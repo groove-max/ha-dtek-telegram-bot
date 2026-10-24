@@ -167,7 +167,7 @@ def validate_destinations(config, store: BotProfileStore) -> None:
             raise ValueError(
                 "Для адреси обрано неналаштованого бота. Додайте або оберіть бота."
             )
-        if address.mode == "personal" and profile.test_mode and profile.test_chat_id != str(address.telegram_user_id):
+        if address.mode == "personal" and profile.test_mode and profile.test_chat_id not in {str(user) for user in address.telegram_user_ids}:
             raise ValueError("Особистий профіль потребує приватного тестового чату авторизованого користувача.")
         if not (
             (profile.test_chat_id if profile.test_mode else "")

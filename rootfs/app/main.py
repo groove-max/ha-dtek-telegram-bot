@@ -27,6 +27,7 @@ from features.power_presence import PowerPresenceFeature
 from features.status_message import StatusMessageFeature
 from ha_client import HAClient
 from personal_source import PersonalSource
+from config import delivery_profiles
 from conversations import Conversations
 from groups import state_groups, select_events, presentation_context
 from messages import DEFAULT_TEMPLATES
@@ -86,8 +87,9 @@ class Orchestrator:
 
     def __init__(self, config: FullConfig) -> None:
         self.config = config
+        self.deliveries = list(delivery_profiles(config))
         self.ha = HAClient(ha_token=config.ha_token)
-        self.personal_sources = {a.key: PersonalSource(self.ha, a) for a in config.addresses if a.mode == "personal"}
+        self.personal_sources = {a.key: PersonalSource(self.ha, a) for a in [*config.addresses, *self.deliveries] if a.mode == "personal"}
         self.bot_profiles = BotProfileStore()
         self.bots = BotRuntime(config, self.bot_profiles)
         self.bots.conversation_factory = lambda profile, client: Conversations(self, profile, client)
@@ -118,7 +120,7 @@ class Orchestrator:
 
     def _init_features(self) -> None:
         """Instantiate enabled features for each address and wire dependencies."""
-        for addr in self.config.addresses:
+        for addr in self.deliveries:
             telegram = self.bots.service(addr)
             if telegram is None or not self.bots.chat(addr):
                 logger.warning("No Telegram destination for %s; address paused", addr.entity_prefix)
@@ -288,7 +290,7 @@ class Orchestrator:
 
     async def _resolve_display_names(self) -> None:
         """Fetch display names from HA device registry for addresses without one."""
-        for addr in self.config.addresses:
+        for addr in [*self.config.addresses, *self.deliveries]:
             if getattr(addr, "mode", "building") == "personal" and not addr.display_name:
                 try:
                     addr.display_name = (await self.personal_sources[addr.key].refresh())["address"]
@@ -424,6 +426,9 @@ class Orchestrator:
 
     async def _build_address_overview(self, addr: AddressConfig) -> dict[str, Any]:
         """Build a summary card for a configured address."""
+        configured = addr
+        if addr.mode == "personal":
+            addr = addr.for_user(addr.telegram_user_ids[0])
         features = self._features_by_address.get(addr.key, [])
         watched_entities = sorted(
             {
@@ -453,8 +458,8 @@ class Orchestrator:
                 live_power = await power_monitor.detect_current_power()
 
         return {
-            "entity_prefix": addr.entity_prefix,
-            "profile_id": addr.key,
+            "entity_prefix": configured.entity_prefix,
+            "profile_id": configured.key,
             "mode": addr.mode,
             "display_name": addr.display_name or addr.entity_prefix,
             "chat_id": self.bots.chat(addr),
@@ -886,7 +891,7 @@ class Orchestrator:
         if not profile.test_chat_id:
             raise ValueError("Вкажіть тестовий чат для обраного бота. Тест у робочий чат не надсилається.")
         chat_id = profile.test_chat_id
-        if address.mode == "personal" and chat_id != str(address.telegram_user_id):
+        if address.mode == "personal" and chat_id not in {str(user) for user in address.telegram_user_ids}:
             raise ValueError("Особистий профіль можна тестувати лише в дозволеному приватному чаті.")
         text = f"🧪 Тест шаблону: {template_name}\n\n{preview['rendered']}"
         service = TelegramService(profile.token, profile.chat_id, test_chat_id=chat_id)

@@ -247,6 +247,8 @@ class AddressConfig(BaseModel):
     mode: Literal["building", "personal"] = "building"
     account_entity: str = ""
     telegram_user_id: int = Field(default=0, ge=0)
+    telegram_user_ids: list[int] = Field(default_factory=list, max_length=50)
+    telegram_route_owner: int = Field(default=0, ge=0)
     allow_readings: bool = False
     reading_reminders: bool = False
     document_notifications: bool = False
@@ -255,17 +257,49 @@ class AddressConfig(BaseModel):
     def key(self) -> str:
         return self.profile_id or self.entity_prefix
 
+    def for_user(self, user_id: int) -> "AddressConfig":
+        """A private delivery route, with stable state for each authorized person.
+
+        Keep the original owner's route for existing status posts. The legacy
+        route owner is an identity anchor, never an additional grant of access.
+        """
+        if self.mode != "personal" or user_id not in self.telegram_user_ids:
+            raise ValueError("Unauthorized personal recipient")
+        key = self.key if user_id == self.telegram_route_owner else "member_" + hashlib.sha256(
+            f"{self.key}:{user_id}".encode()
+        ).hexdigest()[:24]
+        return self.model_copy(deep=True, update={
+            "profile_id": key, "entity_prefix": key,
+            "telegram_user_id": user_id, "telegram_user_ids": [user_id],
+            "telegram_chat_id": str(user_id),
+        })
+
+    @field_validator("telegram_user_ids", mode="before")
+    @classmethod
+    def validate_users(cls, value):
+        if not isinstance(value, list) or any(
+            isinstance(user, bool) or not isinstance(user, int) or user <= 0
+            or user > 2**52 - 1 for user in value
+        ):
+            raise ValueError("Telegram users must be a list of positive integer IDs")
+        return list(dict.fromkeys(value))
+
     @model_validator(mode="after")
     def personal_identity(self):
         if self.profile_id and (len(self.profile_id) > 64 or not all(c.isalnum() or c in "_-" for c in self.profile_id)):
             raise ValueError("Invalid profile ID")
         if self.mode == "personal":
-            if not self.account_entity.startswith("sensor.") or self.telegram_user_id <= 0:
+            if not self.account_entity.startswith("sensor.") or not self.telegram_user_ids:
                 raise ValueError("Personal profiles require an account entity and Telegram user ID")
+            original_user = self.telegram_user_id or self.telegram_user_ids[0]
+            if not self.telegram_route_owner:
+                self.telegram_route_owner = original_user
             if self.selected_group:
                 raise ValueError("Personal groups are supplied by the cabinet")
-            if self.telegram_chat_id and self.telegram_chat_id != str(self.telegram_user_id):
+            if self.telegram_chat_id and self.telegram_chat_id not in (str(original_user), str(self.telegram_user_ids[0])):
                 raise ValueError("Personal account data can only be sent to its authorized private chat")
+            # Legacy readers and previews must never point to a revoked member.
+            self.telegram_user_id = self.telegram_user_ids[0]
             self.telegram_chat_id = str(self.telegram_user_id)
             if not self.profile_id:
                 self.profile_id = "personal_" + hashlib.sha256(f"{self.account_entity}:{self.telegram_bot_id}:{self.telegram_user_id}".encode()).hexdigest()[:20]
@@ -297,6 +331,12 @@ class AddressConfig(BaseModel):
     def coerce_shortcuts(cls, data: Any) -> Any:
         """Support shorthand: `schedule_change: true` -> `{enabled: true}`."""
         if isinstance(data, dict):
+            data = dict(data)
+            if "telegram_user_ids" not in data:
+                user = data.get("telegram_user_id", 0)
+                if isinstance(user, str) and user.isdigit():
+                    user = int(user)
+                data["telegram_user_ids"] = [user] if user else []
             for key in ("schedule_change", "emergency", "group_change"):
                 val = data.get(key)
                 if isinstance(val, bool):
@@ -389,7 +429,26 @@ class FullConfig(BaseModel):
         prefixes = [address.key for address in self.addresses]
         if len(prefixes) != len(set(prefixes)):
             raise ValueError("Each profile ID (or legacy entity_prefix) must appear only once")
+        recipients = [
+            (a.telegram_bot_id, a.account_entity, user)
+            for a in self.addresses if a.mode == "personal"
+            for user in a.telegram_user_ids
+        ]
+        if len(recipients) != len(set(recipients)):
+            raise ValueError("A user can receive an account only once through the same bot")
+        routes = [a.key for a in delivery_profiles(self)]
+        if len(routes) != len(set(routes)):
+            raise ValueError("Delivery profile IDs must be unique")
         return self
+
+
+def delivery_profiles(config):
+    """Expand recipients only at runtime; the editor keeps one apartment profile."""
+    for address in config.addresses:
+        if address.mode == "personal":
+            yield from (address.for_user(user) for user in address.telegram_user_ids)
+        else:
+            yield address
 
 
 def load_options() -> dict[str, Any]:
