@@ -4,6 +4,12 @@
 
 Install the bot through the **Home Assistant app store**; HACS is used for the DTEK Monitor integration. [Latest bot release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest) · [Latest integration release](https://github.com/groove-max/ha-dtek-monitor/releases/latest).
 
+## RC5 update
+
+Install **Monitor 2.0.0-rc5** and **Bot 0.5.0-rc5** for the complete feature set. Schedules start with your groups; all groups remain available. Coloured bands use the published minute boundaries on an hourly scale, including quarter-hours. Older bot/integration combinations retain their available precision. The new compact HA card loads automatically. Reload the HA page after updating.
+
+The bot now allows several family members in one personal profile, with separate private menus and notifications. After Apply, temporary ingress gateway errors during restart keep the progress visible; success still requires confirmation from the restarted app. Recovery notifications from periodic sensors need a new report after the configured delay; see the [bot power guide](https://github.com/groove-max/ha-dtek-telegram-bot/blob/main/docs/POWER.md).
+
 ## First installation
 
 Use **Home Assistant OS**, HA **2026.3.0+** and `amd64` or `aarch64`. [Add the app repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot), install DTEK Telegram Bot, enter your BotFather token and open its web UI. The [step-by-step installation](../README.md#installation) covers creating the bot and discovering your chat.
@@ -12,14 +18,15 @@ Choose [building mode](BUILDING.md) for address alerts or [personal mode](PERSON
 
 ## Choose the matching versions
 
-The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC4 releases are available in the regular release channel.
+The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC5 releases are available in the regular release channel.
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
-| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc4 |
-| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc4** |
-| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc4** |
-| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc4** |
+| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc5 |
+| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc5** |
+| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc5** |
+| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc5** |
+| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc5** |
 
 Public schedules and personal household cabinets cover the four operators listed in Monitor 2.0.0-rc2. **Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental** and await real-account validation. Odesa and Kyiv city cabinet reads have been checked live; actual Day/Night submission has automated tests only.
 
@@ -39,7 +46,7 @@ Public schedules and personal household cabinets cover the four operators listed
 5. Check **Current status**: HA connected, the correct recipient, fresh sensors
    where configured, and the existing status message updating in its chat.
 6. For personal mode, add an **Особистий кабінет** profile and assign its private
-   owner. Submission and reminders are separate, initially disabled switches.
+   recipients. Submission and reminders are separate, initially disabled switches.
    Apply, then send `/start` for fresh menu buttons.
 
 No personal profile is created automatically. New welcome replies are enabled by
@@ -63,9 +70,13 @@ them off in the editor. No new automatic reading submission is introduced.
 Use the [personal guide](PERSONAL.md) and [power sensor guide](POWER.md) for new
 features. An optional template test sends a real Telegram message: choose a test
 destination first. A personal profile may only send private data to its assigned
-user, including in test mode.
+users, including in test mode.
 
 ## Return to your previous setup
+
+RC4 and older versions do not support several recipients in one personal profile. To roll back, restore the matching configuration backup too; do not expect an older app to keep the additional recipients.
+
+
 
 Stop the updated app and restore the pre-upgrade app **and configuration** backup,
 including the earlier app version. Check the restored version before starting it.

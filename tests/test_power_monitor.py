@@ -180,7 +180,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await monitor.detect_current_power(), "unknown")
 
-    async def test_loss_plus_voltage_partial_even_if_loss_entity_triggered(self) -> None:
+    async def test_loss_plus_voltage_partial_conflicts_with_whole_line_loss(self) -> None:
         monitor = PowerMonitor(
             config=self._build_config(
                 mode="loss_plus_voltage",
@@ -200,7 +200,7 @@ class PowerMonitorTest(unittest.IsolatedAsyncioTestCase):
         detected = await monitor.detect_current_power()
         snapshot = await monitor.get_voltage_snapshot()
 
-        self.assertEqual(detected, "partial")
+        self.assertEqual(detected, "unknown")
         self.assertEqual(snapshot["missing_phases"], ["L1"])
 
     async def test_loss_plus_voltage_ignores_unavailable_without_loss_confirmation(self) -> None:

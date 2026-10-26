@@ -11,6 +11,8 @@ Open a profile → **Визначення живлення** → **Датчик�
 
 The two presence sources describe one line. They never create a “partial power” state. For different phases, keep the compatible `voltage_only` or `loss_plus_voltage` scheme with voltage entities labeled L1/L2/L3.
 
+**Both sources must observe the same power supply.** For example, a meter before a protective relay can still measure voltage while an inverter after that relay has no grid input. Those readings are compatible electrically, but cannot confirm one shared power state. Choose observations on the same phase and the same side of local protection. One reliable source is enough; for more complex logic, select a ready-made HA binary status. No brand-specific relay configuration is required in the bot. A sensor in one apartment does not establish the state of every phase in the building.
+
 ## A ready-made binary status
 
 Select whether `on` or `off` means grid present. Only those two HA states count; `unknown`, `unavailable`, a missing entity or a restored placeholder means unknown power.
@@ -74,21 +76,25 @@ Add the meter to `voltage.entities` separately if you also want to display its v
 
 | Observation | Result |
 | --- | --- |
-| All configured sources report present | Presence candidate; apply recovery delay. |
+| All configured sources report present | Presence candidate; apply recovery delay. After a confirmed outage, periodic sources must report presence again at or after the end of that delay. |
 | All configured sources explicitly report absent | Loss candidate; apply loss delay. |
 | Fresh sources disagree | Unknown; cancel the pending physical transition. |
 | Primary unavailable or stale | Unknown, even if the secondary disappears. |
 | Secondary disappears while primary reports present | Unknown; no outage announcement. |
-| Primary explicitly reports absent; previously observed mains-powered secondary stops reporting at that loss | After `confirm_timeout`, its silence can corroborate absence; then apply `loss_delay`. |
+| Primary explicitly reports absent; previously observed mains-powered secondary stops reporting at that loss | Require explicit unavailability or an expired secondary report, plus `confirm_timeout`; then apply `loss_delay`. A still-fresh positive reading cannot confirm loss. |
 | Secondary disappeared before the primary loss or was never observed present | Insufficient corroboration; unknown. |
 | Secondary reports fresh presence after primary loss | Conflict; its later aging does not turn that contradiction into absence. |
 | Primary recovers but secondary is still missing | Wait for agreement and `restore_delay` before announcing recovery. |
 
 Repeated identical reports do not restart delays. Unknown evidence interrupts a pending transition; it does not invent an outage/recovery pair. Grace windows are not restored after an app restart or HA reconnect. Telemetry-loss/recovery posts are off by default; the status still shows unknown data.
 
-With a 15-second grace and 10-second loss delay, an inferred loss needs about 25 seconds **after the primary signal is received**, plus processing/polling time. Device reporting latency adds to this. A freshness limit is not a mandatory wait before every outage.
+With a 15-second grace and 10-second loss delay, explicit secondary unavailability can confirm loss in about 25 seconds **after the primary signal is received**, plus processing/polling time. If it keeps an old positive value, the bot also waits for that report to expire. Two explicit absence readings need only `loss_delay`.
 
-Choose `confirm_timeout` longer than the secondary sensor’s normal reporting interval when using silence as confirmation. A meter that normally reports once a minute cannot reliably corroborate loss by silence after only 15 seconds. If fast trustworthy confirmation is unavailable, use an authoritative backed-up source alone or require two explicit readings.
+Set `max_age_seconds` longer than the sensor’s normal reporting interval. A meter that normally reports once a minute has not disappeared after 15 seconds. For quick confirmation, use explicit absence/unavailability reports or one authoritative backed-up source; increasing confidence from silence necessarily takes longer.
+
+After a confirmed outage, a single positive measurement is not enough to announce recovery. In `sources`, `voltage_only` and `loss_plus_voltage` modes, every periodic source used to confirm recovery must report presence at or after the recovery delay. Normal reporting intervals therefore add to the notification time. For example, with a 30-second delay and minute-based reports, recovery may take roughly a minute or more to confirm. An event-driven binary source does not need to repeat its unchanged state. Conflicting or missing independent readings leave power unknown instead of announcing recovery from voltage alone.
+
+The bot checks current evidence again immediately before sending a power notification, including a retry after a definite Telegram rejection. If the state changed while the notification was being prepared, the old notification is cancelled and the new state goes through its normal confirmation delay. Brief dips that end before confirmation do not produce an outage/recovery pair. This only uses data already received by HA: a bot cannot detect recovery that the sensor has not reported yet, or make a once-a-minute sensor report faster.
 
 For MQTT sources, the optional per-source `mqtt_topic` must be an exact topic carrying the same raw value as the HA entity. The existing HA MQTT observer ignores retained/replayed messages. A matching live report must also be within `max_age_seconds`, including for a binary source. JSON payloads require an HA sensor/topic that exposes the corresponding value; the bot does not apply arbitrary MQTT templates.
 

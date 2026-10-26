@@ -4,10 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0-rc5] - 2026-10-26
+
+**Regular GitHub release**, without the Pre-release flag. Requires Home Assistant 2026.3.0+.
+
+- Keep the confirmed Apply progress visible while HA ingress temporarily returns gateway errors during the app restart. Preserve newer drafts, reject stale poll errors and confirm success only after the new process loads matching settings; do not retry saves automatically or hide failed activation.
+
+- Render exact minute boundaries on an hourly scale in paginated schedules and the full PNG. Consume the integration’s precise timeline segments, preserve DST and unknown coverage, and retain compatibility with older half-hour grids.
+
+- Revalidate power evidence immediately before Telegram delivery so a notification cannot use an observation superseded while saving state. Apply new-report recovery confirmation to single voltage sensors as well as paired sources. Explain same-supply sensor selection in the editor and English/Ukrainian guides, without adding configuration fields.
+- Prevent false power recovery from a single positive polling cycle or a voltage reading that conflicts with the independent grid sensor. Require new periodic reports after the recovery delay. Do not treat a normal reporting pause as sensor disappearance or age a fresh contradiction into an outage. Preserve rapid confirmation from explicit loss/unavailability; calculate measurement freshness across clock changes in UTC.
 - Support several authorized Telegram users in one personal account profile. Keep independent delivery state, pinned statuses, menus, reminders, document delivery and reading confirmations. Preserve existing single-user routes; recipient discovery appends users without replacing editor drafts.
 - Open schedules with personal/building groups; browse all groups in readable 12-row pages with morning/afternoon scales, explicit unknown assignments and a separate full PNG download. Navigation replaces the previous menu screen and never changes a dated request into another day silently.
 
 - Display Kyiv source group IDs (for example, `GPV29.1`) instead of local variant numbers in statuses, schedule alerts, previews and old/new group changes. Keep notification identities, selected groups and private cabinet verification unchanged. Saved templates retain group headings through the compatibility context; website label visibility remains available separately.
+
+**Upgrade:** update Monitor to **2.0.0-rc5** first for exact-minute grids, restart HA, then install **Bot 0.5.0-rc5** and reload its editor. Existing single-user profiles, sensor bindings, templates and pinned messages are retained. Add family members in the profile’s **Telegram** step and apply the settings; discovery alone never grants access. Each new recipient must first send `/start`. No readings are submitted automatically.
+
+**Power timing:** after a confirmed outage, periodic sensors must report presence again at or after the restore delay. This can add a normal reporting interval to recovery notifications. Event-driven binary sensors do not need repeated reports. See the [power guide](docs/POWER.md) / [налаштування датчиків](docs/POWER.uk.md).
+
+[Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md) · [Family access and schedules](docs/PERSONAL.md) · [Особистий режим](docs/PERSONAL.uk.md)
 
 ## [0.5.0-rc4] - 2026-10-23
 

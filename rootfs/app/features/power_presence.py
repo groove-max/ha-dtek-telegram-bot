@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
@@ -36,6 +36,7 @@ class PowerPresenceFeature(Feature):
         self._timer: asyncio.Task | None = None
         self._candidate: str | None = None
         self._candidate_since = 0.0
+        self._candidate_at: datetime | None = None
         self._phase_candidates: dict[str, tuple[bool, float]] = {}
         self._confirm_started_at: datetime | None = None
         self._confirm_since = 0.0
@@ -155,8 +156,8 @@ class PowerPresenceFeature(Feature):
         snapshot = await pm.get_voltage_snapshot()
         deadlines: list[float] = []
         if self.config.power.mode == "loss_plus_voltage":
-            if self._loss_rejected and not any(
-                p["available"] is True for p in snapshot["phases"]
+            if self._loss_rejected and any(
+                p["available"] is False for p in snapshot["phases"]
             ):
                 self._loss_rejected = False
                 self._confirm_started_at = None
@@ -197,6 +198,7 @@ class PowerPresenceFeature(Feature):
         current = self.state_get("power_state", "unknown")
         if actual != self._candidate:
             self._candidate, self._candidate_since = actual, clock
+            self._candidate_at = now_kyiv().astimezone(timezone.utc)
             self._pending_house = None
         house_transition = False
         if actual == "unknown":
@@ -225,7 +227,10 @@ class PowerPresenceFeature(Feature):
                 else self.config.power.restore_delay
             )
             if clock - self._candidate_since >= delay:
-                house_transition = await self._commit(actual, snapshot)
+                if await self._recovery_is_confirmed(actual):
+                    house_transition = await self._commit(actual, snapshot)
+                    if self._candidate is None:
+                        return  # Send-time evidence invalidated this snapshot.
             else:
                 deadlines.append(self._candidate_since + delay)
         if self.config.power.mode != "sources":
@@ -298,14 +303,45 @@ class PowerPresenceFeature(Feature):
         await self._status_update()
         return template in ("power_lost", "power_restored")
 
+    async def _recovery_is_confirmed(self, target: str) -> bool:
+        if target not in ("on", "partial") or self.state_get("power_last_confirmed_state") != "off":
+            return True
+        assert self._power_monitor is not None and self._candidate_at is not None
+        return await self._power_monitor.restoration_confirmed_since(
+            self._candidate_at + timedelta(seconds=self.config.power.restore_delay)
+        )
+
+    async def _notification_is_current(self, target: str) -> bool:
+        assert self._power_monitor is not None
+        if self._stopped:
+            return False
+        if (
+            await self._power_monitor.detect_current_power() == target
+            and await self._recovery_is_confirmed(target)
+        ):
+            return not self._stopped
+        # The event ended or became uncertain while preparing the send. Keep
+        # confirmed history, but debounce any new candidate from scratch.
+        self._pending_house = None
+        self._candidate = None
+        self.state_set("power_state", "unknown")
+        self.state_set("power_observation_gap", True)
+        await self._status_update()
+        return False
+
     async def _send_house(self, template: str, **context: Any) -> int | None:
         # Freeze text and identity across retries, including an ambiguous timeout.
         if self._pending_house is None or self._pending_house[0] != template:
             text = self.render(template, **context)
             self._pending_house = (template, text, getattr(self, "_delivery_key", None))
         _, text, key = self._pending_house
+
+        async def still_current() -> bool:
+            return await self._notification_is_current(context["house_state"])
+
         return await self.send_message(
-            text, delivery_key=key, disable_notification=self.config.power.silent
+            text, delivery_key=key, disable_notification=self.config.power.silent,
+            before_send=still_current if template in ("power_lost", "power_restored") else None,
         )
 
     async def _phases(

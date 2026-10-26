@@ -6,7 +6,7 @@ from math import ceil
 
 from PIL import Image, ImageDraw
 
-from schedule_image import COLORS, LABELS, font, stamp
+from schedule_image import COLORS, LABELS, font, stamp, timeline_segments, paint_timeline
 
 PAGE_SIZE = 12
 SCOPES = {"mine": "Моя група", "home": "Мій будинок", "all": "Усі групи"}
@@ -39,6 +39,8 @@ def select_page(data, offset=0, personal=False, scope="auto", page=0):
         or any(cell not in COLORS for cell in row["cells"]) for row in rows
     ):
         raise ValueError("Invalid grid")
+    for row in rows:
+        timeline_segments(day, row)
     selected, home = any(r.get("selected") for r in rows), any(r.get("home") for r in rows)
     unassigned = not (selected if personal else home)
     if scope == "auto":
@@ -50,7 +52,7 @@ def select_page(data, offset=0, personal=False, scope="auto", page=0):
 
 
 def render_page(view):
-    """Two half-day panels keep labels readable; preserve half-hours and DST."""
+    """Two half-day panels with exact bands, hourly marks and DST-aware slots."""
     if not view.rows:
         raise ValueError("No groups confirmed for this view")
     slots = view.day["slots"]
@@ -64,7 +66,7 @@ def render_page(view):
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
     draw.text((20, 16), f"ДТЕК · {view.day['date']} · {SCOPES[view.scope]}", font=font(26, True), fill="#243442")
-    draw.text((20, 53), f"Сторінка {view.page + 1} із {view.pages} · Europe/Kyiv · крок 30 хв", font=font(20), fill="#334155")
+    draw.text((20, 53), f"Сторінка {view.page + 1} із {view.pages} · Europe/Kyiv · годинна шкала", font=font(20), fill="#334155")
     draw.text((20, 83), f"Перевірено: {stamp(view.data.get('verified_at'))}", font=font(19), fill="#334155")
     highlighted = any(row.get("selected") if view.personal else row.get("home") for row in view.rows)
     note = (
@@ -94,12 +96,8 @@ def render_page(view):
             while size > 12 and draw.textlength(label, font=font(size, highlight)) > left - 34:
                 size -= 1
             draw.text((26, y + 6), label, font=font(size, highlight), fill="#006b8d" if highlight else "#243442")
-            for c, index in enumerate(indices):
-                x, kind = left + c * cell, row["cells"][index]
-                draw.rectangle((x, y, x + cell, y + rh), fill=COLORS[kind], outline="#adbcc3")
-                if kind not in ("outage", "clear"):
-                    for shift in range(8, rh, 8):
-                        draw.line((x + 1, y + shift, x + cell - 1, y + max(1, shift - 10)), fill="#8f9aa8")
+            paint_timeline(draw, view.day, row, left, y, width-left-right, rh,
+                           start=indices[0]*30, end=(indices[-1]+1)*30)
             if highlight:
                 draw.rectangle((20, y, width - right, y + rh), outline="#008fb3", width=3)
     y = top + len(panels) * panel_height

@@ -2,9 +2,7 @@
 
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
-> Use **bot 0.5.0-rc4 or newer** and **DTEK Monitor 2.0.0-rc4 or newer** for the existing cabinet, photo and document features. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
-
-> Multiple people in one profile and paged schedules are **Unreleased** features, not yet included in 0.5.0-rc4.
+> Recommended release pair: **bot 0.5.0-rc5** and **DTEK Monitor 2.0.0-rc5**. See [minimum versions by feature](UPGRADING.md#choose-the-matching-versions) for older installations. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
 Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipients; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
 
@@ -42,7 +40,7 @@ Only the HA administrator can assign an account to a Telegram user. DTEK login c
 The reading-entry and history buttons appear when **Allow reading submission** is enabled for this profile. That switch authorizes access to the reading workflow; it never sends values without your final confirmation. Leave it off for notifications and schedules only.
 
 - **Pinned status**: one automatically updated message with your address, cabinet group, power state, fresh voltage, next verified outage and update time. It uses the same templates and custom overrides as building profiles. Enable the status message, editing mode and pinning in the profile. The **⚡️ Стан (Status)** button is hidden only when the profile has an enabled, pinned message that is edited in place and refreshed periodically (interval greater than zero). The button is available if you disable status messages or pinning, choose a new message for each update, or set the refresh interval to `0`. It requests the current status using the same templates, even when automatic status messages are disabled. This choice is independent for each profile. After applying settings, open **🏠 Меню** or `/start` to see the updated buttons. Unknown power and unavailable schedules remain clearly labeled.
-- **📅 Графік на сьогодні / 🗓 Графік на завтра (Today / tomorrow)**: opens your confirmed personal group or building groups. **My group / My building / All groups** change the scope. Large grids have 12 groups per page; arrow buttons replace the previous screen. Each page includes its date, morning/afternoon time scales, legend and verification time. **📎 Повна таблиця PNG (Full PNG)** sends all groups as one file. Unknown assignments and missing data remain explicit. Refresh uses the integration’s shared cooldown.
+- **📅 Графік на сьогодні / 🗓 Графік на завтра (Today / tomorrow)**: opens your confirmed personal group or building groups. **My group / My building / All groups** change the scope. Large grids have 12 groups per page; arrow buttons replace the previous screen. Each page includes its date, morning/afternoon time scales, legend and verification time. Hour marks are only the scale: coloured bands follow the exact minute boundaries supplied by the integration, including `:15`, `:45` and other minutes. The full PNG uses the same boundaries. With an older integration, the bot retains the available half-hour precision; update both projects for exact intervals. **📎 Повна таблиця PNG (Full PNG)** sends all groups as one file. Unknown assignments and missing data remain explicit. Refresh uses the integration’s shared cooldown.
 - **Submit readings**: enter cumulative whole kWh for each supported tariff zone, or use an available calculation from the energy sensor configured in My DTEK. The bot shows previous/new readings and their difference. This difference is **not necessarily a calendar month's consumption**. Nothing is sent until you press **Confirm and submit to DTEK**.
 - **📋 Покази в ДТЕК (Readings in DTEK)**: see the latest published cumulative readings and their dates, even if you submitted them outside HA. The bot checks the current year, then the previous year if it finds no active-energy records. Repeated requests share a cache of at most one minute; the screen shows when DTEK was checked. Inactive records are hidden by default; blocked and unknown statuses remain visible as warnings. Use **🗂 Показати всі записи ДТЕК (Show all DTEK records)** to include inactive records for the displayed year, and the newer/older buttons to browse six records per page. Refresh preserves this choice. Identical values on different dates or tariff zones remain separate. The filter does not change DTEK data or submission verification. A failed request is shown as unavailable, not as empty history. If this HA has a submission record, its result is shown separately and **Check last submission** compares it against DTEK history. Matching values do not prove a final monthly settlement.
 
@@ -113,14 +111,13 @@ addresses:
 
 Select the actual account entity from discovery instead of guessing its ID. Leave `selected_group` empty. `profile_id` is a stable identity for state and delivery history; the editor/backend creates one when needed. Clone a building profile to send the same building to another destination with independent history; keep the clone's distinct ID. Existing profiles without IDs keep their previous state.
 
-
 ## One token on several HA servers
 
 Both servers can send through the same bot. Keep `receive_commands: true` on the server with the personal cabinet. Set `receive_commands: false` on the others and restart the add-on. This disables incoming commands, introductions, personal reading reminders and feedback collection there; ordinary notifications continue. The switch is available in the editor. Never run two incoming collectors for the same token.
 
 ## If DTEK data is unavailable
 
-Install **Monitor 2.0.0-rc4 or newer** and **Bot 0.5.0-rc4 or newer** for recovery from known meter-service authorization changes and clearer error messages. The integration checks supported formats automatically on reads; it never retries a meter submission automatically.
+Install **Monitor 2.0.0-rc5 or newer** and **Bot 0.5.0-rc5 or newer** for recovery from known meter-service authorization changes and clearer error messages. The integration checks supported formats automatically on reads; it never retries a meter submission automatically.
 
 If a service is incompatible, the bot links to the latest integration release and the issue tracker. Open **Settings → System → Repairs** in HA for details. Update the integration first; if it is already current, report the problem without passwords, tokens or full account details. Sign in again only if HA specifically asks for authentication.
 
@@ -128,7 +125,7 @@ A failure of monthly consumption does not erase available reading history. Other
 
 ## Meter photos and DTEK documents
 
-Available with **DTEK Monitor 2.0.0-rc4** and **Telegram Bot 0.5.0-rc4** or newer. Update the integration first. Document retrieval remains experimental; the availability of a controller’s act through the cabinet is not yet verified.
+Available since **DTEK Monitor 2.0.0-rc4** and **Telegram Bot 0.5.0-rc4**; the current recommended pair is RC5. Update the integration first. Document retrieval remains experimental; the availability of a controller’s act through the cabinet is not yet verified.
 
 After entering readings (or choosing a sensor estimate), press **📷 Додати фото** on the review screen. Select a tariff, then send one photo or a JPEG, PNG or WebP file. Check the preview and repeat for the second tariff if applicable. Albums are not accepted. If you use photos, every tariff needs its own photo; otherwise remove all photos to submit numerical readings only. The numbers must match the official meter in the photos, even when a sensor provided the estimate.
 

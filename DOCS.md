@@ -7,13 +7,13 @@
 <a id="dtek-monitor"></a>
 ## Connect DTEK Monitor
 
-Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 2.0.0-rc4. HA 2026.3.0+ is required. Address support covers Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
+Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 2.0.0-rc5. HA 2026.3.0+ is required. Address support covers Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
 
 | What you need | Configuration |
 | --- | --- |
 | Building channel/group or private address alerts | Building mode; select an address from discovery. |
 | Building linked to an account in My DTEK | Check the building link in cabinet settings, then select that building in the bot. |
-| Personal cabinet groups, readings and reminders | Personal profile; requires bot 0.5.0-rc4 and Monitor 2.0.0-rc4. [Complete setup guide](docs/PERSONAL.md). |
+| Personal cabinet groups, readings and reminders | Personal profile; recommended pair: bot 0.5.0-rc5 and Monitor 2.0.0-rc5. [Complete setup guide](docs/PERSONAL.md). |
 
 For a shared chat, leave `selected_group` empty: building mode keeps all address groups. You may manually choose a confirmed group in this mode; a selection in My DTEK does not change it. Personal mode instead uses only the cabinet API groups, without manual substitution or fallback to building groups.
 
@@ -25,7 +25,7 @@ Building discovery uses the common entity ID prefix. Renaming individual IDs may
 Use the [latest compatible release](https://github.com/groove-max/ha-dtek-monitor/releases/latest) through the normal HACS release channel. Working 1.7.0 installations can continue using the bot. However, 1.7.0 has a [known first-setup issue](https://github.com/groove-max/ha-dtek-monitor/issues/5): when no schedule is published, setup can retry indefinitely without creating the address entities. **2.0.0b1 fixes this case** and loads the address independently of schedule availability.
 
 1. Create a full HA backup that includes integration files, `.storage`, app data, `dtek_telegram_bot.yaml` and template overrides.
-2. In HACS, select the current DTEK Monitor release (**2.0.0-rc4 or newer**) and restart HA. No prerelease switch is needed; see the [installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md).
+2. In HACS, select the current DTEK Monitor release (**2.0.0-rc5 or newer**) and restart HA. No prerelease switch is needed; see the [installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md).
 3. Keep the existing integration entry and bot addresses. Existing entity IDs, destinations, sensor bindings and group selections should remain unchanged.
 4. Check that the integration entry is loaded, the bot reconnects to HA, and local sensors report fresh values. A missing published schedule alone is not an upgrade failure.
 5. If you change bot settings, use **Apply (Застосувати)**. For an optional delivery test, first choose a [test destination](#testing).
@@ -73,7 +73,7 @@ Configure your address in HA and enable the notifications you want. `feedback_en
 
 If you do not need pinning, turn off `status_message.pin` or the entire `status_message.enabled` feature. `delivery_mode: pinned_edit` with `pin: false` still updates one ordinary message. In a group, this also avoids needing pin permission. [Telegram pinning permissions](https://core.telegram.org/bots/api#pinchatmessage).
 
-Each address has one destination; automatic subscriptions for arbitrary users and selecting individual forum topics are not currently implemented. If a group upgrades to a supergroup and its ID changes, update the configured ID and restart the app.
+Each building profile has one destination; a personal profile can have several authorized private recipients. Automatic subscriptions for arbitrary users and selecting individual forum topics are not currently implemented. If a group upgrades to a supergroup and its ID changes, update the configured ID and restart the app.
 
 <a id="destinations"></a>
 ### Multiple addresses, chats and bots
@@ -107,7 +107,7 @@ The runtime YAML stores only `telegram_bot_id` (`default` or the ID shown in the
 
 Clients, delivery journals and incoming-update collectors are separate for each bot. A Telegram error or rate limit for one bot does not stop the other bot workers. Status message IDs and notification acknowledgements are scoped to bot, chat, test/production mode and address. Switching bot or chat creates a new status; the old message stays in the old chat and can be removed manually. Rotating a token for the same bot preserves its status. The first upgrade imports the existing default bot’s state and journal automatically; keep a private backup before updating.
 
-**One destination per profile.** To send the same building to another chat, use **Clone** in the editor: the copy gets its own stable profile ID, notification settings and delivery history. Two profiles may use the same building prefix; their profile IDs must differ. User-managed subscriptions and forum topics are not supported. Use one add-on installation for several profiles.
+**One chat per building profile; several people per personal profile.** To send the same building to another chat, use **Clone** in the editor: the copy gets its own stable profile ID, notification settings and delivery history. Two profiles may use the same building prefix; their profile IDs must differ. User-managed subscriptions and forum topics are not supported. Use one add-on installation for several profiles.
 
 ### Find the chat ID
 
@@ -149,7 +149,7 @@ if not seen:
 
 An existing webhook conflicts with `getUpdates`; do not remove another service's webhook just to test this app. Use a dedicated bot. Telegram's [update API](https://core.telegram.org/bots/api#getupdates) and [bot privacy rules](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get) explain which new messages the bot receives. A bot is not a general chat-history reader.
 
-A **profile** combines one building/account, one recipient and its notification settings. A **Telegram bot** is the BotFather token used to deliver those messages; several profiles can share it. A **power sensor** reports volts, hertz or presence. An **energy sensor** reports cumulative kWh and is configured in DTEK Monitor for reading suggestions.
+A **profile** combines one building/account, its recipients and notification settings (one chat in building mode; authorized private users in personal mode). A **Telegram bot** is the BotFather token used to deliver those messages; several profiles can share it. A **power sensor** reports volts, hertz or presence. An **energy sensor** reports cumulative kWh and is configured in DTEK Monitor for reading suggestions.
 
 <a id="configuration"></a>
 ## Where settings live
@@ -273,7 +273,7 @@ voltage:
 | ATORCH unavailable, inverter still reports grid present | Unknown local power; no false outage. |
 | Both sources stale/unavailable | Unknown, not confirmed loss. |
 | Inverter returns, ATORCH remains unavailable | Wait for fresh voltage before announcing restoration. |
-| Fresh voltage returns and remains valid through the restore delay | Announce restoration if there was a previously confirmed outage. |
+| Voltage and independent source report presence again after the restore delay | Announce restoration after a confirmed outage. Event-driven binary sources need no repeated report. |
 
 Repeated unavailable reports do not restart the timers or turn a confirmed outage into a temporary data warning while the independent loss evidence remains fresh.
 
@@ -284,7 +284,7 @@ Values in the examples are starting points for a source reporting roughly once a
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `power.loss_delay` | 30 s | Stable absence required before a power-loss message. |
-| `power.confirm_timeout` | 15 s | Two-signal confirmation window before disregarding older voltage. |
+| `power.confirm_timeout` | 15 s | Confirmation grace for an unavailable or expired voltage report; fresh conflicting readings remain unknown. |
 | `power.restore_delay` | 10 s | Stable valid presence before recovery. |
 | `voltage.max_age_seconds` | 600 s | Maximum usable sample age; tune to measured reporting cadence. |
 | `voltage.present_above` | 50 V | Voltage at/above this software threshold counts as present. |
@@ -293,7 +293,7 @@ Values in the examples are starting points for a source reporting roughly once a
 
 Fresh low/zero voltage can establish absence on its own in `voltage_only`. In `loss_plus_voltage`, whole-house loss also requires a fresh independent grid-loss signal; the loss delay starts only once both sources agree. Missing, malformed, negative, non-finite, restored or stale readings cannot establish absence on their own. A 5-second watchdog checks silent expiry. Unchanged but newly reported values remain usable; repeated samples do not restart debounce. Unknown or contradictory evidence interrupts a pending transition.
 
-With the two-signal example, allow about 15 + 10 seconds after receiving the independent loss signal, plus processing/watchdog time. Add the device's reporting interval to estimate latency from a physical outage. Do not confuse the freshness limit with the outage-confirmation delay.
+With the two-signal example, explicit secondary unavailability can confirm loss in about 15 + 10 seconds after receiving the independent loss signal, plus processing/watchdog time. If the meter keeps a positive value, the bot must also wait for that report to expire; a normal reporting pause is not disappearance. After a confirmed outage, periodic sources must report presence again at or after the restore delay. See [power detection and timing](docs/POWER.md) for the complete rules.
 
 HA's `last_reported` (or `last_updated` fallback) records HA reporting, not a guaranteed new measurement at the device. A cloud integration repeatedly republishing cached values can still be misleading. The old `unavailable_as_missing` flag is accepted for compatibility but no longer turns missing data into an outage.
 
@@ -373,7 +373,7 @@ Overrides are stored in `/data/templates/*.j2` and survive updates. Consequently
 <a id="testing"></a>
 ## Test without posting to the main chat
 
-Personal profiles and their template tests can send only to the authorized private chat; a shared test group is rejected. [Personal mode](docs/PERSONAL.md).
+Personal profiles and their template tests can send only to an authorized recipient’s private chat; a shared test group is rejected. [Personal mode](docs/PERSONAL.md).
 
 1. Choose a test destination: press **Start** in a private conversation, or add the bot to a test group/channel with the required permissions.
 2. For the **Default bot**, set the Supervisor option `test_chat_id` and restart. This redirects all of that bot’s notifications to the test chat, preserving the existing behavior.

@@ -62,6 +62,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.started = {}
         self.failures = {}
         self.malformed = {}
+        self.disconnected = set()
         self.ticks = 0
         self.candidates = []
         self.accounts = []
@@ -130,9 +131,12 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.started.setdefault(endpoint, asyncio.Event()).set()
         if endpoint in self.gates:
             await self.gates[endpoint].wait()
+        if endpoint in self.disconnected:
+            await route.abort("connectionrefused")
+            return
         if endpoint in self.malformed:
             await route.fulfill(
-                status=200,
+                status=self.failures.get(endpoint, 200),
                 body=self.malformed[endpoint],
                 content_type="application/json",
             )
@@ -1121,3 +1125,88 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.refresh()
         await expect(self.page.locator('#editor-status')).to_contain_text('Налаштування застосовано')
         self.assertEqual(sum(e == 'config/save' for e,_ in self.calls), 1)
+
+    async def test_apply_ingress_outage_preserves_wait_and_new_draft_until_verified(self):
+        field = self.page.locator('.addr-display-name').first
+        await field.fill('Збережена версія')
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        await field.fill('Нова чернетка після збереження')
+        template_status = await self.page.locator('#template-status').text_content()
+        for status in (502, 503, 504):
+            self.failures['config'] = status
+            self.malformed['config'] = '<html>Ingress unavailable</html>'
+            await self.refresh()
+            await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+            await expect(self.page.locator('#save-restart-button')).to_be_disabled()
+            await expect(self.page.locator('#template-status')).to_have_text(template_status)
+            await expect(field).to_have_value('Нова чернетка після збереження')
+        # Waiting and the draft survive a page reload while ingress is offline.
+        await self.page.reload()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        self.failures.clear(); self.malformed.clear()
+        self.process_id = 'new-process'; self.restart_required = False
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Налаштування застосовано')
+        await expect(self.page.locator('#editor-status')).to_contain_text('чернетці ще не застосовано')
+        await expect(field).to_have_value('Нова чернетка після збереження')
+        self.assertEqual(self.config['addresses'][0]['display_name'], 'Збережена версія')
+        self.assertEqual(sum(e == 'config/save' for e,_ in self.calls), 1)
+
+    async def test_apply_connection_loss_is_bounded_and_never_retries_save(self):
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        self.disconnected.add('config')
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        await self.page.clock.run_for(181000)
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('застосування не підтверджено')
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('застосування не підтверджено')
+        await expect(self.page.locator('#save-restart-button')).to_be_enabled()
+        self.assertEqual(sum(e == 'config/save' for e,_ in self.calls), 1)
+
+    async def test_apply_poll_timeout_keeps_wait_and_access_denial_stays_visible(self):
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        gate = self.delay('config')
+        await self.page.locator('#refresh-button').click()
+        await self.wait_started('config')
+        await self.page.clock.run_for(30001)
+        await expect(self.page.locator('#refresh-button')).to_be_enabled()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        gate.set(); del self.gates['config']
+        self.failures['config'] = 401
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_have_class('status-message status-bad')
+        self.assertEqual(sum(e == 'config/save' for e,_ in self.calls), 1)
+
+    async def test_gateway_error_without_acknowledged_apply_is_not_hidden(self):
+        self.failures['config'] = 502
+        self.malformed['config'] = '<html>Ingress unavailable</html>'
+        await self.refresh()
+        await expect(self.page.locator('#editor-status')).to_contain_text('неочікувану відповідь')
+        await expect(self.page.locator('#editor-status')).to_have_class('status-message status-bad')
+        self.failures.clear(); self.malformed.clear()
+        await self.refresh()
+        # An ambiguous save must keep the draft and must not enter a success wait.
+        await self.page.locator('.addr-display-name').first.fill('Не втратити')
+        self.failures['config/save'] = 502
+        self.malformed['config/save'] = '<html>Ingress unavailable</html>'
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_have_class('status-message status-bad')
+        await expect(self.page.locator('#save-restart-button')).to_be_enabled()
+        await expect(self.page.locator('.addr-display-name').first).to_have_value('Не втратити')
+
+    async def test_late_poll_error_cannot_overwrite_newer_save_confirmation(self):
+        gate = self.delay('config')
+        await self.page.locator('#refresh-button').click()
+        await self.wait_started('config')
+        await self.page.locator('#save-restart-button').click()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')
+        # Even a genuine response error belongs to the old request epoch.
+        self.failures['config'] = 401
+        gate.set()
+        await expect(self.page.locator('#refresh-button')).to_be_enabled()
+        await expect(self.page.locator('#editor-status')).to_contain_text('Очікуємо перезапуск')

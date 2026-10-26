@@ -3,6 +3,7 @@
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime
+import math
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
@@ -49,6 +50,56 @@ def stamp(value):
         return "—"
 
 
+def timeline_segments(day, row):
+    """Exact elapsed-minute bands, or the old integration's half-hour cells."""
+    duration = len(day["slots"]) * 30
+    if "segments" in row:
+        parts = row["segments"]
+        if not isinstance(parts, list) or not 1 <= len(parts) <= 4096:
+            raise ValueError("Invalid timeline segments")
+        cursor = 0
+        for part in parts:
+            if not isinstance(part, dict) or any(
+                type(part.get(k)) not in (int, float) or not math.isfinite(part[k])
+                for k in ("start", "end")
+            ) or part["start"] != cursor or not cursor < part["end"] <= duration or part.get("kind") not in COLORS:
+                raise ValueError("Invalid timeline segments")
+            cursor = part["end"]
+        if cursor != duration:
+            raise ValueError("Incomplete timeline segments")
+        return parts
+    result = []
+    for i, kind in enumerate(row["cells"]):
+        if result and result[-1]["kind"] == kind:
+            result[-1]["end"] = (i + 1) * 30
+        else:
+            result.append(dict(start=i * 30, end=(i + 1) * 30, kind=kind))
+    return result
+
+
+def paint_timeline(draw, day, row, x, y, width, height, *, start=0, end=None):
+    """Paint proportional bands, then hour lines; never expand to a whole cell."""
+    end = len(day["slots"]) * 30 if end is None else end
+    scale = width / (end - start)
+    for part in timeline_segments(day, row):
+        left, right = max(start, part["start"]), min(end, part["end"])
+        if left >= right:
+            continue
+        x0, x1 = round(x + (left - start) * scale), round(x + (right - start) * scale)
+        if x1 <= x0:
+            continue
+        draw.rectangle((x0, y, x1 - 1, y + height - 1), fill=COLORS[part["kind"]])
+        if part["kind"] not in ("outage", "clear"):
+            for shift in range(-height, x1 - x0, 8):
+                a, b = max(0, shift), min(x1 - x0 - 1, shift + height - 1)
+                if a <= b:
+                    draw.line((x0+a, y+height-1-(a-shift), x0+b, y+height-1-(b-shift)), fill="#8f9aa8")
+    for minute in range(int(start), int(end) + 1, 60):
+        edge = round(x + (minute - start) * scale)
+        draw.line((edge, y, edge, y + height), fill="#adbcc3")
+    draw.rectangle((x, y, x + width, y + height), outline="#adbcc3")
+
+
 def render_grid(data, offset=0, personal=False):
     if data.get("status") != "ready" or type(offset) is not int or offset not in (0, 1):
         raise ValueError("Schedule grid unavailable")
@@ -66,7 +117,7 @@ def render_grid(data, offset=0, personal=False):
         for row in rows
     ):
         raise ValueError("Invalid schedule cells")
-    if all(c == "unknown" for row in rows for c in row["cells"]):
+    if all(p["kind"] == "unknown" for row in rows for p in timeline_segments(day, row)):
         raise ValueError("No published schedule for date")
     cell = 28
     left = 210
@@ -129,18 +180,7 @@ def render_grid(data, offset=0, personal=False):
             font=font(17, highlight),
             fill="#006b8d" if highlight else "#243442",
         )
-        for c, value in enumerate(row["cells"]):
-            x = left + c * cell
-            draw.rectangle(
-                (x, y, x + cell, y + rh), fill=COLORS[value], outline="#adbcc3"
-            )
-            if value in ("possible", "forecast", "forecast_clear", "unknown"):
-                for shift in range(0, rh, 8):
-                    draw.line(
-                        (x, y + shift, x + cell, y + max(0, shift - 12)),
-                        fill="#8f9aa8",
-                        width=1,
-                    )
+        paint_timeline(draw, day, row, left, y, cell * len(slots), rh)
         if highlight:
             draw.rectangle(
                 (20, y, left + len(slots) * cell, y + rh), outline="#008fb3", width=3

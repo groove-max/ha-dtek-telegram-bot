@@ -162,6 +162,7 @@ class PowerPresenceFeatureTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_loss_plus_voltage_confirms_outage_when_voltage_never_refreshes(self) -> None:
         feature, _monitor, ha, telegram, state = self._build_feature()
+        feature.config.voltage.max_age_seconds = 60
 
         await feature.on_start()
         loss_state = {"state": "0", "last_updated": now_kyiv().isoformat()}
@@ -202,7 +203,7 @@ class PowerPresenceFeatureTest(unittest.IsolatedAsyncioTestCase):
         )
         await asyncio.sleep(0.08)
 
-        self.assertEqual(state.get(self.prefix, "power_state"), "on")
+        self.assertEqual(state.get(self.prefix, "power_state"), "unknown")
         self.assertIsNone(state.get(self.prefix, "loss_stale_reference_at"))
         self.assertEqual(telegram.messages, [])
 

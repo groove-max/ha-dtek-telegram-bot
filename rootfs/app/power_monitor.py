@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import math
 from typing import Any
@@ -77,16 +77,14 @@ class PowerMonitor:
                 unavailable_as_missing=False,
             )
             house_state = snapshot.get("house_state")
-            if (
-                mode == "loss_plus_voltage"
-                and house_state == "off"
-                and not await self.loss_condition_met()
-            ):
-                # A meter can briefly report numeric zero during a telemetry
-                # glitch. In the paired mode, every whole-house outage needs
-                # fresh independent confirmation, even for numeric readings.
-                # Recheck after the voltage fetch: the witness may have changed.
-                return "unknown"
+            if mode == "loss_plus_voltage" and house_state in ("on", "partial", "off"):
+                # Recheck both loss AND restoration after the voltage fetch.
+                # Missing/expired witness data cannot mean confirmed presence.
+                witness = await self._loss_sample()
+                if witness is None or parse_condition(
+                    self._config.power.loss_state, str(witness.get("state", ""))
+                ) != (house_state == "off"):
+                    return "unknown"
             if house_state in ("on", "partial", "off"):
                 return str(house_state)
 
@@ -178,6 +176,7 @@ class PowerMonitor:
                 and not restored
                 and reference_dt is not None
                 and last_updated_dt is not None
+                and (stale or raw_value in ("unavailable", "unknown"))
                 and (
                     last_updated_dt < reference_dt
                     or raw_value in ("unavailable", "unknown")
@@ -266,26 +265,33 @@ class PowerMonitor:
 
     async def loss_condition_met(self) -> bool:
         """Check whether the configured loss entity currently indicates a loss."""
+        sample = await self._loss_sample()
+        return sample is not None and parse_condition(
+            self._config.power.loss_state, str(sample.get("state", ""))
+        )
+
+    async def _loss_sample(self) -> dict | None:
+        """Return a live independent report; missing data is not grid presence."""
         loss_entity = self._config.power.loss_entity
         if not loss_entity:
-            return False
+            return None
 
         if not getattr(self._ha, "is_connected", True):
-            return False
+            return None
         state = await self._ha.get_state(loss_entity)
         if not state or state.get("attributes", {}).get("restored"):
-            return False
+            return None
         topic = getattr(self._config.power, "loss_mqtt_topic", "")
         if topic:
             live = self._ha.mqtt_observation(topic)
             if live is None:
-                return False
+                return None
             try:
                 agrees = float(live["state"]) == float(state["state"])
             except (ValueError, TypeError):
                 agrees = live["state"] == state["state"]
             if not agrees:
-                return False
+                return None
             state = live
         value = str(state.get("state", ""))
         stamp = self._parse_state_datetime(
@@ -306,15 +312,55 @@ class PowerMonitor:
             <= (now_kyiv() - stamp).total_seconds()
             <= getattr(self._config.voltage, "max_age_seconds", 600)
         ):
-            return False
+            return None
         if value in ("unavailable", "unknown", ""):
-            return False
+            return None
         try:
             if not math.isfinite(float(value)):
-                return False
+                return None
         except ValueError:
             pass  # Binary sensors (off/on) may also be independent witnesses.
-        return parse_condition(self._config.power.loss_state, value)
+        return state
+
+    async def restoration_confirmed_since(self, deadline: datetime) -> bool:
+        """Confirm recovery with new reports, not repeated reads of one sample.
+
+        Event-driven binary sources remain valid without periodic reports. For
+        paired measurements, each source must report presence at/after the end
+        of the restore delay. This prevents a single positive polling cycle
+        from being announced as a stable recovery.
+        """
+        mode = self._config.power.mode
+        if mode == "sources":
+            evidence = await self.sources.snapshot()
+            if evidence["state"] != "on":
+                return False
+            for source, item in zip(self._config.power.sources, evidence["sources"]):
+                if source.freshness != "heartbeat" and not source.mqtt_topic:
+                    continue
+                stamp = self._parse_state_datetime(item["reported_at"])
+                if stamp is None or stamp < deadline:
+                    return False
+            return True
+        if mode not in ("loss_plus_voltage", "voltage_only"):
+            return True
+        voltage = await self.get_voltage_snapshot()
+        if voltage["house_state"] not in ("on", "partial"):
+            return False
+        for phase in voltage["phases"]:
+            if phase["available"] is True:
+                stamp = self._parse_state_datetime(phase["last_updated"])
+                if stamp is None or stamp < deadline:
+                    return False
+        if mode == "voltage_only":
+            return True
+        witness = await self._loss_sample()
+        if witness is None or parse_condition(self._config.power.loss_state, str(witness["state"])):
+            return False
+        if str(witness["state"]) in ("on", "off") and not getattr(self._config.power, "loss_mqtt_topic", ""):
+            return True
+        stamp = self._parse_state_datetime(witness.get("last_reported") or witness.get("last_updated"))
+        return stamp is not None and stamp >= deadline
 
     def phase_label_for_entity(self, entity_id: str) -> str:
         """Return the display label for a configured voltage entity."""
@@ -346,8 +392,9 @@ class PowerMonitor:
             except (TypeError, ValueError):
                 return None
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=now_kyiv().tzinfo)
-        return dt.astimezone(now_kyiv().tzinfo)
+            dt = dt.replace(tzinfo=now_kyiv().tzinfo)
+        # Durations and freshness must use elapsed time across DST transitions.
+        return dt.astimezone(timezone.utc)
 
     @staticmethod
     def _phase_label(index: int, total: int, raw_label: str) -> str:

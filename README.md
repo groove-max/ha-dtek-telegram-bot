@@ -40,7 +40,7 @@ You create your own bot with BotFather and control its recipients in Home Assist
 - Supports one phase or multiple voltage sensors, including partial outages.
 - Optionally alerts on low/high voltage and recovery.
 - Updates a pinned status instead of filling the chat with status posts.
-- Shows today’s or tomorrow’s all-group schedule as a PNG from the personal menu.
+- Shows today’s or tomorrow’s schedule for your groups, with pages and a full PNG for all groups.
 - Shows DTEK reading history, sends optional reminders and submits your cumulative readings after explicit confirmation in private mode.
 - Uses compatible energy-sensor suggestions and calibration from My DTEK; a sensor is not required for manual entry.
 - Provides a web editor for addresses, notifications, templates, previews and diagnostics.
@@ -69,9 +69,9 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 
 Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a DTEK Monitor building or connected cabinet and your own Telegram bot token. Select your recipient from detected users/chats after `/start`, or enter the numeric ID manually.
 
-**Bot 0.5.0-rc4** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. Use **bot 0.5.0-rc4 or newer** and **Monitor 2.0.0-rc4 or newer** for personal cabinets and PNG schedule tables. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
+**Bot 0.5.0-rc5** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. For a new installation, we recommend **bot 0.5.0-rc5** with **Monitor 2.0.0-rc5**. See [minimum versions by feature](docs/UPGRADING.md#choose-the-matching-versions) if you are keeping an older integration. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
 
-**Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for an assigned private user. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md). Attach optional meter photos during reading review and open cabinet documents from the same private menu. Document retrieval is experimental; [photo and document instructions](docs/PERSONAL.md#meter-photos-and-dtek-documents).
+**Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for explicitly authorized private users. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md). Attach optional meter photos during reading review and open cabinet documents from the same private menu. Document retrieval is experimental; [photo and document instructions](docs/PERSONAL.md#meter-photos-and-dtek-documents).
 
 **Several addresses, chats or bots? Use one installation.** Each address has its own notifications, sensors, group selection and Telegram bot profile. Keep the default bot or add another token once in **Telegram bots** and reuse that profile for several addresses. See [addresses, chats and bots](DOCS.md#destinations).
 
@@ -106,7 +106,7 @@ Each profile has its own card; **Налаштувати** opens one editor at a 
 
 **Success looks like:** HA is connected, your address and group are recognized, the test appears in the intended chat, and the status message can be edited. Local power may correctly show `unknown` when no fresh measurement is available.
 
-For enforced test routing, set the app option `test_chat_id` to your private chat, test group or channel before starting. For building profiles, it overrides the destination. Personal profiles and their template tests accept only the authorized private user as a test destination. See [isolated testing](DOCS.md#testing).
+For enforced test routing, set the app option `test_chat_id` to your private chat, test group or channel before starting. For building profiles, it overrides the destination. Personal profiles and their template tests accept only an authorized private user as a test destination. See [isolated testing](DOCS.md#testing).
 
 <a id="power-detection"></a>
 ## Choose how to detect power

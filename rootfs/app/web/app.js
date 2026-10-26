@@ -57,7 +57,7 @@ const POWER_MODE_META = {
   },
   loss_plus_voltage: {
     label: "Швидка втрата + напруга",
-    copy: "Додатковий датчик на тій самій лінії має працювати при відключенні та явно повідомляти про втрату мережі. Після підтвердження він дозволяє відхилити стару напругу. Відновлення потребує свіжої напруги; недоступність датчика сама по собі не підтверджує відключення.",
+    copy: "Додатковий датчик має контролювати те саме живлення, працювати при відключенні та явно повідомляти про втрату мережі. Відновлення потребує узгоджених нових показань обох датчиків після затримки. Датчики до та після реле захисту можуть показувати різне; тоді стан буде невідомим.",
   },
 };
 
@@ -478,26 +478,35 @@ function toNumber(value, fallback, parser = Number.parseFloat) {
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 30000);
+  let received = false;
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
+    received = true;
     let data;
     try {
       data = await response.json();
     } catch {
-      throw new Error("Сервер повернув неочікувану відповідь. Чернетку збережено; перевірте з’єднання з HA.");
+      const error = new Error("Сервер повернув неочікувану відповідь. Чернетку збережено; перевірте з’єднання з HA.");
+      error.status = response.status;
+      throw error;
     }
     if (!response.ok || data?.ok === false) {
       const details = Array.isArray(data?.errors)
         ? data.errors.map((error) => `${error.loc.join(".")}: ${error.msg}`).join("; ")
         : data?.message || response.statusText;
-      throw new Error(details);
+      const error = new Error(details);
+      error.status = response.status;
+      throw error;
     }
     if (!isPlainObject(data)) throw new Error("Некоректна відповідь сервера. Чернетку не змінено.");
     return data;
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error("Час очікування відповіді вичерпано. Чернетку збережено. Якщо ви зберігали налаштування, перевірте збережену версію перед повтором.");
+      const timeoutError = new Error("Час очікування відповіді вичерпано. Чернетку збережено. Якщо ви зберігали налаштування, перевірте збережену версію перед повтором.");
+      timeoutError.temporary = true;
+      throw timeoutError;
     }
+    if (!received && error instanceof TypeError) error.temporary = true;
     throw error;
   } finally {
     window.clearTimeout(timeout);
@@ -1293,7 +1302,7 @@ function getDraftGuidance(address) {
       hints.push("Окремі сповіщення про якість напруги вимкнені, але вибрані сенсори все одно використовуються для визначення наявності живлення.");
     }
     if (usesVoltageTopology) {
-      hints.push("Втрата зв’язку або застарілі вимірювання не підтверджують відключення. Про них надходить окреме повідомлення після затримки.");
+      hints.push("Втрата зв’язку або застарілі вимірювання означають невідомий стан у статусі. Окремі повідомлення про втрату даних надходять лише якщо ви їх увімкнули.");
     }
   } else {
     hints.push("Сповіщення про наявність світла для цієї адреси вимкнені.");
@@ -1990,7 +1999,8 @@ function renderAddressEditor(address, index) {
             <div class="sources-only">
               ${renderPowerSource(address.power?.sources?.[0], 0)}
               ${renderPowerSource(address.power?.sources?.[1], 1)}
-              <p class="helper-copy">Два датчики мають вимірювати ту саму лінію незалежно один від одного. Вони не є різними фазами. Суперечливі дані означають невідомий стан. Зникнення другого датчика підтверджує відключення тільки після явного сигналу першого та очікування.</p>
+              <p class="helper-copy">Одного надійного датчика достатньо. Другий має незалежно контролювати те саме живлення: ту саму фазу, з одного боку реле захисту. Напруга до реле та вхід інвертора після нього можуть показувати різне — тоді бот покаже невідомий стан і не повідомлятиме про зникнення чи повернення світла.</p>
+              <p class="helper-copy">Для складнішої логіки можна обрати готовий бінарний статус HA. Якщо другий датчик вимикається з мережею, його зникнення враховується лише разом із явним сигналом першого та перевіркою давності даних. Звичайна пауза між звітами не є відключенням.</p>
             </div>
             <div class="helper-block subtle sensor-mode-only">
               <label class="toggle">
@@ -3151,6 +3161,20 @@ async function loadDashboard({ background = false } = {}) {
       persistTemplateDraftSnapshot();
     }
   } catch (error) {
+    // A poll started before a write must not replace its newer result or draft.
+    if (epoch !== state.writeEpoch || state.configBusy || state.templateBusy || state.botBusy) return;
+    // Ingress briefly returns HTML 502/503/504 while Supervisor restarts us.
+    // Only an acknowledged Apply may treat that outage as expected. Keep the
+    // existing bounded wait; never retry a write or claim success without the
+    // new process and matching saved revisions.
+    const restarting = ["pending", "unconfirmed"].includes(state.activation?.status);
+    const unavailable = error.temporary || [502, 503, 504].includes(error.status);
+    if (restarting && unavailable) {
+      reconcileActivation();
+      lastUpdated.textContent = state.activation.status === "pending"
+        ? "Очікуємо запуск застосунку…" : "Застосування не підтверджено";
+      return;
+    }
     diagnosticsOutput.textContent = `Не вдалося завантажити dashboard:\n${error}`;
     reconcileActivation();
     lastUpdated.textContent = "Помилка оновлення";

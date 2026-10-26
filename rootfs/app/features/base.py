@@ -6,6 +6,7 @@ import logging
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from typing import Any
 from datetime import datetime
 
@@ -258,7 +259,10 @@ class Feature(ABC):
             return self.tg.resolve_chat_id(self.telegram_chat_id)
         return self.telegram_chat_id or getattr(self.tg, "default_chat_id", "")
 
-    async def send_message(self, text: str, **kwargs: Any) -> int | None:
+    async def send_message(
+        self, text: str, *, before_send: Callable[[], Awaitable[bool]] | None = None,
+        **kwargs: Any,
+    ) -> int | None:
         """Send a message to the configured chat for this address."""
         group_notice = kwargs.pop("group_notice", None)
         if group_notice is not None and self.name != "group_change":
@@ -303,6 +307,10 @@ class Feature(ABC):
         expires = delivery_context.get("expires")
         if expires is not None and now_kyiv().timestamp() >= expires:
             self.log.info("Notification expired while validating; skipping send")
+            return None
+        # Persistence and validation can yield to new HA observations. Check
+        # live evidence at the last local boundary before the Telegram request.
+        if before_send is not None and not await before_send():
             return None
         return await self.tg.send_message(
             text,

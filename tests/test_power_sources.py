@@ -98,7 +98,7 @@ class PowerSourceTests(unittest.IsolatedAsyncioTestCase):
             for unavailable in (False, True):
                 with self.subTest(kind=secondary_kind, unavailable=unavailable):
                     self.seconds=0
-                    a,b=self.source(), self.source('b',secondary_kind,availability='mains_powered')
+                    a,b=self.source(), self.source('b',secondary_kind,availability='mains_powered', freshness='heartbeat', max_age_seconds=20)
                     e=self.engine(a,b)
                     self.put(a,'230'); self.put(b,{'voltage':'230','frequency':'50','binary':'on'}[secondary_kind])
                     self.assertEqual((await e.snapshot())['state'],'on')

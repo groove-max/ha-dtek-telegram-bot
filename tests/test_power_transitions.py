@@ -164,7 +164,9 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.time = 20
         self.put("50", self.loss_entity)
         await self.step(20, "230")
-        await self.step(50)
+        self.time = 50
+        self.put("50", self.loss_entity)
+        await self.step(50, "230")
         self.assertEqual(self.messages(), ["power_lost", "power_restored"])
 
     async def test_zero_voltage_waits_for_loss_witness_before_starting_debounce(self):
@@ -229,7 +231,7 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.step(12, "unknown")
         await self.step(32)
         await self.step(40, "230")
-        await self.step(70)
+        await self.step(70, "230")
         self.assertEqual(
             self.messages(), ["power_lost", "power_telemetry_lost", "power_restored"]
         )
@@ -242,7 +244,7 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.step(46, "230")
         await self.step(50)
         self.assertEqual(self.messages(), ["power_lost"])
-        await self.step(76)
+        await self.step(76, "230")
         self.assertEqual(self.messages(), ["power_lost", "power_restored"])
 
     async def test_silent_expiry_warns_without_any_ha_state_event(self):
@@ -301,12 +303,17 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_independent_loss_with_cached_voltage_confirms(self):
         self.feature.config.power.mode = "loss_plus_voltage"
         self.feature.config.power.confirm_timeout = 15
+        self.feature.config.voltage.max_age_seconds = 20
+        self.feature.config.power.telemetry_notifications = False
         self.time = 1
         self.put("0", self.loss_entity)
         await self.step(1)
         await self.step(16)
         self.assertEqual(self.messages(), [])
-        await self.step(26)
+        self.time = 21
+        self.put("0", self.loss_entity)
+        await self.step(21)
+        await self.step(31)
         self.assertEqual(self.messages(), ["power_lost"])
 
     async def test_missing_stale_or_restored_loss_signal_cannot_confirm(self):
@@ -342,7 +349,7 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.feature.on_start()
         self.assertIsNone(self.state.get(self.prefix, "loss_stale_reference_at"))
         self.assertEqual(self.messages(), [])
-        await self.step(30)
+        await self.step(30, "230")
         self.assertEqual(self.messages(), ["power_restored"])
 
     async def test_phase_loss_uses_validated_samples_and_debounce(self):
@@ -447,13 +454,16 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.step(71, "230")
         await self.step(100, "230")
         self.assertEqual(self.messages(), ["power_lost"])
-        await self.step(101)
+        self.time = 101
+        self.put("50", self.loss_entity)
+        await self.step(101, "230")
         self.assertEqual(self.power(), "on")
         self.assertEqual(self.messages(), ["power_lost", "power_restored"])
 
     async def test_loss_signal_expiry_cancels_pending_confirmation(self):
         self.feature.config.power.mode = "loss_plus_voltage"
         self.feature.config.power.confirm_timeout = 15
+        self.feature.config.power.telemetry_notifications = False
         self.time = 1
         self.put("0", self.loss_entity)
         await self.step(1)
@@ -470,9 +480,13 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
     async def test_old_positive_reading_cannot_restore_after_independent_loss(self):
         self.feature.config.power.mode = "loss_plus_voltage"
         self.feature.config.power.confirm_timeout = 15
+        self.feature.config.voltage.max_age_seconds = 20
+        self.feature.config.power.telemetry_notifications = False
         self.time = 1
         self.put("0", self.loss_entity)
-        for t in [1, 16, 26, 60, 90]:
+        for t in [1, 16, 26, 36, 60, 90]:
+            self.time = t
+            self.put("0", self.loss_entity)
             await self.step(t)
         self.assertEqual(self.messages(), ["power_lost"])
         self.assertEqual(self.power(), "off")
@@ -489,7 +503,9 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.step(11)
         self.put("230", "sensor.l2")
         await self.step(20, "230")
-        await self.step(50)
+        self.time = 50
+        self.put("230", "sensor.l2")
+        await self.step(50, "230")
         self.assertEqual(self.messages(), ["power_lost", "power_restored"])
 
     async def test_failed_send_is_retried_and_does_not_hide_live_power_state(self):
@@ -547,7 +563,7 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.step(11)
         await self.step(12, "unknown")
         await self.step(20, "230")
-        await self.step(50)
+        await self.step(50, "230")
         self.assertIn("невідомо", self.tg.messages[-1])
 
     async def test_presence_threshold_boundary(self):
@@ -592,7 +608,7 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.step(61, "0")
         await self.step(71)
         await self.step(80, "230")
-        await self.step(110)
+        await self.step(110, "230")
         self.assertEqual(self.messages(), ["power_lost", "power_restored"])
 
     async def test_disabling_notices_also_suppresses_pending_data_recovery(self):

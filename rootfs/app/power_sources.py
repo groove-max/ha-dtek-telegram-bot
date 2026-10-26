@@ -173,6 +173,9 @@ class PowerSources:
             # positive report contradicts the witness, even if it later ages.
             may_sleep = (
                 source.availability == "mains_powered"
+                # An ordinary interval between reports is not disappearance.
+                # A positive sample remains contradictory until it expires.
+                and secondary["reason"] in ("stale", "unavailable")
                 and (confirmed_before_sleep or (
                     self._can_sleep and last_on is not None and last_on <= started
                 ))
