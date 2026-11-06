@@ -98,6 +98,14 @@ The bot checks current evidence again immediately before sending a power notific
 
 For MQTT sources, the optional per-source `mqtt_topic` must be an exact topic carrying the same raw value as the HA entity. The existing HA MQTT observer ignores retained/replayed messages. A matching live report must also be within `max_age_seconds`, including for a binary source. JSON payloads require an HA sensor/topic that exposes the corresponding value; the bot does not apply arbitrary MQTT templates.
 
+## Duration in power notifications
+
+The bot shows “Світло було…” / “Без світла було…” only when it observed the whole period between confirmed power changes. If there was any data gap, sensor disagreement, app downtime, or no valid starting time, it omits the duration line entirely. The restoration message still arrives when recovery is confirmed; it simply contains no incomplete estimate. The pinned status also hides an incomplete elapsed duration.
+
+Internal observation checkpoints remain available and the period's original start is preserved when the same state returns. Gaps are never counted as observed time. Power detection and confirmation delays are unchanged.
+
+If you customized these templates, wrap the duration line in `{% if duration %}…{% endif %}`: `duration` is empty when the period is incomplete.
+
 ## Upgrading an existing setup
 
 Existing sensor bindings, MQTT topics, delays and voltage limits are preserved. There is no silent conversion of old configurations. To switch, choose **Датчики Home Assistant**, select the primary/optional secondary and their availability, check voltage display separately, and use the live preview under additional actions before applying. Preview is a point-in-time check; it does not simulate the running grace/debounce timers.

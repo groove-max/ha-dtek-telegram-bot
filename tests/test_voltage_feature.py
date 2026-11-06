@@ -176,7 +176,7 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         )
         await asyncio.sleep(0.01)
 
-        self.assertEqual(telegram.messages, ["voltage_high|voltage=250.3|phase=L1"])
+        self.assertEqual(telegram.messages, ["voltage_high|voltage=250.3|phase="])
         self.assertTrue(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
         self.assertEqual(
             state.get(self.prefix, f"voltage_alert_type_{self.voltage_entity}"),
@@ -204,8 +204,8 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             telegram.messages,
             [
-                "voltage_high|voltage=250.3|phase=L1",
-                "voltage_normal|voltage=244.8|phase=L1",
+                "voltage_high|voltage=250.3|phase=",
+                "voltage_normal|voltage=244.8|phase=",
             ],
         )
         self.assertFalse(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
@@ -225,7 +225,7 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         )
         await asyncio.sleep(0.01)
 
-        self.assertEqual(telegram.messages, ["voltage_low|voltage=190.2|phase=L1"])
+        self.assertEqual(telegram.messages, ["voltage_low|voltage=190.2|phase="])
         self.assertTrue(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
 
         near_threshold = {
@@ -248,8 +248,8 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             telegram.messages,
             [
-                "voltage_low|voltage=190.2|phase=L1",
-                "voltage_normal|voltage=200.2|phase=L1",
+                "voltage_low|voltage=190.2|phase=",
+                "voltage_normal|voltage=200.2|phase=",
             ],
         )
         self.assertFalse(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
@@ -279,8 +279,8 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             telegram.messages,
             [
-                "voltage_high|voltage=250.5|phase=L1",
-                "voltage_normal|voltage=249.9|phase=L1",
+                "voltage_high|voltage=250.5|phase=",
+                "voltage_normal|voltage=249.9|phase=",
             ],
         )
 
@@ -358,7 +358,7 @@ class VoltageFeatureTest(unittest.IsolatedAsyncioTestCase):
             recovered_state,
         )
 
-        self.assertEqual(telegram.messages, ["voltage_low|voltage=190.0|phase=L1"])
+        self.assertEqual(telegram.messages, ["voltage_low|voltage=190.0|phase="])
         self.assertFalse(state.get(self.prefix, f"voltage_alert_{self.voltage_entity}"))
 
 

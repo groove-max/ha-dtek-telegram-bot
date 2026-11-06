@@ -167,6 +167,14 @@ def validate_destinations(config, store: BotProfileStore) -> None:
             raise ValueError(
                 "Для адреси обрано неналаштованого бота. Додайте або оберіть бота."
             )
+        if address.member_access:
+            from building_access import group_chat
+            if not group_chat(address.telegram_chat_id or profile.chat_id):
+                raise ValueError("Для меню учасників оберіть групу або канал, а не особистий чат.")
+            if not config.receive_commands:
+                raise ValueError("Меню учасників налаштовується на сервері, що приймає команди цього бота.")
+            if profile.test_mode:
+                raise ValueError("Меню учасників недоступне в режимі перенаправлення до тестового чату.")
         if address.mode == "personal" and profile.test_mode and profile.test_chat_id not in {str(user) for user in address.telegram_user_ids}:
             raise ValueError("Особистий профіль потребує приватного тестового чату авторизованого користувача.")
         if not (

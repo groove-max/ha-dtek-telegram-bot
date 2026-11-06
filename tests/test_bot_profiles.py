@@ -204,7 +204,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_enabled_receiving_starts_one_consumer_per_token(self):
         runtime = BotRuntime(self.config, self.store, self.path)
-        runtime.conversation_factory = Mock(return_value=SimpleNamespace(handle=AsyncMock()))
+        runtime.conversation_factory = Mock(return_value=SimpleNamespace(handle=AsyncMock(), sync_commands=AsyncMock()))
         self.runtimes.append(runtime)
         with patch("bot_runtime.TelegramService.start_updates", new_callable=AsyncMock) as start:
             await runtime.start()

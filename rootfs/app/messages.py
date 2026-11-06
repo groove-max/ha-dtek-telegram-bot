@@ -51,6 +51,12 @@ DEFAULT_TEMPLATES: dict[str, str] = {
 
 ✅ Електропостачання відновлено (за даними ДТЕК).
 ⏱ Тривалість: {{ duration }}""",
+    "schedule_restoration": """\
+⚡️ {{ display_name }}
+
+🔄 Час відновлення за графіком змінено.
+🕦 Новий орієнтовний час: {{ new_end }}
+⚠️ При аварійних відключеннях графік може не діяти.""",
     # ── Feature 3: Group Change ──
     "group_change": """\
 ⚡️ {{ display_name }}
@@ -104,13 +110,15 @@ DEFAULT_TEMPLATES: dict[str, str] = {
 ⚡️ {{ display_name }}
 
 ⛔ Світло зникло.
-✅ Світло було: {{ duration }}.
+{% if duration %}✅ Світло було: {{ duration }}.
+{% endif %}{{ '' -}}
 🕒 {{ timestamp }}""",
     "power_restored": """\
 ⚡️ {{ display_name }}
 
 {% if house_state == "partial" %}🟠 Світло з'явилось частково{% else %}✅ Світло з'явилось{% endif %}.
-⛔ Без світла було: {{ duration }}.
+{% if duration %}⛔ Без світла було: {{ duration }}.
+{% endif %}{{ '' -}}
 {% if missing_phases %}
 ⚠️ Відсутні фази: {{ missing_phases | join(", ") }}
 {% endif %}

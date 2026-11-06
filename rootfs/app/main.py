@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 import signal
 import sys
 from datetime import datetime, timezone
 from typing import Any
+from telegram_onboarding import profile_binding
 
 from config import (
     AddressConfig,
@@ -63,6 +65,7 @@ TEMPLATE_GROUPS = {
     "schedule_empty": "Schedule",
     "emergency_start": "Emergency",
     "emergency_update": "Emergency",
+    "schedule_restoration": "Emergency",
     "emergency_end": "Emergency",
     "group_change": "Group",
     "voltage_low": "Voltage",
@@ -160,6 +163,8 @@ class Orchestrator:
                     break
 
             for f in addr_features:
+                if f.name in ("schedule_change", "group_change"):
+                    f.set_emergency(next((item for item in addr_features if isinstance(item, EmergencyFeature)), None))
                 if isinstance(f, StatusMessageFeature):
                     f.set_power_monitor(power_monitor)
                 elif isinstance(f, GroupChangeFeature):
@@ -1109,6 +1114,8 @@ class Orchestrator:
                 old_end="17.03.2026 13:25",
                 new_end=format_datetime(end_raw) if end_raw else timestamp,
             )
+        elif template_name == "schedule_restoration":
+            context.update(new_end=timestamp)
         elif template_name == "emergency_end":
             outage_start_iso = self.state.get(address.key, "outage_start_time")
             duration = "—"
@@ -1127,7 +1134,7 @@ class Orchestrator:
                 schedule_lines=schedule_lines,
             )
         elif template_name in {"voltage_low", "voltage_high", "voltage_normal"}:
-            label = phases[0]["label"] if phases else ""
+            label = phases[0]["label"] if len(phases) > 1 else ""
             context.update(
                 voltage=voltage if voltage is not None else 228.5,
                 phase_label=label,
@@ -1358,12 +1365,75 @@ class Orchestrator:
         )
         snapshot["runtime"] = self.bots.public()
         snapshot["recipients"] = {}
+        snapshot["connection_requests"] = {}
+        snapshot["onboarding"] = {}
+        bindings = {p.key: profile_binding(p) for p in self.config.addresses}
+        accounts = {p.key: p.account_entity for p in self.config.addresses}
         for profile in snapshot["profiles"]:
             client = self.bots.clients.get(profile["id"])
             if client and client.journal and str(client._bot.id) == str(profile["bot_id"]):
                 snapshot["recipients"][profile["id"]] = client.journal.recipients.list()
+                requests = getattr(client.journal, "requests", None)
+                if self.config.receive_commands and requests:
+                    snapshot["connection_requests"][profile["id"]] = [r | {"target_valid": not r["profile_key"] or bindings.get(r["profile_key"]) == r["binding"], "target_account_entity": accounts.get(r["profile_key"], "")} for r in requests.pending()]
+                onboarding = getattr(client.journal, "onboarding", None)
+                if self.config.receive_commands and onboarding:
+                    snapshot["onboarding"][profile["id"]] = [r | {"target_valid": r["kind"] != "invite" or bindings.get(r["profile_key"]) == r["binding"]} for r in onboarding.snapshot(client.journal.recipients)]
         snapshot["receiving"] = self.config.receive_commands
         return snapshot
+
+    def decline_connection_request(self, payload):
+        profile_id = str(payload.get("bot_id", ""))
+        snapshot = self.get_bot_profiles()
+        request = next((r for r in snapshot["connection_requests"].get(profile_id, [])
+                        if r["user_id"] == payload.get("user_id") and r["revision"] == payload.get("revision") and r["profile_key"] == payload.get("profile_key", "")), None)
+        if not request or not self.bots.clients[profile_id].journal.requests.resolve(
+            request["user_id"], "declined", request["revision"], request["profile_key"]
+        ):
+            raise ValueError("Заявка вже змінилася або недоступна. Оновіть список.")
+        return self.get_bot_profiles()
+
+    def _onboarding_client(self, payload):
+        bot_id = str(payload.get("bot_id", ""))
+        snapshot = self.get_bot_profiles()
+        client = self.bots.clients.get(bot_id)
+        profile = next((p for p in snapshot["profiles"] if p["id"] == bot_id), None)
+        if (not self.config.receive_commands or not client or not client.journal
+                or not profile or str(client._bot.id) != str(profile["bot_id"])
+                or bot_id not in self.bots.conversations or client._test_chat_id):
+            raise ValueError("Запустіть бота з прийманням команд на цьому HA без тестового перенаправлення. Збережені токени й налаштування потрібно застосувати.")
+        return client
+
+    async def create_onboarding_link(self, payload):
+        from config import runtime_config_revision
+        client = self._onboarding_client(payload)
+        kind, key = str(payload.get("kind", "")), str(payload.get("profile_key", ""))
+        binding = ""
+        if kind == "invite":
+            profile = next((p for p in self.config.addresses if p.key == key and p.telegram_bot_id == payload.get("bot_id") and p.mode == "personal"), None)
+            if (not profile or profile.account_entity != payload.get("account_entity")
+                    or payload.get("expected_revision") != runtime_config_revision()):
+                raise ValueError("Спочатку застосуйте особистий профіль і оновіть стан редактора.")
+            saved = next((p for p in self._get_editor_runtime_config().addresses if p.key == key), None)
+            if not saved or profile_binding(saved) != profile_binding(profile):
+                raise ValueError("Спочатку застосуйте збережені зміни профілю.")
+            binding = profile_binding(profile)
+        try:
+            async with asyncio.timeout(10):
+                username = (await client._bot.get_me()).username
+        except Exception:
+            raise ValueError("Telegram зараз не підтвердив підключення бота. Спробуйте пізніше.") from None
+        if not username or not re.fullmatch(r"[A-Za-z0-9_]+", username):
+            raise ValueError("Не вдалося визначити ім’я бота для посилання.")
+        token, link = client.journal.onboarding.create(kind, key, binding, payload.get("pin") is True)
+        return {"link": {"id": link["id"], "kind": kind, "profile_key": key,
+                         "url": f"https://t.me/{username}?start=dtek_{token}", "expires": link["expires"]},
+                "bots": self.get_bot_profiles()}
+
+    def revoke_onboarding_link(self, payload):
+        client = self._onboarding_client(payload)
+        client.journal.onboarding.revoke(str(payload.get("id", "")))
+        return {"bots": self.get_bot_profiles()}
 
     async def save_bot_profile(self, payload):
         profile = await self.bot_profiles.save(payload, self.config)

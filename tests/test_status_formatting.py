@@ -54,13 +54,13 @@ class StatusFormattingTests(unittest.IsolatedAsyncioTestCase):
             text = await self.render(power)
             self.assertNotIn("[Template error", text)
             self.assertEqual(text.count("GPV3.1"), 1)
-            self.assertIn("📅 Найближче планове:\n17.10 — 19:00–22:00\n🕒", text)
+            self.assertIn("📅 Найближче планове:\n17.10.2026 — 19:00–22:00\n🕒", text)
 
     async def test_multiple_groups_keep_interval_provenance(self):
         self.snapshot["attributes"]["schedule_groups"].append("GPV5.1")
         text = await self.render()
         self.assertIn("Група GPV3.1, GPV5.1\n", text)
-        self.assertIn("📅 Найближче планове:\n🔵 GPV3.1\n17.10 — 19:00–22:00", text)
+        self.assertIn("📅 Найближче планове:\n🔵 GPV3.1\n17.10.2026 — 19:00–22:00", text)
 
     async def test_selected_group_is_not_repeated(self):
         self.snapshot["attributes"]["schedule_groups"].append("GPV5.1")
@@ -68,6 +68,15 @@ class StatusFormattingTests(unittest.IsolatedAsyncioTestCase):
         text = await self.render()
         self.assertEqual(text.count("GPV3.1"), 1)
         self.assertNotIn("GPV5.1", text)
+
+    async def test_pinned_duration_requires_continuous_observations(self):
+        self.feature.state_set('power_last_change', self.now.replace(hour=16).isoformat())
+        text = await self.render('off')
+        self.assertIn('відсутнє 2 год', text)
+        self.feature.state_set('power_observation_gap', True)
+        text = await self.render('off')
+        self.assertIn('Електропостачання: відсутнє\n', text)
+        self.assertNotIn('відсутнє 2 год', text)
 
     async def test_website_hidden_group_ids_are_not_duplicated_in_status(self):
         self.snapshot["attributes"]["group_labels_visible"] = False
@@ -100,11 +109,11 @@ class StatusFormattingTests(unittest.IsolatedAsyncioTestCase):
         text = format_next_outage(
             self.events, header_group="GPV3.1, GPV5.1", now=self.now
         )
-        self.assertEqual(text, "🔵 GPV3.1, GPV5.1\n17.10 — 19:00–22:00")
+        self.assertEqual(text, "🔵 GPV3.1, GPV5.1\n17.10.2026 — 19:00–22:00")
 
     def test_next_day_end_is_explicit(self):
         self.events[0]["end"] = "2026-10-18T01:00:00+03:00"
         self.assertEqual(
             format_next_outage(self.events, header_group="GPV3.1", now=self.now),
-            "17.10 — 19:00–18.10 01:00",
+            "17.10.2026 — 19:00–18.10.2026 01:00",
         )

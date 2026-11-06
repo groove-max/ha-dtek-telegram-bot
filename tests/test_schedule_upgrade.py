@@ -255,7 +255,7 @@ class ScheduleUpgradeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.events = [event()]
         await f.on_tick()
         self.assertEqual(len(self.telegram.messages), 1)
-        self.assertIn("20.10 02:00", await self.feature(StatusMessageFeature)._get_next_outage())
+        self.assertIn("20.10.2026 02:00", await self.feature(StatusMessageFeature)._get_next_outage())
 
     async def test_warning_fetches_midnight_continuation_beyond_countdown_window(self):
         self.now = DAY + timedelta(hours=19, minutes=55)

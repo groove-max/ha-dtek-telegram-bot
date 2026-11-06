@@ -308,9 +308,9 @@ def format_next_outage(
         ]
         lines.append("🔵 " + ", ".join(labels))
     start, end = start.astimezone(TZ_KYIV), end.astimezone(TZ_KYIV)
-    end_label = end.strftime("%H:%M" if start.date() == end.date() else "%d.%m %H:%M")
+    end_label = end.strftime("%H:%M" if start.date() == end.date() else "%d.%m.%Y %H:%M")
     lines.append(
-        f"{start:%d.%m} — {start:%H:%M}–{end_label}"
-        if confirmed else f"{start:%d.%m} — від {start:%H:%M}; завершення невідоме"
+        f"{start:%d.%m.%Y} — {start:%H:%M}–{end_label}"
+        if confirmed else f"{start:%d.%m.%Y} — від {start:%H:%M}; завершення невідоме"
     )
     return "\n".join(lines)

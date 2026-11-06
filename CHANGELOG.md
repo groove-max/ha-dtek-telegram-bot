@@ -2,7 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.5.0-rc6] - 2026-11-06
+
+**Regular GitHub release**, without the Pre-release flag. Requires Home Assistant 2026.3.0+ on amd64/aarch64.
+
+### Telegram menus and easier setup
+
+- Use Telegram’s native command menu alongside the existing buttons for schedules, readings, history, documents and help. Preserve reading/photo drafts during navigation and require confirmation before submission or an account change.
+- Add explicit `/connect` requests, revocable personal invitation links and Telegram’s native recipient picker. Users, groups and channels can be added to a draft without copying numeric IDs; the HA owner still applies access. Keep unsaved editor choices during background refresh.
+- Optionally let verified building group/channel members request status and schedules privately. Check membership and bot permissions on every interaction; access never includes cabinet readings or private notifications. This feature is off by default.
+
+### Clearer, quieter schedules
+
+- Show the full day on one wide row, with exact outage ranges below the table, a current-time line and dimmed elapsed time. Keep readable pages for large group lists, consistent menu icons and one **All groups** action with optional hidden address/highlights.
+- Attach all-groups schedule images to schedule/group changes by default. Today/tomorrow pictures and albums are always silent; the main text keeps its configured sound. Images use verified data and delivery tracking without repeating the text after a media failure.
+- Optionally refresh the latest automatic image for today in place, every 5 minutes by default (configurable 1–60 minutes). Real table changes refresh it immediately. Keep tracking across restarts, promote tomorrow’s picture at midnight and respect Telegram backoff; unavailable data never creates replacement posts.
+- Do not announce a change solely because yesterday expires at midnight. Preserve genuine changes, newly published dates, cancellations and retries after a failed send.
+- Send a revised end of an ongoing hourly outage immediately after the schedule text, silently and labelled as a schedule estimate. Suppress the later identical operator estimate; emergency/repair forecasts remain separate.
+- Use DD.MM.YYYY and DD.MM.YYYY HH:MM consistently. Resolve building schedules even when HA entity names have been translated or renamed.
+
+### Reliable power and voltage notices
+
+- Prevent repeated sensor updates from cancelling a voltage warning during delivery. Send normalization only after a confirmed warning, with persistent incident tracking and fresh-data validation; low-to-high jumps never count as normal.
+- Make normalization silent by default with its own **Напруга в нормі** checkbox under **Додаткові параметри → Тихий режим повідомлень**. Keep low/high warning sound independent. Omit unnecessary phase labels for a single sensor.
+- Show power-period duration only when observation is complete. Omit it after telemetry gaps or restarts; retain internal checkpoints without counting disconnected time as a known outage.
+
+**Upgrade:** use **DTEK Monitor 2.0.0-rc6** with **Bot 0.5.0-rc6**; update the integration first, restart HA, then update the app and reload its editor. Existing recipients, sensors, templates, pinned messages and delivery history are preserved. Schedule-image attachments and silent voltage normalization default to on; periodic image refresh and private access for building members remain opt-in. No readings are submitted automatically. One Telegram token must have only one incoming-update collector.
+
+[Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md) · [Private menus and setup](docs/PERSONAL.md) · [Особистий режим](docs/PERSONAL.uk.md)
 
 ## [0.5.0-rc5] - 2026-10-26
 

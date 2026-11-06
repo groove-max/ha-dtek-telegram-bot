@@ -23,6 +23,7 @@ class PowerPresenceFeature(Feature):
 
     name = "power_presence"
     CHECK_INTERVAL = 5
+    DURATION_CHECKPOINT_SECONDS = 60
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -43,6 +44,8 @@ class PowerPresenceFeature(Feature):
         self._loss_rejected = False
         self._stopped = False
         self._pending_house: tuple[str, str, str | None] | None = None
+        self._observed_start: datetime | None = None
+        self._observed_end: datetime | None = None
 
     def set_power_monitor(self, pm: PowerMonitor) -> None:
         self._power_monitor = pm
@@ -131,6 +134,7 @@ class PowerPresenceFeature(Feature):
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        self._close_observation()
         self._timer = self._watchdog = None
         self._candidate = None
         self._phase_candidates.clear()
@@ -196,6 +200,7 @@ class PowerPresenceFeature(Feature):
         else:
             actual = await pm.detect_current_power()
         current = self.state_get("power_state", "unknown")
+        self._observe(actual)
         if actual != self._candidate:
             self._candidate, self._candidate_since = actual, clock
             self._candidate_at = now_kyiv().astimezone(timezone.utc)
@@ -261,11 +266,7 @@ class PowerPresenceFeature(Feature):
         if previous is None:
             previous = self.state_get("power_state", "unknown")
         gap = self.state_get("power_observation_gap", False)
-        duration = (
-            "невідомо (була перерва в даних)"
-            if gap
-            else self._calc_duration(self.state_get("power_last_change"), now_kyiv())
-        )
+        duration = None if gap else self._calc_duration(self.state_get("power_last_change"), now_kyiv())
         template = None
         if target == "off" and previous != "off":
             template = "power_lost"
@@ -289,19 +290,60 @@ class PowerPresenceFeature(Feature):
             # Keep retrying the same delivery identity until the journal accepts it.
             if delivered is None:
                 return False
-        if (
-            gap
-            or (target == "off") != (previous == "off")
-            or not self.state_get("power_last_change")
-        ):
+        changed = (target == "off") != (previous == "off")
+        if changed or not self.state_get("power_last_change"):
             self.state_set("power_last_change", now_kyiv().isoformat())
         self.state_set("power_state", target)
         self.state_set("power_last_confirmed_state", target)
         self.state_set("power_telemetry_alert", False)
-        self.state_set("power_observation_gap", False)
+        # Returning to the same state cannot erase an earlier observation gap
+        # or move the beginning of the confirmed period forward.
+        if changed:
+            self.state_set("power_observation_gap", False)
+            self.state_set("power_known_duration", 0)
+            self._observed_start = self._observed_end = now_kyiv().astimezone(timezone.utc)
         self._pending_house = None
         await self._status_update()
         return template in ("power_lost", "power_restored")
+
+    def _observe(self, actual: str) -> None:
+        """Retain a conservative duration when sources disagree at an edge.
+
+        Only the longest uninterrupted observed segment is a lower bound. Never
+        sum across gaps: there may have been an unobserved restoration in them.
+        The live state and notification debounce remain independent of this.
+        """
+        previous = self.state_get("power_last_confirmed_state")
+        if actual not in ("on", "partial", "off") or actual != previous:
+            self._close_observation()
+            return
+        now = now_kyiv().astimezone(timezone.utc)
+        if self._observed_end is not None and (
+            now - self._observed_end
+        ).total_seconds() > self.CHECK_INTERVAL * 3:
+            # A stalled observer is also a gap, even if the next value agrees.
+            self._close_observation()
+            self.state_set("power_observation_gap", True)
+        if self._observed_start is None:
+            self._observed_start = now
+        self._observed_end = now
+        self._checkpoint_observation()
+
+    def _checkpoint_observation(self, *, closing: bool = False) -> None:
+        # Do not rely on graceful shutdown to retain hours of evidence. Persist
+        # progress about once a minute through the normal atomic state writer;
+        # a new process still starts a separate segment and never counts downtime.
+        if self._observed_start is not None and self._observed_end is not None:
+            seconds = max(0, (self._observed_end - self._observed_start).total_seconds())
+            saved = self.state_get("power_known_duration", 0)
+            if seconds > saved and (
+                closing or seconds - saved >= self.DURATION_CHECKPOINT_SECONDS
+            ):
+                self.state_set("power_known_duration", seconds)
+
+    def _close_observation(self) -> None:
+        self._checkpoint_observation(closing=True)
+        self._observed_start = self._observed_end = None
 
     async def _recovery_is_confirmed(self, target: str) -> bool:
         if target not in ("on", "partial") or self.state_get("power_last_confirmed_state") != "off":
@@ -325,6 +367,7 @@ class PowerPresenceFeature(Feature):
         self._pending_house = None
         self._candidate = None
         self.state_set("power_state", "unknown")
+        self._close_observation()
         self.state_set("power_observation_gap", True)
         await self._status_update()
         return False
@@ -403,12 +446,11 @@ class PowerPresenceFeature(Feature):
         return f"phase_state::{entity_id}"
 
     @staticmethod
-    def _calc_duration(last_change_iso: str | None, now: datetime) -> str:
+    def _calc_duration(last_change_iso: str | None, now: datetime) -> str | None:
         if not last_change_iso:
-            return "—"
+            return None
         try:
-            return format_duration(
-                max(0, (now - datetime.fromisoformat(last_change_iso)).total_seconds())
-            )
+            seconds = (now - datetime.fromisoformat(last_change_iso)).total_seconds()
+            return format_duration(seconds) if seconds >= 0 else None
         except (ValueError, TypeError):
-            return "—"
+            return None

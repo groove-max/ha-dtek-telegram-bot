@@ -13,6 +13,7 @@ from schedule_notifications import (
     schedule_signature,
     schedule_signature_matches,
     acknowledge_schedule,
+    remember_schedule,
 )
 from outage_calendar import build_schedule_lines, extract_calendar_events
 from utils import TZ_KYIV, now_kyiv
@@ -59,7 +60,9 @@ class ScheduleChangeFeature(Feature):
         previous_groups = self.state_get("notified_groups")
         if previous_groups is None:
             previous_groups = canonical_groups(self.state_get("current_group", ""))
-        previous_snapshot = self.state_get("calendar_snapshot") or {}
+        # The shared calendar cache can advance after a failed send or when a
+        # different feature fetches it. Prefer our independent acknowledged data.
+        previous_snapshot = self.state_get("schedule_baseline") or self.state_get("calendar_snapshot") or {}
         events = await self.calendar_snapshot(self._fetch_outage_events)
         if (
             getattr(getattr(self.config, "group_change", None), "enabled", False)
@@ -69,16 +72,15 @@ class ScheduleChangeFeature(Feature):
             return
         schedule_lines = self._build_schedule_lines(events)
         now = now_kyiv()
-        signature = self._compute_signature(events, now=now)
-
         old_signature = self.state_get("schedule_signature", "")
-        if schedule_signature_matches(old_signature, events, previous_snapshot.get("events"), now=now):
-            self.state_set("schedule_signature", signature)
+        if schedule_signature_matches(old_signature, events, previous_snapshot.get("events"), now=now, previous_at=previous_snapshot.get("at")):
+            remember_schedule(self, events, now=now)
+            self.state_set("has_schedule", bool(schedule_lines))
             self.log.debug("Schedule signature unchanged, skipping")
             return
 
         if not old_signature:
-            self.state_set("schedule_signature", signature)
+            remember_schedule(self, events, now=now)
             self.state_set("has_schedule", bool(schedule_lines))
             if schedule_lines:
                 self.state_set("last_schedule_seen_at", now_kyiv().isoformat())
@@ -104,7 +106,7 @@ class ScheduleChangeFeature(Feature):
                 )
             else:
                 self.log.info("Schedule still empty, skipping notification")
-            self.state_set("schedule_signature", signature)
+            remember_schedule(self, events, now=now)
             self.state_set("has_schedule", False)
             return
 
@@ -113,7 +115,12 @@ class ScheduleChangeFeature(Feature):
             disable_notification=self.config.schedule_change.silent,
         )
         if delivered:
-            await acknowledge_schedule(self, events, schedule_lines)
+            if not await self.notify_schedule_restoration(events, previous_snapshot.get("events")):
+                return
+            from schedule_attachments import attach_schedule
+            if not await attach_schedule(self, delivered, events, previous_snapshot.get("events")):
+                return
+            await acknowledge_schedule(self, events, schedule_lines, now=now)
         self.log.info("Schedule update processed (%d lines)", len(schedule_lines))
 
     async def _fetch_outage_events(self) -> list[dict[str, Any]]:

@@ -7,6 +7,16 @@ import math
 from zoneinfo import ZoneInfo
 from PIL import Image, ImageDraw, ImageFont
 
+KYIV = ZoneInfo("Europe/Kyiv")
+NOW_COLOR = "#d73a59"
+PAST_FADE = 0.48
+PAGE_WIDTH = 1600
+FULL_WIDTH = 1920
+GRID_LEFT = 156
+GRID_RIGHT = 28
+GRID_TOP = 210
+BAR_HEIGHT = 34
+
 COLORS = {
     "outage": "#e9a63b",
     "possible": "#f6dca9",
@@ -39,13 +49,11 @@ def font(size, bold=False):
     raise ValueError("Cyrillic font unavailable")
 
 
+from utils import format_date, format_datetime
+
 def stamp(value):
     try:
-        return (
-            datetime.fromisoformat(value)
-            .astimezone(ZoneInfo("Europe/Kyiv"))
-            .strftime("%d.%m %H:%M")
-        )
+        return format_datetime(datetime.fromisoformat(value))
     except (ValueError, TypeError):
         return "—"
 
@@ -59,10 +67,16 @@ def timeline_segments(day, row):
             raise ValueError("Invalid timeline segments")
         cursor = 0
         for part in parts:
-            if not isinstance(part, dict) or any(
-                type(part.get(k)) not in (int, float) or not math.isfinite(part[k])
-                for k in ("start", "end")
-            ) or part["start"] != cursor or not cursor < part["end"] <= duration or part.get("kind") not in COLORS:
+            if (
+                not isinstance(part, dict)
+                or any(
+                    type(part.get(k)) not in (int, float) or not math.isfinite(part[k])
+                    for k in ("start", "end")
+                )
+                or part["start"] != cursor
+                or not cursor < part["end"] <= duration
+                or part.get("kind") not in COLORS
+            ):
                 raise ValueError("Invalid timeline segments")
             cursor = part["end"]
         if cursor != duration:
@@ -93,14 +107,323 @@ def paint_timeline(draw, day, row, x, y, width, height, *, start=0, end=None):
             for shift in range(-height, x1 - x0, 8):
                 a, b = max(0, shift), min(x1 - x0 - 1, shift + height - 1)
                 if a <= b:
-                    draw.line((x0+a, y+height-1-(a-shift), x0+b, y+height-1-(b-shift)), fill="#8f9aa8")
+                    draw.line(
+                        (
+                            x0 + a,
+                            y + height - 1 - (a - shift),
+                            x0 + b,
+                            y + height - 1 - (b - shift),
+                        ),
+                        fill="#8f9aa8",
+                    )
     for minute in range(int(start), int(end) + 1, 60):
         edge = round(x + (minute - start) * scale)
         draw.line((edge, y, edge, y + height), fill="#adbcc3")
     draw.rectangle((x, y, x + width, y + height), outline="#adbcc3")
 
 
-def render_grid(data, offset=0, personal=False):
+def time_label(day, minute):
+    """Civil clock labels, preserving repeated DST hours and exact minutes."""
+    slots = day["slots"]
+    if minute == len(slots) * 30:
+        return "24:00"
+    slot = slots[int(minute // 30)]
+    hours, minutes = map(int, slot["label"].split(":"))
+    seconds = round((hours * 60 + minutes + minute % 30) * 60)
+    label = f"{seconds // 3600:02}:{seconds % 3600 // 60:02}"
+    if seconds % 60:
+        label += f":{seconds % 60:02}"
+    if sum(s["label"][:2] == slot["label"][:2] for s in slots) > 2:
+        offset = slot.get("offset", "")
+        label += " UTC" + (
+            offset[:3] + ":" + offset[3:] if len(offset) == 5 else offset
+        )
+    return label
+
+
+def current_minute(day, now):
+    """Place the current instant on today's elapsed-time axis, never tomorrow's."""
+    local = now.astimezone(KYIV)
+    if day["date"] != local.date().isoformat():
+        return None
+    start = day["slots"][0].get("start")
+    start = (
+        datetime.fromisoformat(start)
+        if start
+        else local.replace(hour=0, minute=0, second=0, microsecond=0)
+    )
+    if start.tzinfo is None:
+        raise ValueError("Schedule timestamps require a timezone")
+    minute = (now.timestamp() - start.timestamp()) / 60
+    return minute if 0 <= minute < len(day["slots"]) * 30 else None
+
+
+def interval_summaries(day, row):
+    """Text ranges also cover narrow bands and distinguish forecasts/unknowns."""
+    parts = timeline_segments(day, row)
+    labels = {
+        "outage": "Відключення",
+        "possible": "Можливі",
+        "forecast": "Прогноз",
+        "unknown": "Немає даних",
+    }
+    result = []
+    for kind, title in labels.items():
+        ranges = [
+            f"{time_label(day, p['start'])}–{time_label(day, p['end'])}"
+            for p in parts
+            if p["kind"] == kind
+        ]
+        if ranges:
+            result.append((kind, title + ":", ranges))
+    if not result:
+        forecast = any(p["kind"] == "forecast_clear" for p in parts)
+        result.append(
+            (
+                "forecast_clear" if forecast else "clear",
+                "Прогноз: без відключень" if forecast else "Без планових відключень",
+                [],
+            )
+        )
+    return result
+
+
+def _text_lines(draw, day, row, width, text_font):
+    result = []
+    for kind, title, ranges in interval_summaries(day, row):
+        line = title
+        for label in ranges:
+            candidate = line + (" " if line == title else " · ") + label
+            if draw.textlength(candidate, font=text_font) > width:
+                result.append((kind, line))
+                line = label
+            else:
+                line = candidate
+        result.append((kind, line))
+    return result
+
+
+def _fit_text(draw, value, width, text_font):
+    value = str(value)
+    if draw.textlength(value, font=text_font) <= width:
+        return value
+    while value and draw.textlength(value + "…", font=text_font) > width:
+        value = value[:-1]
+    return value + "…"
+
+
+def render_schedule(
+    data,
+    day,
+    rows,
+    *,
+    personal=False,
+    scope="Усі групи",
+    page=None,
+    now=None,
+    width=PAGE_WIDTH,
+    general=False,
+):
+    """An uninterrupted day table, followed by a separate per-group range key."""
+    now = now or datetime.now(KYIV)
+    marker = current_minute(day, now)
+    left, right = GRID_LEFT, GRID_RIGHT
+    plot_width = width - left - right
+    duration = len(day["slots"]) * 30
+    text_font = font(22)
+    line_height = 29
+    column_width = (width - 64) // 2
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    summaries = [
+        _text_lines(measure, day, row, column_width - 136, text_font) for row in rows
+    ]
+    # Keep the compact table whole. Range descriptions form a two-column key
+    # below it; a long/fragmented day's text never splits a timeline row.
+    detail_heights = [
+        18 + line_height * max(len(lines) for lines in summaries[i : i + 2])
+        for i in range(0, len(summaries), 2)
+    ]
+    table_bottom = GRID_TOP + BAR_HEIGHT * len(rows)
+    legend_top = table_bottom + 22
+    detail_top = legend_top + 104
+    footer = detail_top + sum(detail_heights) + 16
+    height = footer + 70
+    if height > 20000:
+        raise ValueError("Schedule image is too large")
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    title = (
+        f"ДТЕК · {format_date(day['date'])} · {scope}"
+    )
+    draw.text(
+        (24, 16),
+        _fit_text(draw, title, width - 48, font(32, True)),
+        font=font(32, True),
+        fill="#243442",
+    )
+    subtitle = "Усі групи оператора" if general else data.get("address", "")
+    draw.text(
+        (24, 58),
+        _fit_text(draw, subtitle, width - 48, font(22)),
+        font=font(22),
+        fill="#526273",
+    )
+    draw.text(
+        (24, 91),
+        f"ДТЕК: {stamp(data.get('source_updated_at'))} · Перевірено: {stamp(data.get('verified_at'))}",
+        font=font(19),
+        fill="#526273",
+    )
+
+    def highlighted(row):
+        return not general and bool(
+            row.get("selected") if personal else row.get("home")
+        )
+
+    if general:
+        note = "Загальний графік"
+    elif not any(highlighted(row) for row in day["rows"]):
+        note = "Вашу групу ще не підтверджено"
+    elif any(highlighted(row) for row in rows):
+        note = "Виділено вашу групу" if personal else "Виділено групи будинку"
+    else:
+        note = "Ваші групи — на іншій сторінці"
+    if page is not None:
+        note += f" · {page[0] + 1} / {page[1]}"
+    draw.text((24, 120), note, font=font(19), fill="#006b8d")
+    draw.text((30, GRID_TOP - 25), "Група", font=font(19), fill="#526273")
+    for i, slot in enumerate(day["slots"]):
+        if not slot["label"].endswith(":00"):
+            continue
+        x = left + i * 30 / duration * plot_width
+        draw.text(
+            (x, GRID_TOP - 25),
+            slot["label"][:2],
+            font=font(19),
+            fill="#526273",
+            anchor="mt",
+        )
+        if sum(s["label"] == slot["label"] for s in day["slots"]) > 1:
+            draw.text(
+                (x, GRID_TOP - 7),
+                slot.get("offset", "")[:3],
+                font=font(9),
+                fill="#526273",
+                anchor="mt",
+            )
+    draw.text(
+        (width - right, GRID_TOP - 25), "24", font=font(19), fill="#526273", anchor="mt"
+    )
+
+    for i, row in enumerate(rows):
+        y = GRID_TOP + i * BAR_HEIGHT
+        highlight = highlighted(row)
+        draw.rectangle(
+            (24, y, left, y + BAR_HEIGHT), fill="#e7f5fb" if highlight else "#f5f8fa"
+        )
+        size = 22
+        while (
+            size > 12
+            and draw.textlength(str(row["id"]), font=font(size, highlight)) > left - 40
+        ):
+            size -= 1
+        label_font = font(size, highlight)
+        draw.text(
+            (30, y + 5),
+            _fit_text(draw, row["id"], left - 40, label_font),
+            font=label_font,
+            fill="#006b8d" if highlight else "#243442",
+        )
+        paint_timeline(draw, day, row, left, y, plot_width, BAR_HEIGHT)
+        draw.line((24, y, left, y), fill="#d4dfe4")
+
+    cursor_x = (
+        round(left + marker / duration * plot_width) if marker is not None else None
+    )
+    if cursor_x is not None:
+        if cursor_x > left:
+            box = (left, GRID_TOP, cursor_x, table_bottom + 1)
+            image.paste(
+                Image.blend(
+                    image.crop(box),
+                    Image.new(
+                        "RGB", (cursor_x - left, table_bottom + 1 - GRID_TOP), "white"
+                    ),
+                    PAST_FADE,
+                ),
+                box,
+            )
+        label = "Зараз " + now.astimezone(KYIV).strftime("%H:%M")
+        label_width = draw.textlength(label, font=font(19, True)) + 18
+        # A dedicated line keeps the badge clear of the page note and hour labels.
+        label_x = max(
+            left, min(cursor_x - label_width / 2, width - right - label_width)
+        )
+        draw.rounded_rectangle(
+            (label_x, 150, label_x + label_width, 178), radius=6, fill=NOW_COLOR
+        )
+        draw.text((label_x + 9, 153), label, font=font(19, True), fill="white")
+        draw.line(
+            (cursor_x, GRID_TOP - 4, cursor_x, table_bottom), fill=NOW_COLOR, width=2
+        )
+    for i, row in enumerate(rows):
+        if highlighted(row):
+            y = GRID_TOP + i * BAR_HEIGHT
+            draw.rectangle(
+                (24, y, width - right, y + BAR_HEIGHT), outline="#008fb3", width=2
+            )
+    draw.rectangle((24, GRID_TOP, width - right, table_bottom), outline="#91a8b4")
+
+    for i, (kind, label) in enumerate(LABELS.items()):
+        x, y = 24 + (i % 3) * ((width - 48) // 3), legend_top + (i // 3) * 28
+        draw.rectangle((x, y + 2, x + 18, y + 20), fill=COLORS[kind], outline="#94a3b8")
+        draw.text((x + 28, y), label, font=font(19), fill="#526273")
+    draw.text(
+        (24, detail_top - 38),
+        "Час відключень за групами",
+        font=font(24, True),
+        fill="#243442",
+    )
+    y = detail_top
+    for start in range(0, len(rows), 2):
+        row_height = detail_heights[start // 2]
+        for column, (row, lines) in enumerate(
+            zip(rows[start : start + 2], summaries[start : start + 2])
+        ):
+            x = 24 + column * (column_width + 16)
+            draw.text(
+                (x, y),
+                _fit_text(draw, row["id"], 120, font(22, True)),
+                font=font(22, True),
+                fill="#006b8d" if highlighted(row) else "#243442",
+            )
+            for n, (kind, line) in enumerate(lines):
+                draw.text(
+                    (x + 132, y + n * line_height),
+                    line,
+                    font=text_font,
+                    fill="#75501b" if kind == "outage" else "#536371",
+                )
+        y += row_height
+    draw.line((24, footer - 8, width - 24, footer - 8), fill="#d4dfe4")
+    draw.text(
+        (24, footer),
+        "Сформовано: " + format_datetime(now),
+        font=font(19),
+        fill="#526273",
+    )
+    draw.text(
+        (24, footer + 29),
+        "При аварійних відключеннях графік може не діяти.",
+        font=font(19),
+        fill="#526273",
+    )
+    out = BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def render_grid(data, offset=0, personal=False, *, now=None, general=False):
     if data.get("status") != "ready" or type(offset) is not int or offset not in (0, 1):
         raise ValueError("Schedule grid unavailable")
     days = data.get("days", [])
@@ -109,102 +432,25 @@ def render_grid(data, offset=0, personal=False):
     day = days[offset]
     rows = day.get("rows", [])
     slots = day.get("slots", [])
-    if not 1 <= len(rows) <= 100 or not 1 <= len(slots) <= 50:
-        raise ValueError("Invalid grid size")
-    if any(
-        len(row.get("cells", [])) != len(slots)
-        or any(c not in COLORS for c in row["cells"])
-        for row in rows
+    if (
+        not 1 <= len(rows) <= 100
+        or not 1 <= len(slots) <= 50
+        or any(
+            len(row.get("cells", [])) != len(slots)
+            or any(c not in COLORS for c in row["cells"])
+            for row in rows
+        )
     ):
-        raise ValueError("Invalid schedule cells")
+        raise ValueError("Invalid grid size or cells")
     if all(p["kind"] == "unknown" for row in rows for p in timeline_segments(day, row)):
         raise ValueError("No published schedule for date")
-    cell = 28
-    left = 210
-    top = 160
-    rh = 42
-    width = left + cell * len(slots) + 24
-    height = top + rh * len(rows) + 190
-    image = Image.new("RGB", (width, height), "white")
-    draw = ImageDraw.Draw(image)
-    normal = font(17)
-    small = font(13)
-    title = font(25, True)
-    draw.text((20, 18), f"ДТЕК · Усі групи · {day['date']}", font=title, fill="#243442")
-    # The shared table includes the building, never an apartment/account number.
-    draw.text((20, 55), str(data.get("address", ""))[:110], font=normal, fill="#243442")
-    draw.text(
-        (20, 86),
-        f"Оновлено ДТЕК: {stamp(data.get('source_updated_at'))} · Перевірено: {stamp(data.get('verified_at'))}",
-        font=small,
-        fill="#334155",
+    return render_schedule(
+        data,
+        day,
+        rows,
+        personal=personal,
+        now=now,
+        width=FULL_WIDTH,
+        general=general,
+        scope="Усі групи · без адреси" if general else "Усі групи",
     )
-    has_selection = any(row.get("selected") for row in rows)
-    draw.text(
-        (20, 111),
-        (
-            "Час: Europe/Kyiv · Виділено вашу групу"
-            if has_selection
-            else "Час: Europe/Kyiv · Ваша група зараз недоступна"
-        )
-        if personal
-        else "Час: Europe/Kyiv · Виділено групи будинку",
-        font=small,
-        fill="#334155",
-    )
-    repeated = {
-        s["label"] for s in slots if sum(t["label"] == s["label"] for t in slots) > 1
-    }
-    for i, slot in enumerate(slots):
-        if i % 2 == 0 or slot["label"] in repeated:
-            draw.text(
-                (left + i * cell, top - 22), slot["label"], font=font(9), fill="#334155"
-            )
-            if slot["label"] in repeated:
-                # UTC offsets on a second line distinguish repeated hours without overlap.
-                draw.text(
-                    (left + i * cell, top - 12),
-                    slot.get("offset", ""),
-                    font=font(8),
-                    fill="#334155",
-                )
-    for r, row in enumerate(rows):
-        y = top + r * rh
-        highlight = bool(row.get("selected") if personal else row.get("home"))
-        draw.rectangle(
-            (20, y, left - 1, y + rh), fill="#dff3fb" if highlight else "#f5f7f8"
-        )
-        draw.text(
-            (30, y + 11),
-            str(row.get("label", row["id"]))[:22],
-            font=font(17, highlight),
-            fill="#006b8d" if highlight else "#243442",
-        )
-        paint_timeline(draw, day, row, left, y, cell * len(slots), rh)
-        if highlight:
-            draw.rectangle(
-                (20, y, left + len(slots) * cell, y + rh), outline="#008fb3", width=3
-            )
-    y = top + len(rows) * rh + 20
-    for i, (kind, label) in enumerate(LABELS.items()):
-        x = 20 + (i % 3) * (width // 3)
-        line = y + (i // 3) * 34
-        draw.rectangle(
-            (x, line, x + 22, line + 20), fill=COLORS[kind], outline="#94a3b8"
-        )
-        draw.text((x + 30, line), label, font=small, fill="#243442")
-    draw.text(
-        (20, y + 82),
-        "Плановий графік. Аварійні відключення можуть відрізнятися.",
-        font=normal,
-        fill="#334155",
-    )
-    draw.text(
-        (20, y + 112),
-        "Прогноз та відсутність даних не є підтвердженим денним графіком.",
-        font=small,
-        fill="#334155",
-    )
-    out = BytesIO()
-    image.save(out, format="PNG")
-    return out.getvalue()

@@ -558,13 +558,66 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(keys), 2)
         self.assertEqual(keys[0], keys[1])
 
-    async def test_duration_is_unknown_after_a_gap(self):
+    async def test_duration_is_omitted_after_a_gap(self):
         await self.step(1, "0")
         await self.step(11)
         await self.step(12, "unknown")
         await self.step(20, "230")
         await self.step(50, "230")
-        self.assertIn("невідомо", self.tg.messages[-1])
+        self.assertIn("duration=None", self.tg.messages[-1])
+
+    async def test_restore_keeps_observed_outage_duration_when_sensors_recover_apart(self):
+        await self.step(1, "0")
+        await self.step(11, "0")
+        for t in range(16, 612, 5):
+            await self.step(t, "0")
+        await self.step(616, "unavailable")
+        await self.step(650, "230")
+        await self.step(680, "231")
+        self.assertIn("duration=None", self.tg.messages[-1])
+        self.assertNotIn("невідомо", self.tg.messages[-1])
+        self.assertEqual(self.messages(), ["power_lost", "power_restored"])
+
+    async def test_gap_followed_by_same_state_keeps_anchor_and_does_not_sum_segments(self):
+        await self.step(1, "0")
+        await self.step(11, "0")
+        anchor = self.state.get(self.prefix, "power_last_change")
+        for t in range(16, 132, 5):
+            await self.step(t, "0")
+        await self.step(136, "unavailable")
+        await self.step(140, "0")
+        await self.step(150, "0")
+        self.assertEqual(self.state.get(self.prefix, "power_last_change"), anchor)
+        self.assertTrue(self.state.get(self.prefix, "power_observation_gap"))
+        for t in range(155, 211, 5):
+            await self.step(t, "0")
+        await self.step(215, "230")
+        await self.step(245, "230")
+        self.assertIn("duration=None", self.tg.messages[-1])
+        self.assertNotIn("щонайменше 3 хв", self.tg.messages[-1])
+
+    async def test_restart_preserves_lower_bound_but_does_not_count_unobserved_time(self):
+        await self.step(1, "0")
+        await self.step(11, "0")
+        for t in range(16, 132, 5):
+            await self.step(t, "0")
+        await self.feature.on_stop()
+        self.assertEqual(self.state.get(self.prefix, "power_known_duration"), 120)
+        self.feature._stopped = False
+        self.state.set(self.prefix, "power_observation_gap", True)
+        await self.step(3611, "230")
+        await self.step(3641, "230")
+        self.assertIn("duration=None", self.tg.messages[-1])
+
+    async def test_normal_observations_keep_exact_duration(self):
+        await self.step(1, "0")
+        await self.step(11, "0")
+        for t in range(16, 132, 5):
+            await self.step(t, "0")
+        await self.step(136, "230")
+        await self.step(166, "230")
+        self.assertIn("duration=2 хв", self.tg.messages[-1])
+        self.assertNotIn("невідомо", self.tg.messages[-1])
 
     async def test_presence_threshold_boundary(self):
         for value, expected in [
@@ -575,6 +628,65 @@ class PowerTransitionTests(unittest.IsolatedAsyncioTestCase):
         ]:
             self.put(value)
             self.assertEqual(await self.monitor.detect_current_power(), expected)
+
+    async def test_abrupt_restart_keeps_checkpointed_outage_without_counting_downtime(self):
+        import tempfile
+        from pathlib import Path
+        from state_store import StateStore
+
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        state_path = Path(folder.name) / "state.json"
+        store = StateStore(state_path)
+        for (prefix, key), value in self.state._data.items():
+            store.set(prefix, key, value)
+        self.state = self.feature.state = self.monitor._state = store
+        self.addAsyncCleanup(store.flush)
+        await self.step(1, "0")
+        await self.step(11, "0")
+        for t in range(16, 647, 5):
+            await self.step(t, "0")
+        # Flush normal writes, deliberately skipping on_stop: a killed process
+        # cannot close its current observation segment.
+        await store.flush()
+        loaded = StateStore(state_path)
+        loaded.load()
+        self.addAsyncCleanup(loaded.flush)
+        self.assertEqual(loaded.get(self.prefix, "power_known_duration"), 600)
+        anchor = loaded.get(self.prefix, "power_last_change")
+        old = self.feature
+        self.feature = type(old)(address_config=old.config, ha_client=self.ha,
+                                 telegram=self.tg, state_store=loaded, templates=old.templates)
+        self.state = self.monitor._state = loaded
+        self.feature.set_power_monitor(self.monitor)
+        self.feature._monotonic = lambda: self.time
+        self.feature._arm = lambda deadlines: None
+        self.time = 7200
+        self.put("0")
+        await self.feature.on_start()
+        for t in range(7205, 7321, 5):
+            await self.step(t, "0")
+        self.assertEqual(self.state.get(self.prefix, "power_last_change"), anchor)
+        await self.step(7325, "230")
+        await self.step(7355, "231")
+        self.assertIn("duration=None", self.tg.messages[-1])
+        self.assertEqual(self.messages(), ["power_lost", "power_restored"])
+
+    async def test_continuous_duration_checkpoints_are_bounded_and_reset_on_transition(self):
+        from unittest.mock import Mock
+
+        self.state.set = Mock(wraps=self.state.set)
+        for t in range(5, 636, 5):
+            await self.step(t, "230")
+        checkpoints = [c.args[2] for c in self.state.set.call_args_list
+                       if c.args[1] == "power_known_duration"]
+        self.assertEqual(checkpoints, list(range(60, 601, 60)))
+        await self.step(640, "0")
+        await self.step(650, "0")
+        self.assertEqual(self.state.get(self.prefix, "power_known_duration"), 0)
+        for t in range(655, 716, 5):
+            await self.step(t, "0")
+        self.assertEqual(self.state.get(self.prefix, "power_known_duration"), 60)
 
     async def test_cached_zero_before_start_or_ha_reconnect_is_not_a_loss_signal(self):
         self.feature.config.power.mode = "loss_plus_voltage"

@@ -13,9 +13,12 @@ from types import SimpleNamespace
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from config import delivery_profiles
 from ha_client import HACommandError
-from utils import format_datetime
+from utils import format_datetime, format_date, now_kyiv
 from reading_photos import ReadingPhotos, PHOTO_ACTIONS
 from personal_documents import PersonalDocuments
+from telegram_commands import CommandNavigation, automatic_status, profile_label
+from building_access import BuildingAccess
+from telegram_onboarding import OnboardingNavigation
 logger = logging.getLogger(__name__)
 ZONE_LABELS = {
     "GENERAL": "Загальні", "DAY": "День", "NIGHT": "Ніч",
@@ -23,17 +26,19 @@ ZONE_LABELS = {
 }
 
 
-class Conversations(ReadingPhotos, PersonalDocuments):
+class Conversations(CommandNavigation, ReadingPhotos, PersonalDocuments):
     def __init__(self, orchestrator, profile_id, telegram):
         self.app, self.bot_id, self.tg = orchestrator, profile_id, telegram
         self.buttons = OrderedDict()
         self.sessions = {}
+        self.onboarding = OnboardingNavigation(self)
+        self.members = BuildingAccess(orchestrator, profile_id, telegram)
         self._lock = asyncio.Lock()
         self.config = SimpleNamespace(telegram_bot_id=profile_id)
         self.name = "personal_reminders"
 
     def profiles(self, user_id):
-        return [
+        explicit = [
             a
             for a in delivery_profiles(self.app.config)
             if a.telegram_bot_id == self.bot_id
@@ -47,6 +52,8 @@ class Conversations(ReadingPhotos, PersonalDocuments):
                 or (a.mode == "building" and self.app.bots.chat(a) == str(user_id))
             )
         ]
+        keys = {p.key for p in explicit}
+        return explicit + [p for p in self.members.profiles(user_id) if p.key not in keys]
 
     async def send(self, chat, text, buttons=None, *, transient=True):
         # Commands have their own explicit reply destination; never inherit a house channel.
@@ -61,6 +68,9 @@ class Conversations(ReadingPhotos, PersonalDocuments):
         return await operation()
 
     def navigation(self, user, profile, actions=()):
+        actions = list(actions)
+        if user in self.sessions:
+            actions.append(("↩️ До чернетки показів", "resume", None))
         return self.keyboard(user, profile, [*actions, ("🏠 Меню", "menu", None)])
 
     async def reply(self, user, profile, title, text, actions=(), *, address=None, transient=True):
@@ -115,26 +125,36 @@ class Conversations(ReadingPhotos, PersonalDocuments):
             return
         user = sender.get("id")
         chat = message["chat"].get("id")
-        if not isinstance(user, int) or user <= 0 or chat != user:
+        if type(user) is not int or user <= 0 or chat != user:
             return
         if self.tg._test_chat_id and str(chat) != self.tg._test_chat_id:
             return
         if not callback and (
             time.time() - message.get("date", 0) > 300
-            or not (message.get("text") or message.get("photo") or message.get("document"))
+            or not (message.get("text") or message.get("photo") or message.get("document") or message.get("users_shared") or message.get("chat_shared"))
         ):
             return
         async with self._lock:
-            self.sessions = {
-                k: v for k, v in self.sessions.items() if v["expires"] > time.time()
-            }
+            for key, session in list(self.sessions.items()):
+                if session["expires"] <= time.time():
+                    self.cancel_reading(key)
             self.buttons = OrderedDict((k,v) for k,v in self.buttons.items() if v["expires"] > time.time())
+            if not callback and await self.onboarding.handle(user, sender, message):
+                return
+            if self.members.candidates():
+                if not self.tg.journal.claim_interaction(f"member-check:{user}", 1):
+                    if callback:
+                        await self.tg._bot.answer_callback_query(callback["id"], text="Зачекайте секунду й повторіть.")
+                    return
+            await self.members.refresh(user)
             profiles = self.profiles(user)
             if not profiles:
                 if callback:
                     await self.tg._bot.answer_callback_query(
                         callback["id"], text="Доступ не налаштовано."
                     )
+                    return
+                if await self.public_command(user, sender, message.get("text", "").strip()):
                     return
                 if (
                     self.app.config.welcome_enabled
@@ -191,8 +211,10 @@ class Conversations(ReadingPhotos, PersonalDocuments):
                 return
             text = message["text"].strip()
             if text.startswith("/"):
-                self.cancel_reading(user)
-                await self.menu(user, profiles)
+                try:
+                    await self.command(user, profiles, text)
+                except Exception as exc:
+                    await self.failure(user, exc, profiles[0], action="command")
                 return
             session = self.sessions.get(user)
             if session and session["expires"] > time.time():
@@ -208,30 +230,24 @@ class Conversations(ReadingPhotos, PersonalDocuments):
             await self.menu(user, profiles)
 
     async def menu(self, user, profiles):
+        self.invalidate_reading_buttons(user)
         if len(profiles) > 1:
             rows = []
             for profile in profiles:
                 rows.extend(self.keyboard(user, profile, [(
-                    "🏠 " + (profile.display_name or "Рахунок ДТЕК"), "profile", None
+                    profile_label(profile), "profile", None
                 )]).inline_keyboard)
-            await self.send(user, "⚡️ <b>Мій ДТЕК</b>\n\nОберіть рахунок:", InlineKeyboardMarkup(inline_keyboard=rows))
+            await self.send(user, "⚡️ <b>Мій ДТЕК</b>\n\nОберіть адресу або рахунок:", InlineKeyboardMarkup(inline_keyboard=rows))
             return
         for profile in profiles:
             actions = [
                 ("📅 Графік на сьогодні", "grid", 0),
                 ("🗓 Графік на завтра", "grid", 1),
             ]
-            status = profile.status_message
             # Only a pinned, periodically refreshed post replaces manual access.
             # With interval=0, event-driven updates may still occur, but users
             # must be able to request a fresh status at any time.
-            automatic_pinned_status = (
-                status.enabled
-                and status.pin
-                and status.delivery_mode == "pinned_edit"
-                and status.update_interval > 0
-            )
-            if not automatic_pinned_status:
+            if not automatic_status(profile):
                 actions.insert(0, ("⚡️ Стан", "status", None))
             if profile.mode == "personal" and profile.allow_readings:
                 actions += [
@@ -241,7 +257,9 @@ class Conversations(ReadingPhotos, PersonalDocuments):
             if profile.mode == "personal":
                 actions.append(("📄 Документи ДТЕК", "documents", None))
             if len(self.profiles(user)) > 1:
-                actions.append(("🔀 Обрати рахунок", "menu", None))
+                actions.append(("🔀 Обрати адресу / рахунок", "menu", None))
+            if user in self.sessions:
+                actions.insert(0, ("↩️ Продовжити введення показів", "resume", None))
             await self.send(
                 user,
                 "⚡️ <b>Мій ДТЕК</b>\n📍 " + escape(
@@ -285,20 +303,52 @@ class Conversations(ReadingPhotos, PersonalDocuments):
             if not (
                 v["user"] == user and v["action"] in PHOTO_ACTIONS | {
                     "confirm", "manual", "estimate", "review",
-                    "calibration_preview", "calibration_save",
+                    "calibration_preview", "calibration_save", "discard",
                 }
             )
         )
 
     async def action(self, user, profile, action, payload):
+        if profile not in self.profiles(user):
+            raise HACommandError("unauthorized")
+        if action == "command":
+            await self.action(user, profile, *payload)
+            return
+        if profile.mode == "building" and action not in {"menu", "profile", "status", "grid", "resume", "help"}:
+            raise HACommandError("unauthorized")
+        if action == "resume":
+            await self.resume_reading(user)
+            return
+        session = self.sessions.get(user)
+        if session and session["expires"] <= time.time():
+            self.cancel_reading(user)
+            session = None
+        if action == "discard":
+            if not session or payload["session"] is not session:
+                await self.send(user, "ℹ️ Чернетка змінилася. Відкрийте /start.")
+                return
+            self.cancel_reading(user)
+            await self.action(user, profile, payload["action"], None)
+            return
+        if session and (action == "readings" or (action == "profile" and profile.mode == "personal")):
+            if session["profile"] != profile.key:
+                self.invalidate_reading_buttons(user)
+                await self.reply(user, profile, "📝 Є незавершені покази",
+                    "Перейти до іншого профілю та видалити чернетку? Покази ще не будуть передані.",
+                    [("✖️ Відкинути й перейти", "discard", {"session": session, "action": action})])
+                return
+            if action == "readings":
+                await self.resume_reading(user)
+                return
+        if action in ("status", "grid", "history", "result", "documents", "document", "help"):
+            self.invalidate_reading_buttons(user)
         if action in PHOTO_ACTIONS:
             await self.photo_action(user, profile, action, payload)
             return
         if action in ("documents", "document"):
-            self.cancel_reading(user)
             await self.document_action(user, profile, action, payload)
             return
-        if action in ("menu", "profile", "readings", "manual", "estimate", "review"):
+        if action in ("readings", "manual", "estimate", "review"):
             # Editing, starting over or switching accounts invalidates old confirmations.
             self.cancel_reading(user)
         if action == "menu":
@@ -311,6 +361,8 @@ class Conversations(ReadingPhotos, PersonalDocuments):
             # Match the automatic status, including saved template overrides,
             # fresh voltage, cabinet groups and unverified schedule handling.
             text = await self.app.render_status(profile)
+            if profile not in self.profiles(user):
+                raise HACommandError("unauthorized")
             await self.send(user, escape(text), self.navigation(user, profile))
             return
         if action == "grid":
@@ -704,19 +756,24 @@ class Conversations(ReadingPhotos, PersonalDocuments):
 
     async def grid(self, user, profile, offset):
         from schedule_image import render_grid
-        from schedule_pages import select_page, render_page, SCOPES
+        from schedule_pages import select_page, render_page, SCOPES, SCOPE_BUTTONS
         from aiogram.types import BufferedInputFile
 
         request = offset if isinstance(offset, dict) else {"offset": int(offset)}
         navigating = "date" in request
+        refresh = not navigating or request.get("refresh") is True
         offset = request.get("offset", 0)
         scope, page = request.get("scope", "auto"), request.get("page", 0)
         try:
             if profile.mode == "personal":
-                data = await self.cabinet(profile, user, "grid" if navigating else "refresh")
+                data = await self.cabinet(profile, user, "refresh" if refresh else "grid")
             else:
-                entity = f"sensor.{profile.entity_prefix}_schedule_status"
-                if not navigating:
+                # Entity IDs may use translated names or have been renamed in
+                # HA. The integration's registry-backed catalog identifies the
+                # status belonging to this building without guessing a suffix.
+                from schedule_attachments import building_grid_entity
+                entity = await building_grid_entity(self.app.ha, profile)
+                if refresh:
                     await self.app.ha.command(
                         "dtek_monitor/schedule_refresh", entity_id=entity
                     )
@@ -748,17 +805,24 @@ class Conversations(ReadingPhotos, PersonalDocuments):
             def target(selected_scope, selected_page=0, full=False):
                 return {"offset": offset, "date": view.day["date"], "scope": selected_scope, "page": selected_page, "full": full}
             for name in ("mine", "home", "all"):
-                if name != view.scope and (name != "mine" or profile.mode == "personal"):
-                    actions.append((SCOPES[name], "grid", target(name)))
+                current_scope = "all" if view.scope == "general" else view.scope
+                if name != current_scope and (name != "mine" or profile.mode == "personal"):
+                    actions.append((SCOPE_BUTTONS[name], "grid", target(name)))
+            if view.scope in ("all", "general"):
+                hidden = view.scope == "general"
+                actions.append(("🏠 Показати адресу та виділення" if hidden else "🙈 Приховати адресу та виділення", "grid", target("all" if hidden else "general", view.page, bool(request.get("full")))))
             if view.page > 0:
                 actions.append((f"◀️ {view.page} із {view.pages}", "grid", target(view.scope, view.page - 1)))
             if view.page + 1 < view.pages:
-                actions.append((f"{view.page + 2} із {view.pages} ▶️", "grid", target(view.scope, view.page + 1)))
-            actions.append(("📎 Повна таблиця PNG", "grid", target("all", full=True)))
+                actions.append((f"▶️ {view.page + 2} із {view.pages}", "grid", target(view.scope, view.page + 1)))
+            if view.scope in ("all", "general") and view.pages > 1 and not request.get("full"):
+                actions.append(("📎 Усі сторінки одним файлом", "grid", target(view.scope, full=True)))
+            actions.append(("🔄 Оновити", "grid", {**target(view.scope, view.page, bool(request.get("full"))), "refresh": True}))
+            rendered_at = now_kyiv()
             if request.get("full"):
-                png = await asyncio.to_thread(render_grid, data, offset, profile.mode == "personal")
+                png = await asyncio.to_thread(render_grid, data, offset, profile.mode == "personal", now=rendered_at, general=view.scope == "general")
             else:
-                png = await asyncio.to_thread(render_page, view)
+                png = await asyncio.to_thread(render_page, view, now=rendered_at)
         except ValueError:
             await self.reply(
                 user, profile, "📅 Графік ще недоступний",
@@ -766,12 +830,16 @@ class Conversations(ReadingPhotos, PersonalDocuments):
             )
             return
         date = view.day["date"]
-        caption = f"📅 Графік на {date}\n{SCOPES[view.scope]} · {view.page + 1} із {view.pages}\n"
+        if profile.member_access and profile not in self.profiles(user):
+            raise HACommandError("unauthorized")
+        caption = f"📅 Графік на {format_date(date)}\n{SCOPES[view.scope]} · {view.page + 1} із {view.pages}\n"
         if request.get("full"):
-            caption = f"📅 Графік на {date}\nПовна таблиця · Усі групи\n"
-        caption += escape(str(data.get("address", ""))[:300])
+            caption = f"📅 Графік на {format_date(date)}\nПовна таблиця · {SCOPES[view.scope]}\n"
+        if view.scope != "general":
+            caption += escape(str(data.get("address", ""))[:300])
         if view.unassigned:
             caption += "\nℹ️ Вашу групу ще не підтверджено."
+        caption += "\n🕒 Сформовано: " + format_datetime(rendered_at) + ". «Оновити» — свіжий графік і лінія часу."
         caption += "\n\n⚠️ При аварійних відключеннях графік може не діяти."
         async def send():
             args = dict(chat_id=user, caption=caption, parse_mode="HTML", reply_markup=self.navigation(user, profile, actions))
@@ -782,6 +850,7 @@ class Conversations(ReadingPhotos, PersonalDocuments):
         await self.tg.replace_menu(user, send)
 
     async def on_tick(self):
+        await self.sync_commands()
         async with self._lock:
             for user in list(self.sessions):
                 if self.sessions[user]["expires"] <= time.time():

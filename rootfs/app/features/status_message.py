@@ -267,7 +267,7 @@ class StatusMessageFeature(Feature):
         outage_duration = None
 
         power_last_change = self.state_get("power_last_change")
-        if power_last_change:
+        if power_last_change and not self.state_get("power_observation_gap", False):
             try:
                 outage_duration = format_duration(
                     (now_kyiv() - datetime.fromisoformat(str(power_last_change))).total_seconds()

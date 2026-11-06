@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
+from outage_calendar import parse_event_time
+from schedule_restoration import changed_restoration_end
 from utils import (
     OUTAGE_TYPE_UA,
     TZ_KYIV,
@@ -44,6 +46,70 @@ class EmergencyFeature(Feature):
         self._status_message: StatusMessageFeature | None = None
         self._pending_update_task: asyncio.Task[None] | None = None
         self._pending_update: dict[str, Any] = {}
+        self._eta_lock = asyncio.Lock()
+
+    async def on_schedule_notification(self, sender: Feature, events, previous) -> bool:
+        """Announce an ongoing hourly outage's revised end before image uploads."""
+        async with self._eta_lock:
+            # Planned repairs and emergencies do not follow the hourly grid.
+            if await self._get_entity_value("status") != "stabilization":
+                return True
+            scope = await self._eta_scope()
+            if not scope["start"]:
+                return True
+            groups = self.state_get("current_groups", [])
+            selected = getattr(self.config, "selected_group", "")
+            relevant = [selected] if selected in groups else groups
+            end = changed_restoration_end(
+                events, previous, relevant, self.state_get("groups_snapshot"), now_kyiv(),
+                started=parse_event_time(scope["start"]),
+            )
+            if end is None:
+                return True
+            end_raw = end.isoformat()
+            if self._eta_announced(scope, end_raw):
+                return True
+            if parse_event_time(await self._get_entity_value("outage_end")) == end:
+                # The operator update already carries this value (or is queued).
+                return True
+            verified = getattr(sender, "_verified_calendar", None)
+
+            async def still_current():
+                current_groups = await self.read_groups(require_schedule=True)
+                return (
+                    verified is not None
+                    and verified == (tuple(current_groups), self._schedule_revision(), self._schedule_source())
+                    and await self._get_entity_value("status") == "stabilization"
+                    and await self._eta_scope() == scope
+                    and now_kyiv() < end
+                )
+
+            text = self.render("schedule_restoration", new_end=format_datetime(end))
+            delivered = await self.send_message(text, disable_notification=True, before_send=still_current)
+            if not delivered:
+                return False
+            await self._remember_eta(scope, end_raw)
+            return True
+
+    async def _eta_scope(self) -> dict:
+        start = parse_event_time(await self._get_entity_value("outage_start"))
+        return {
+            "start": start.isoformat() if start else None,
+            "source": list(self._schedule_source()),
+            "groups": self.state_get("current_groups", []),
+            "selected": getattr(self.config, "selected_group", ""),
+        }
+
+    def _eta_announced(self, scope, end_raw) -> bool:
+        record = self.state_get("announced_restoration") or {}
+        return (record.get("scope") == scope and scope["start"] is not None
+                and parse_event_time(record.get("end")) == parse_event_time(end_raw))
+
+    async def _remember_eta(self, scope, end_raw) -> None:
+        self.state_set("announced_restoration", {"scope": scope, "end": end_raw})
+        save = getattr(self.state, "save", None)
+        if save is not None:
+            await save()
 
     def set_status_message(self, sm: StatusMessageFeature) -> None:
         """Inject StatusMessage dependency for push updates."""
@@ -71,6 +137,7 @@ class EmergencyFeature(Feature):
         self.state_set("last_emergency_status", current_status)
 
         if current_status == "ok":
+            self.state_set("announced_restoration", None)
             self.state_set("last_outage_start", None)
             self.state_set("last_outage_end", None)
             self.state_set("last_outage_description", None)
@@ -262,6 +329,7 @@ class EmergencyFeature(Feature):
     async def _on_outage_start(self, outage_type: str) -> None:
         """Send notification about outage start."""
         self._cancel_pending_update()
+        self.state_set("announced_restoration", None)
         start_raw = await self._get_entity_value("outage_start", "")
         end_raw = await self._get_entity_value("outage_end", "")
         self.state_set("outage_start_time", start_raw or now_kyiv().isoformat())
@@ -273,6 +341,7 @@ class EmergencyFeature(Feature):
     async def _on_outage_end(self, previous_type: str) -> None:
         """Handle outage end from DTEK."""
         self._cancel_pending_update()
+        self.state_set("announced_restoration", None)
         outage_start_iso = self.state_get("outage_start_time")
         duration_str = "—"
         if outage_start_iso:
@@ -419,6 +488,10 @@ class EmergencyFeature(Feature):
                 self._pending_update_task = None
 
     async def _flush_pending_update(self) -> None:
+        async with self._eta_lock:
+            await self._flush_pending_update_locked()
+
+    async def _flush_pending_update_locked(self) -> None:
         pending = self._pending_update
         self._pending_update = {}
 
@@ -428,6 +501,9 @@ class EmergencyFeature(Feature):
 
         reason_changed = bool(pending.get("reason_changed"))
         end_changed = bool(pending.get("end_changed"))
+        scope = await self._eta_scope()
+        if end_changed and self._eta_announced(scope, pending.get("end_new")):
+            end_changed = False
 
         if not reason_changed and not end_changed:
             return
@@ -442,10 +518,12 @@ class EmergencyFeature(Feature):
             new_end=format_datetime(pending.get("end_new")),
         )
 
-        await self.send_message(
+        delivered = await self.send_message(
             text,
-            disable_notification=self.config.emergency.silent,
+            disable_notification=not reason_changed or self.config.emergency.silent,
         )
+        if delivered and end_changed:
+            await self._remember_eta(scope, pending.get("end_new"))
         self._mark_emergency_context()
         await self._notify_status_message()
 

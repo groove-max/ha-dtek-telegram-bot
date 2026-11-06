@@ -159,6 +159,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             send_document=AsyncMock(),
             delete_message=AsyncMock(),
             edit_message_reply_markup=AsyncMock(),
+            set_my_commands=AsyncMock(), delete_my_commands=AsyncMock(), set_chat_menu_button=AsyncMock(),
         )
         message_ids = itertools.count(10)
         self.tg = SimpleNamespace(_bot=self.bot, _test_chat_id="", journal=self.journal)
@@ -294,12 +295,12 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             keyboard = self.bot.send_message.call_args.kwargs["reply_markup"]
             self.assertEqual("⚡️ Стан" in str(keyboard), expected)
 
-    async def test_return_to_menu_invalidates_reading_confirmation(self):
+    async def test_return_to_menu_keeps_draft_but_invalidates_reading_confirmation(self):
         token = self.router.keyboard(123, self.profile, [("Send", "confirm", "draft")]).inline_keyboard[0][0].callback_data
         menu = self.router.navigation(123, self.profile).inline_keyboard[0][0].callback_data
         self.router.sessions[123] = {"profile": self.profile.key, "expires": time.time() + 300}
         await self.router.handle(self.telegram_update(self.callback(menu)))
-        self.assertNotIn(123, self.router.sessions)
+        self.assertIn(123, self.router.sessions)
         await self.router.handle(self.telegram_update(self.callback(token)))
         self.app.ha.command.assert_not_awaited()
 
@@ -496,6 +497,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         for energy, expected in [({"binding": None}, "не налаштовано"),
                                  ({"binding": {}, "readings": {"GENERAL": {"error": "source_stale"}}}, "застаріли"),
                                  ({"binding": {}, "readings": {"GENERAL": {"error": "source_reset"}}}, "скидання")]:
+            self.router.cancel_reading(123)
             self.app.ha.command.side_effect = [context, energy]
             await self.router.action(123, self.profile, "readings", None)
             sent = self.bot.send_message.call_args.kwargs

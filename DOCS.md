@@ -7,13 +7,13 @@
 <a id="dtek-monitor"></a>
 ## Connect DTEK Monitor
 
-Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 2.0.0-rc5. HA 2026.3.0+ is required. Address support covers Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
+Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 2.0.0-rc6. HA 2026.3.0+ is required. Address support covers Odesa oblast, Kyiv oblast, Dnipropetrovsk oblast and Kyiv city.
 
 | What you need | Configuration |
 | --- | --- |
 | Building channel/group or private address alerts | Building mode; select an address from discovery. |
 | Building linked to an account in My DTEK | Check the building link in cabinet settings, then select that building in the bot. |
-| Personal cabinet groups, readings and reminders | Personal profile; recommended pair: bot 0.5.0-rc5 and Monitor 2.0.0-rc5. [Complete setup guide](docs/PERSONAL.md). |
+| Personal cabinet groups, readings and reminders | Personal profile; recommended pair: bot 0.5.0-rc6 and Monitor 2.0.0-rc6. [Complete setup guide](docs/PERSONAL.md). |
 
 For a shared chat, leave `selected_group` empty: building mode keeps all address groups. You may manually choose a confirmed group in this mode; a selection in My DTEK does not change it. Personal mode instead uses only the cabinet API groups, without manual substitution or fallback to building groups.
 
@@ -25,7 +25,7 @@ Building discovery uses the common entity ID prefix. Renaming individual IDs may
 Use the [latest compatible release](https://github.com/groove-max/ha-dtek-monitor/releases/latest) through the normal HACS release channel. Working 1.7.0 installations can continue using the bot. However, 1.7.0 has a [known first-setup issue](https://github.com/groove-max/ha-dtek-monitor/issues/5): when no schedule is published, setup can retry indefinitely without creating the address entities. **2.0.0b1 fixes this case** and loads the address independently of schedule availability.
 
 1. Create a full HA backup that includes integration files, `.storage`, app data, `dtek_telegram_bot.yaml` and template overrides.
-2. In HACS, select the current DTEK Monitor release (**2.0.0-rc5 or newer**) and restart HA. No prerelease switch is needed; see the [installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md).
+2. In HACS, select the current DTEK Monitor release (**2.0.0-rc6 or newer**) and restart HA. No prerelease switch is needed; see the [installation guide](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md).
 3. Keep the existing integration entry and bot addresses. Existing entity IDs, destinations, sensor bindings and group selections should remain unchanged.
 4. Check that the integration entry is loaded, the bot reconnects to HA, and local sensors report fresh values. A missing published schedule alone is not an upgrade failure.
 5. If you change bot settings, use **Apply (Застосувати)**. For an optional delivery test, first choose a [test destination](#testing).
@@ -52,10 +52,16 @@ The bot also checks the requested notification interval and groups, so today's s
 
 A verified group assignment change can still be announced without a schedule; it never means “no outages”.
 
+At midnight in Kyiv, yesterday's schedule expires silently. An unchanged schedule for the new day is not sent again. Changes to outage times, cancellations and newly published schedules still trigger notifications.
+
 Power monitoring from fresh local sensors can continue while DTEK schedules are unavailable. The `dtek_only` mode still depends on DTEK address data and does not measure actual electricity.
 
 <a id="telegram"></a>
 ## Set up Telegram
+
+**Without typing IDs:** use the native Telegram selector for people, a group or a channel on the profile’s **Telegram** step. For an already applied personal profile, create an invitation link for family members. The owner still reviews recipients and applies settings. See [invitations and native selection](docs/PERSONAL.md#connection-requests-and-invitations).
+
+**Private access:** choose **🔗 Request access** (`/connect`) in Telegram’s native Menu, then add the applicant to a personal profile on the **Telegram** step and **Apply**. `/start` opens the menu or greeting and does not request access. Manual IDs and detected recipients remain available. See [commands and requests](docs/PERSONAL.md#use-the-menu).
 
 Create a bot with [@BotFather](https://t.me/BotFather), add it to your destination and keep its token private. Use a separate bot for this app to avoid competing update collectors.
 
@@ -108,6 +114,8 @@ The runtime YAML stores only `telegram_bot_id` (`default` or the ID shown in the
 Clients, delivery journals and incoming-update collectors are separate for each bot. A Telegram error or rate limit for one bot does not stop the other bot workers. Status message IDs and notification acknowledgements are scoped to bot, chat, test/production mode and address. Switching bot or chat creates a new status; the old message stays in the old chat and can be removed manually. Rotating a token for the same bot preserves its status. The first upgrade imports the existing default bot’s state and journal automatically; keep a private backup before updating.
 
 **One chat per building profile; several people per personal profile.** To send the same building to another chat, use **Clone** in the editor: the copy gets its own stable profile ID, notification settings and delivery history. Two profiles may use the same building prefix; their profile IDs must differ. User-managed subscriptions and forum topics are not supported. Use one add-on installation for several profiles.
+
+**Private menu for building members.** On a building profile’s **Telegram** step, you can let its group/channel members privately request status and schedules. This is off by default and requires the bot to be a chat administrator. It does not grant cabinet access or enable private notification delivery. [Setup and multiple-address selection](docs/PERSONAL.md#private-menu-for-building-members).
 
 ### Find the chat ID
 
@@ -309,7 +317,7 @@ Use the compatible `voltage_only` or `loss_plus_voltage` scheme. `sources` combi
 
 Add voltage entities with labels such as `L1`, `L2`, `L3`. `on` means all configured phases are present; `off` requires evidence that all are absent. `partial` means some power is present with other phases absent or unknown; the status distinguishes missing and unknown phases. Uncertain evidence never becomes a phase-loss alert. Use a loss witness only if it describes the same monitored feed/topology.
 
-A previously confirmed outage survives a later data gap, so a valid recovery can still notify. Durations are marked unknown when missing observations prevent a reliable calculation.
+A previously confirmed outage survives a later data gap, so a valid recovery can still notify. The duration line is shown only for a fully observed period; it is omitted after a data gap or app downtime. See [duration in notifications](docs/POWER.md#duration-in-power-notifications).
 
 <a id="notifications"></a>
 ## Choose notifications for the chat
@@ -326,7 +334,35 @@ Each feature has an `enabled` setting. `silent` suppresses Telegram's notificati
 | `voltage` | Optional low/high/normal alerts: defaults `low: 195`, `high: 245`, `hysteresis: 5`, `delay: 15`. |
 | `status_message` | `pinned_edit` (default) or `send_new`; `pin`, `silent`, `update_interval` (300 s), `min_update_interval` (10 s). |
 
-Voltage recovery uses hysteresis: after low/high voltage, the value must move back inside the normal range by the configured margin. For shared chats, start with a pinned status and only the alerts residents need. If using `dtek_only`, enabling both DTEK outage messages and power messages can describe the same operator event twice; choose the desired categories.
+**Restoration time changes are silent.** With `emergency` enabled, a changed end of the ongoing hourly outage is announced immediately after its schedule notification, before image uploads. It is labelled “за графіком” (according to the schedule). A later operator update with the same time does not repeat it. This requires verified coverage and one common end for the relevant groups; emergencies and planned repair work continue to use the operator’s own forecast. Enable schedule-change notifications to receive the early schedule-based update.
+
+**Images with schedule updates are enabled by default.** In the profile editor, open **Notifications → “Зображення «Усі групи»” (All-groups image)** to disable them for that address/account. The same switch applies when a group-change message includes its new schedule. The full text arrives first; the bot replies to it with the same table as **📊 All groups**, highlighting your building or personal group. It includes only the changed date(s): today, tomorrow, or both. Large tables arrive as albums of pages. Image follow-ups (including albums for today and tomorrow) are always sent without sound. The main text keeps the notification’s `silent` setting. Each image shows when it was generated. It stays a snapshot unless you enable automatic updates below.
+
+If an image is unavailable, the text still arrives. A definite temporary Telegram rejection can retry the image without repeating the text or an accepted album. An uncertain delivery is not resent automatically. Images remain in the chat with automatic notifications when you navigate the menu.
+
+**Keep the latest automatic graph current.** Enable **Notifications → “Оновлювати останній графік за сьогодні” (Update the latest graph for today)**. This separate feature is off by default. Choose **Оновлення зображення, хв**: 5 minutes by default, from 1 to 60. Image attachments and either schedule-change or group-change notifications must also be enabled.
+
+The bot replaces the picture and caption in the latest automatic graph for **today**, including all its album pages. It moves the current-time line and fades elapsed time without posting another message. Only that profile’s recipient sees its own graph. Previous notifications and manual menu images are not updated. Tomorrow’s image starts updating when its date becomes today; yesterday’s images stop. The message references and update interval survive app restarts. After upgrading, tracking starts with newly delivered automatic graphs.
+
+**Schedule changes do not wait for the timer.** When HA reports a change to today’s table, the latest image is updated in place, including changes to groups outside your building. The bot compares the actual daily table: repeated checks, new verification timestamps and tomorrow-only changes do not cause another upload. If the notification already included a fresh image, it is not edited again unnecessarily. The regular minute check also catches changes missed during a reconnect. The chosen interval remains the timer for moving the time marker after the last image update. Telegram retry limits still apply; edits create no new notification.
+
+Updates read the integration’s current verified data without forcing extra DTEK refreshes. If data is unavailable, the image keeps its previous generation timestamp. A group change waits for a new matching notification; a deleted or uneditable message is not recreated. Telegram rate limits postpone the next attempt. The caption’s generation time remains the reference for the line, which can lag by the chosen interval.
+
+Dates use **DD.MM.YYYY**, and timestamps use **DD.MM.YYYY HH:MM**, for example **06.11.2026 12:00**. Times remain in Ukraine’s schedule timezone, including daylight-saving changes; no city suffix is shown. Time-only axis labels and interval endpoints remain **HH:MM**.
+
+YAML equivalents inside a profile:
+
+```yaml
+schedule_change:
+  include_image: true
+schedule_image:
+  enabled: true
+  update_interval: 300  # seconds; the editor shows minutes
+```
+
+Voltage recovery uses hysteresis: the reading must return inside the normal range by the configured margin. The bot sends a recovery notice only after its warning was confirmed as delivered; one incident produces one recovery notice, even after a restart. Missing voltage is handled by power monitoring. A single sensor is described as “Напруга в нормі”; phase names are added only when several voltage sensors are configured.
+
+Recovery notices are **silent by default**, separately from low/high alerts. In the profile editor, open **Additional settings → Silent notifications** and use **Напруга в нормі** (`voltage.normal_silent: true`). **Низька / висока напруга** controls `voltage.silent`. Uncheck the recovery switch to enable its sound. For shared chats, start with a pinned status and only the alerts residents need. If using `dtek_only`, choose operator/power notification categories carefully to avoid describing the same event twice.
 
 Schedules and local readings remain separate. During a DTEK failure, actual power detection can continue; saved schedules cannot drive automatic schedule/group/upcoming warnings.
 

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import math
-from power_monitor import PowerMonitor
-from utils import now_kyiv
 from typing import Any
+from uuid import uuid4
 
 from features.base import Feature
+from power_monitor import PowerMonitor
+from utils import now_kyiv
 
 
 class VoltageFeature(Feature):
@@ -29,8 +32,9 @@ class VoltageFeature(Feature):
         # entity -> pending alert task (for delay)
         self._pending_types: dict[str, str] = {}
         self._pending_alerts: dict[str, asyncio.Task[None]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
         for ve in self.config.voltage.entities:
-            self._entity_labels[ve.entity] = ve.label
+            self._entity_labels[ve.entity] = ve.label if len(self.config.voltage.entities) > 1 else ""
 
     @staticmethod
     def _alert_keys(entity_id: str) -> tuple[str, str]:
@@ -75,6 +79,48 @@ class VoltageFeature(Feature):
         alert_key, alert_type_key = self._alert_keys(entity_id)
         self.state_set(alert_key, False)
         self.state_set(alert_type_key, "")
+        self.state_set(f"voltage_incident_{entity_id}", None)
+
+    def _incident(self, entity_id: str) -> dict:
+        incident = self.state_get(f"voltage_incident_{entity_id}")
+        if incident:
+            return incident
+        # Legacy active flags were written before delivery. Only the journal
+        # can establish that their warning actually reached this recipient.
+        legacy_key = f"{self.state_get('delivery_identity_voltage')}:{self.state_get('delivery_revision_voltage', 0)}"
+        prior = self._delivery(legacy_key)
+        context = {}
+        if prior and prior[0] == "ok":
+            digest = hashlib.sha256(f"{self.effective_telegram_chat_id}:{legacy_key}".encode()).hexdigest()
+            row = self.tg.journal.db.execute("SELECT payload FROM deliveries WHERE key=?", (digest,)).fetchone()
+            context = json.loads(row[0]).get("context", {}) if row else {}
+        notified = bool(context.get("stream") == entity_id and
+                        context.get("guards", {}).get(f"voltage_observation_{entity_id}") in ("low", "high"))
+        incident = {"id": uuid4().hex, "notified": notified}
+        self.state_set(f"voltage_incident_{entity_id}", incident)
+        return incident
+
+    def _incident_key(self, entity_id: str, stage: str) -> str:
+        return f"voltage:{self.profile_key}:{entity_id}:{self._incident(entity_id)['id']}:{stage}"
+
+    def _delivery(self, key):
+        journal = getattr(self.tg, "journal", None)
+        if journal is None:
+            return None
+        digest = hashlib.sha256(f"{self.effective_telegram_chat_id}:{key}".encode()).hexdigest()
+        return journal.delivery(digest)
+
+    def _alert_was_delivered(self, entity_id: str) -> bool:
+        incident = self._incident(entity_id)
+        if incident["notified"]:
+            return True
+        record = self._delivery(self._incident_key(entity_id, "alert"))
+        return bool(record and record[0] == "ok")
+
+    async def _save(self):
+        save = getattr(self.state, "save", None)
+        if save:
+            await save()
 
     @property
     def enabled(self) -> bool:
@@ -86,6 +132,18 @@ class VoltageFeature(Feature):
     async def on_state_change(
         self, entity_id: str, old_state: dict[str, Any], new_state: dict[str, Any]
     ) -> None:
+        async with self._locks.setdefault(entity_id, asyncio.Lock()):
+            await self._observe(entity_id, new_state)
+
+    async def on_start(self):
+        await self.on_tick()
+
+    async def on_tick(self):
+        for entity in self._entity_labels:
+            async with self._locks.setdefault(entity, asyncio.Lock()):
+                await self._observe(entity, await self.ha.get_state(entity) or {})
+
+    async def _observe(self, entity_id, new_state):
         guard_key = f"voltage_observation_{entity_id}"
         if not self._is_fresh(new_state):
             self.state_set(guard_key, "unknown")
@@ -138,10 +196,18 @@ class VoltageFeature(Feature):
 
         if active_type is not None:
             self._cancel_pending(entity_id)
-            if self._has_recovered(active_type, voltage):
-                await self._send_normalized(entity_id, label, voltage)
+            if quality == "normal" and self._has_recovered(active_type, voltage):
+                if self._alert_was_delivered(entity_id):
+                    if not await self._send_normalized(entity_id, label, voltage):
+                        return
+                self._clear_alert_state(entity_id)
+                await self._save()
+            elif quality in ("low", "high") and quality != active_type:
+                # Jumping from one extreme to the other is not normalization.
                 self._clear_alert_state(entity_id)
             else:
+                if quality == active_type and not self._alert_was_delivered(entity_id):
+                    await self._send_alert(entity_id, label, voltage, active_type)
                 return
 
         if voltage < low:
@@ -166,40 +232,28 @@ class VoltageFeature(Feature):
         self._pending_types[entity_id] = alert_type
 
         async def _delayed_alert() -> None:
-            await asyncio.sleep(self.config.voltage.delay)
-            # Re-check current value
-            state = await self.ha.get_state(entity_id)
-            if state is None or not self._is_fresh(state):
-                self.state_set(f"voltage_observation_{entity_id}", "unknown")
-                return
-            sample_time = PowerMonitor._parse_state_datetime(
-                state.get("last_reported") or state.get("last_updated")
-            )
-            self.state_set(
-                f"voltage_expires_{entity_id}",
-                sample_time.timestamp()
-                + getattr(self.config.voltage, "max_age_seconds", 600),
-            )
             try:
-                current = float(self.get_state_value(state))
-            except (ValueError, TypeError):
-                return
-
-            if not math.isfinite(current) or not self._phase_is_present(current):
-                self._clear_alert_state(entity_id)
-                return
-
-            low = self.config.voltage.low
-            high = self.config.voltage.high
-            still_bad = (alert_type == "low" and current < low) or (
-                alert_type == "high" and current > high
-            )
-
-            if still_bad:
-                alert_key, alert_type_key = self._alert_keys(entity_id)
-                self.state_set(alert_key, True)
-                self.state_set(alert_type_key, alert_type)
-                await self._send_alert(entity_id, label, current, alert_type)
+                await asyncio.sleep(self.config.voltage.delay)
+                async with self._locks.setdefault(entity_id, asyncio.Lock()):
+                    state = await self.ha.get_state(entity_id)
+                    current = self._valid_voltage(state)
+                    if current is None:
+                        return
+                    if (alert_type == "low" and current < self.config.voltage.low) or (
+                        alert_type == "high" and current > self.config.voltage.high
+                    ):
+                        sample_time = PowerMonitor._parse_state_datetime(state.get("last_reported") or state.get("last_updated"))
+                        self.state_set(f"voltage_expires_{entity_id}", sample_time.timestamp() + getattr(self.config.voltage, "max_age_seconds", 600))
+                        self.state_set(f"voltage_observation_{entity_id}", alert_type)
+                        alert_key, alert_type_key = self._alert_keys(entity_id)
+                        self.state_set(f"voltage_incident_{entity_id}", {"id": uuid4().hex, "notified": False})
+                        self.state_set(alert_key, True)
+                        self.state_set(alert_type_key, alert_type)
+                        await self._send_alert(entity_id, label, current, alert_type)
+            finally:
+                if self._pending_alerts.get(entity_id) is asyncio.current_task():
+                    self._pending_alerts.pop(entity_id, None)
+                    self._pending_types.pop(entity_id, None)
 
         self._pending_alerts[entity_id] = asyncio.create_task(_delayed_alert())
 
@@ -212,6 +266,7 @@ class VoltageFeature(Feature):
     def _cancel_pending(self, entity_id: str) -> None:
         """Cancel a pending alert task if any."""
         task = self._pending_alerts.pop(entity_id, None)
+        self._pending_types.pop(entity_id, None)
         if task and not task.done():
             task.cancel()
 
@@ -225,6 +280,30 @@ class VoltageFeature(Feature):
             now_kyiv() - timestamp
         ).total_seconds() <= getattr(self.config.voltage, "max_age_seconds", 600)
 
+    def _valid_voltage(self, state) -> float | None:
+        if not state or not self._is_fresh(state):
+            return None
+        try:
+            voltage = float(self.get_state_value(state))
+        except (ValueError, TypeError):
+            return None
+        return voltage if math.isfinite(voltage) and self._phase_is_present(voltage) else None
+
+    async def _still_relevant(self, entity_id, stage):
+        state = await self.ha.get_state(entity_id)
+        voltage = self._valid_voltage(state)
+        if voltage is None:
+            return False
+        if stage == "normal":
+            active = self.state_get(self._alert_keys(entity_id)[1])
+            relevant = (self.config.voltage.low <= voltage <= self.config.voltage.high
+                        and active in ("low", "high") and self._has_recovered(active, voltage))
+        else:
+            relevant = voltage < self.config.voltage.low if stage == "low" else voltage > self.config.voltage.high
+        if relevant:
+            self.state_set(f"voltage_observation_{entity_id}", stage)
+        return relevant
+
     def _delivery_context(self, entity_id: str) -> dict:
         key = f"voltage_observation_{entity_id}"
         return {
@@ -235,27 +314,37 @@ class VoltageFeature(Feature):
 
     async def _send_alert(
         self, entity_id: str, label: str, voltage: float, alert_type: str
-    ) -> None:
+    ) -> int | None:
         """Send voltage alert message."""
         template = "voltage_low" if alert_type == "low" else "voltage_high"
         text = self.render(template, voltage=voltage, phase_label=label)
-        await self.send_message(
+        delivered = await self.send_message(
             text,
+            delivery_key=self._incident_key(entity_id, "alert"),
+            before_send=lambda: self._still_relevant(entity_id, alert_type),
             delivery_context=self._delivery_context(entity_id),
             disable_notification=self.config.voltage.silent,
         )
-        self.log.info(
-            "Voltage %s alert: %.1f V (phase: %s)", alert_type, voltage, label or "—"
-        )
+        if delivered:
+            self.state_set(f"voltage_incident_{entity_id}", {**self._incident(entity_id), "notified": True})
+            await self._save()
+            self.log.info("Voltage %s alert: %.1f V (phase: %s)", alert_type, voltage, label or "—")
+        return delivered
 
     async def _send_normalized(
         self, entity_id: str, label: str, voltage: float
-    ) -> None:
+    ) -> bool:
         """Send voltage normalized message."""
         text = self.render("voltage_normal", voltage=voltage, phase_label=label)
-        await self.send_message(
+        key = self._incident_key(entity_id, "normal")
+        delivered = await self.send_message(
             text,
+            delivery_key=key,
+            before_send=lambda: self._still_relevant(entity_id, "normal"),
             delivery_context=self._delivery_context(entity_id),
-            disable_notification=self.config.voltage.silent,
+            disable_notification=getattr(self.config.voltage, "normal_silent", True),
         )
-        self.log.info("Voltage normalized: %.1f V (phase: %s)", voltage, label or "—")
+        if delivered:
+            self.log.info("Voltage normalized: %.1f V (phase: %s)", voltage, label or "—")
+        record = self._delivery(key)
+        return bool(delivered or (record and record[0] in ("unknown", "rejected", "expired", "superseded")))

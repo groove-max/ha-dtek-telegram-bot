@@ -78,6 +78,7 @@ class GroupChangeFeature(Feature):
         if previous == groups:
             return
         # A failed calendar request must not turn into an empty-schedule claim.
+        previous_snapshot = self.state_get("schedule_baseline") or self.state_get("calendar_snapshot") or {}
         groups_only = False
         try:
             events = await self.calendar_snapshot(self._fetch_outage_events)
@@ -96,10 +97,17 @@ class GroupChangeFeature(Feature):
             schedule_lines=lines,
             schedule_complete=complete,
         )
-        if await self.send_message(
+        delivered = await self.send_message(
             text, disable_notification=self.config.group_change.silent,
             group_notice=tuple(groups) if groups_only else None
-        ):
+        )
+        if delivered:
+            if not groups_only and (lines or complete):
+                if not await self.notify_schedule_restoration(events, previous_snapshot.get("events")):
+                    return
+                from schedule_attachments import attach_schedule
+                if not await attach_schedule(self, delivered, events, previous_snapshot.get("events")):
+                    return
             self.state_set("notified_groups", groups)
             if lines or complete:
                 await acknowledge_schedule(self, events, lines)

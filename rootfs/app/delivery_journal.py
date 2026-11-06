@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from outage_calendar import canonical_warning_key
 from telegram_directory import RecipientDirectory
+from connection_requests import ConnectionRequests
+from telegram_onboarding import OnboardingStore
+from schedule_image_state import ScheduleImageStore
 
 
 class DeliveryJournal:
@@ -39,7 +43,10 @@ class DeliveryJournal:
         self.db.execute("UPDATE deliveries SET status='unknown' WHERE status='pending'")
         self._migrate_upcoming_deliveries()
         self.db.commit()
+        self.schedule_images = ScheduleImageStore(self.db)
         self.recipients = RecipientDirectory(self.db)
+        self.requests = ConnectionRequests(self.db)
+        self.onboarding = OnboardingStore(self.db)
 
     def _migrate_upcoming_deliveries(self) -> None:
         """Preserve sent/ambiguous outcomes when warnings stop including end times.
@@ -213,7 +220,7 @@ class DeliveryJournal:
                                 kind,
                                 str(allowed_chat),
                                 msg.get("message_id"),
-                                json.dumps(payload, ensure_ascii=False),
+                                re.sub(r"dtek_[A-Za-z0-9_-]{32}", "dtek_[redacted]", json.dumps(payload, ensure_ascii=False)),
                             ),
                         )
             self.db.execute(

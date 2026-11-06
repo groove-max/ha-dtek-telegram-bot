@@ -83,6 +83,8 @@ const state = {
   configBusy: false,
   templateBusy: false,
   botBusy: false,
+  onboardingLinks: {},
+  onboardingBusy: {},
   botDirty: false,
   botEditingId: "",
   botRevision: null,
@@ -516,12 +518,13 @@ async function fetchJson(url, options = {}) {
 function createBlankAddress(prefill = {}) {
   return {
     entity_prefix: prefill.entity_prefix ?? "",
-    profile_id: "", mode: "building", account_entity: "", telegram_user_id: 0, telegram_user_ids: [], telegram_route_owner: 0, allow_readings: false, reading_reminders: false, document_notifications: false,
+    profile_id: "", mode: "building", account_entity: "", telegram_user_id: 0, telegram_user_ids: [], telegram_route_owner: 0, allow_readings: false, reading_reminders: false, document_notifications: false, member_access: false,
     display_name: prefill.display_name ?? prefill.friendly_name ?? "",
     telegram_chat_id: "",
     telegram_bot_id: "default",
     selected_group: "",
-    schedule_change: { enabled: true, silent: true },
+    schedule_change: { enabled: true, silent: true, include_image: true },
+    schedule_image: { enabled: false, update_interval: 300 },
     emergency: { enabled: true, silent: false },
     group_change: { enabled: true, silent: false },
     voltage: {
@@ -535,6 +538,7 @@ function createBlankAddress(prefill = {}) {
       hysteresis: 5,
       delay: 15,
       silent: false,
+      normal_silent: true,
     },
     power: {
       enabled: false,
@@ -1566,10 +1570,10 @@ function currentEditorPreview() {
 function previewDescription() {
   const checked = state.editorDirty && state.validatedPreview?.revision === state.editorRevision;
   const snapshot = currentEditorPreview();
-  const time = snapshot?.generated_at ? new Date(snapshot.generated_at).toLocaleTimeString(UI_LOCALE) : null;
-  if (checked) return `Знімок перевіреної чернетки${time ? ` о ${time}` : ""}. Для нових показань натисніть «Перевірити».`;
+  const time = snapshot?.generated_at ? displayDateTime(snapshot.generated_at) : null;
+  if (checked) return `Знімок перевіреної чернетки${time ? `: ${time}` : ""}. Для нових показань натисніть «Перевірити».`;
   if (state.editorDirty) return "Показано стан збережених налаштувань. Перевірте чернетку, щоб побачити її результат.";
-  return time ? `Живий стан збережених налаштувань оновлено о ${time}.` : "Живий стан ще недоступний.";
+  return time ? `Живий стан збережених налаштувань оновлено: ${time}.` : "Живий стан ще недоступний.";
 }
 
 function profileIdentity(address) {
@@ -1833,7 +1837,7 @@ function renderAddressEditor(address, index) {
         <div class="addr-identity-grid">
           <label class="field"><span>Режим профілю</span><select class="addr-mode"><option value="building" ${address.mode !== "personal" ? "selected" : ""}>Графіки за адресою</option><option value="personal" ${address.mode === "personal" ? "selected" : ""}>Особистий кабінет</option></select></label>
           <label class="field personal-only"><span>Особовий рахунок у HA</span><select class="addr-account"><option value="">Оберіть рахунок</option>${(state.discovery?.accounts || []).map(a => `<option value="${escapeHtml(a.entity_id)}" ${a.entity_id === address.account_entity ? "selected" : ""}>${escapeHtml(a.masked + " · " + a.address)}</option>`).join("")}${address.account_entity && !(state.discovery?.accounts || []).some(a => a.entity_id === address.account_entity) ? `<option selected value="${escapeHtml(address.account_entity)}">${escapeHtml(address.account_entity)} · недоступний</option>` : ""}</select><small>Підключіть кабінет через DTEK Monitor. Група береться тільки з API кабінету.</small></label>
-          <label class="field personal-only"><span>Користувачі Telegram</span><input class="addr-user-id" type="text" data-identity-user="${address.telegram_route_owner || address.telegram_user_id || 0}" value="${escapeHtml((address.telegram_user_ids || (address.telegram_user_id ? [address.telegram_user_id] : [])).join(", "))}" placeholder="123456789, 987654321" />${recipientPicker(".addr-user-id", true)}<small>Кожен користувач має написати боту /start. Додавайте людей зі списку нижче або введіть ID через кому. Перевірте ім’я, @username та ID: після застосування кожен отримає доступ до цього рахунку, власне меню й увімкнені сповіщення. Дозвіл на передачу показів спільний для всіх. Щоб забрати доступ, видаліть ID та застосуйте зміни.</small></label>
+          <label class="field personal-only"><span>Користувачі Telegram</span><input class="addr-user-id" type="text" data-identity-user="${address.telegram_route_owner || address.telegram_user_id || 0}" value="${escapeHtml((address.telegram_user_ids || (address.telegram_user_id ? [address.telegram_user_id] : [])).join(", "))}" placeholder="123456789, 987654321" />${recipientPicker(".addr-user-id", true)}<small>Кожен користувач може надіслати заявку командою /connect. Додавайте людей зі списку нижче або введіть ID через кому. Перевірте ім’я, @username та ID: після застосування кожен отримає доступ до цього рахунку, власне меню й увімкнені сповіщення. Дозвіл на передачу показів спільний для всіх. Щоб забрати доступ, видаліть ID та застосуйте зміни.</small></label>
           <label class="toggle personal-only"><input class="addr-allow-readings" type="checkbox" ${address.allow_readings ? "checked" : ""}/><span>Дозволити передачу показів із підтвердженням</span></label>
           <label class="toggle personal-only"><input class="addr-reminders" type="checkbox" ${address.reading_reminders ? "checked" : ""}/><span>Нагадувати про покази</span></label>
           <label class="toggle personal-only"><input class="addr-documents" type="checkbox" ${address.document_notifications ? "checked" : ""}/><span>Нові документи й акти ДТЕК (перевірка кожні 30 хв)</span></label>
@@ -1871,6 +1875,7 @@ function renderAddressEditor(address, index) {
             ${recipientPicker(".addr-chat-id")}
             <small>Особистий чат, група або канал. Для особистого чату спочатку натисніть «Розпочати» у бота. Порожнє поле використовує чат обраного бота.</small>
           </label>
+          <label class="toggle building-only"><input class="addr-member-access" type="checkbox" ${address.member_access ? "checked" : ""}/><span>Особисте меню для учасників групи / каналу</span><small>Учасники чату цієї адреси можуть написати боту й отримати стан та графіки. Бот має бути адміністратором. Покази, документи та особисті сповіщення їм не надаються. Налаштовуйте на єдиному HA, що приймає команди цього токена.</small></label>
           <label class="field building-only">
             <span>Обрана група (порожньо — всі окремо)</span>
             <input class="addr-selected-group" type="text" value="${escapeHtml(address.selected_group || "")}" placeholder="GPV5.1" />
@@ -1883,11 +1888,17 @@ function renderAddressEditor(address, index) {
         <p class="section-label">Сповіщення</p>
         <div class="feature-grid">
           <label class="toggle"><input class="feature-schedule-change" type="checkbox" ${address.schedule_change?.enabled ? "checked" : ""} /><span>Зміна графіка</span></label>
+          <label class="toggle"><input class="schedule-include-image" type="checkbox" ${address.schedule_change?.include_image !== false ? "checked" : ""} /><span>Зображення «Усі групи»</span><small>До повідомлень про зміну графіка або групи. Таблиці змінених дат надходять у відповідь на текст; великі таблиці — альбомом. Якщо зображення недоступне, текст залишається.</small></label>
+          <label class="toggle"><input class="schedule-image-enabled" type="checkbox" ${address.schedule_image?.enabled ? "checked" : ""} /><span>Оновлювати останній графік за сьогодні</span></label>
           <label class="toggle"><input class="feature-emergency" type="checkbox" ${address.emergency?.enabled ? "checked" : ""} /><span>Екстрені</span></label>
           <label class="toggle"><input class="feature-group-change" type="checkbox" ${address.group_change?.enabled ? "checked" : ""} /><span>Зміна групи</span></label>
           <label class="toggle"><input class="feature-upcoming-enabled" type="checkbox" ${address.upcoming_outage?.enabled ? "checked" : ""} /><span>Наближення відключення</span></label>
           <label class="toggle"><input class="feature-status-enabled" type="checkbox" ${address.status_message?.enabled ? "checked" : ""} /><span>Закріплений статус</span></label>
         </div>
+      </div>
+
+      <div class="inline-fields schedule-image-options">
+        <label class="field"><span>Оновлення зображення, хв</span><input class="schedule-image-interval" type="number" min="1" max="60" step="1" value="${escapeHtml((address.schedule_image?.update_interval ?? 300) / 60)}" /><small>Потрібні зображення до сповіщень. Лінія часу оновлюється в останній таблиці за сьогодні, без нового повідомлення. Вчорашні зображення та екрани меню не змінюються.</small></label>
       </div>
 
       <div
@@ -2099,7 +2110,8 @@ function renderAddressEditor(address, index) {
               <label class="toggle"><input class="schedule-silent" type="checkbox" ${address.schedule_change?.silent !== false ? "checked" : ""} /><span>Зміна графіка</span></label>
               <label class="toggle"><input class="emergency-silent" type="checkbox" ${address.emergency?.silent ? "checked" : ""} /><span>Екстрені</span></label>
               <label class="toggle"><input class="group-silent" type="checkbox" ${address.group_change?.silent ? "checked" : ""} /><span>Зміна групи</span></label>
-              <label class="toggle"><input class="voltage-silent" type="checkbox" ${address.voltage?.silent ? "checked" : ""} /><span>Напруга</span></label>
+              <label class="toggle"><input class="voltage-silent" type="checkbox" ${address.voltage?.silent ? "checked" : ""} /><span>Низька / висока напруга</span></label>
+              <label class="toggle"><input class="voltage-normal-silent" type="checkbox" ${address.voltage?.normal_silent !== false ? "checked" : ""} /><span>Напруга в нормі</span></label>
               <label class="toggle"><input class="power-silent" type="checkbox" ${address.power?.silent ? "checked" : ""} /><span>Світло / фази</span></label>
               <label class="toggle"><input class="upcoming-silent" type="checkbox" ${address.upcoming_outage?.silent ? "checked" : ""} /><span>Найближче відключення</span></label>
               <label class="toggle"><input class="status-silent" type="checkbox" ${address.status_message?.silent !== false ? "checked" : ""} /><span>Статус</span></label>
@@ -2213,7 +2225,7 @@ function renderEditor(force = false) {
         </label>
       </div>
       <label class="toggle"><input id="cfg-receive-commands" type="checkbox" ${config.receive_commands !== false ? "checked" : ""}/><span>Приймати команди та особисті повідомлення</span></label>
-      <p class="helper-copy">Якщо цей токен працює на кількох HA, увімкніть приймання лише на сервері з особистим кабінетом. Решта серверів продовжать надсилати сповіщення.</p>
+      <p class="helper-copy">Якщо цей токен працює на кількох HA, увімкніть приймання лише на одному сервері. Усі профілі для особистого меню (будинки й кабінети) мають бути налаштовані на ньому. Решта серверів продовжать надсилати сповіщення.</p>
       <label class="toggle"><input id="cfg-welcome" type="checkbox" ${config.welcome_enabled !== false ? "checked" : ""}/><span>Привітання для нових користувачів</span></label>
       <p class="helper-copy">Лише у приватній переписці у відповідь на звернення, не частіше разу на добу. Текст і посилання можна змінити: «Шаблони» → «Привітання · welcome». Типово — опис бота, посилання на GitHub і Telegram ID співрозмовника. Шаблон спільний для всіх ботів цього add-on; дані рахунків у нього не передаються.</p>
       <p id="editor-preview-time" class="helper-copy">${escapeHtml(previewDescription())}</p>
@@ -2275,7 +2287,7 @@ function decorateProfiles() {
     });
     const grid = body.querySelector(".addr-identity-grid");
     for (const field of [...grid.children]) {
-      const delivery = field.querySelector(".addr-bot-id, .addr-chat-id, .addr-user-id");
+      const delivery = field.querySelector(".addr-bot-id, .addr-chat-id, .addr-user-id, .addr-member-access");
       const notify = field.querySelector(".addr-allow-readings, .addr-reminders");
       stages[delivery ? 1 : notify ? 2 : 0].append(field);
     }
@@ -2290,7 +2302,7 @@ function decorateProfiles() {
     controls.className = "wizard-controls";
     controls.innerHTML = `<button type="button" class="secondary-button" data-action="wizard-back">Назад</button><button type="button" class="secondary-button" data-action="wizard-next">Далі</button>`;
     body.append(controls);
-    stages[1].insertAdjacentHTML("afterbegin", `<div class="telegram-setup"><div class="telegram-progress" role="status"></div><div class="tool-actions"><button type="button" class="secondary-button" data-action="connect-bot">Додати іншого бота</button><button type="button" class="secondary-button" data-action="activate-bots">Запустити збережені налаштування</button><button type="button" class="secondary-button" data-action="refresh-recipients">Оновити одержувачів</button></div><p class="helper-copy">Після запуску напишіть боту /start. Для групи додайте бота й надішліть /start@ім’я_бота; для каналу призначте його адміністратором. Оберіть одержувача нижче або введіть ID. Виявлення користувача саме по собі не надає доступу до рахунку.</p></div>`);
+    stages[1].insertAdjacentHTML("afterbegin", `<div class="telegram-setup"><div class="telegram-progress" role="status"></div><div class="tool-actions"><button type="button" class="secondary-button" data-action="connect-bot">Додати іншого бота</button><button type="button" class="secondary-button" data-action="activate-bots">Запустити збережені налаштування</button><button type="button" class="secondary-button" data-action="refresh-recipients">Оновити одержувачів</button></div><p class="helper-copy">Після запуску приватний користувач може натиснути /connect у меню бота. Заявка з’явиться нижче; доступ надається після «Застосувати». /start лише відкриває меню або привітання. Для групи додайте бота й надішліть /start@ім’я_бота; для каналу призначте його адміністратором. Оберіть одержувача нижче або введіть ID. Виявлення користувача саме по собі не надає доступу до рахунку.</p><div class="telegram-onboarding"></div><div class="connection-requests"></div></div>`);
     if (!isNew) controls.insertAdjacentHTML("beforeend", '<button type="button" class="secondary-button" data-action="show-all">Усі розділи</button>');
   });
   editorContainer.querySelectorAll("details").forEach(node => {
@@ -2342,12 +2354,14 @@ function updateProfileSummary(form, address) {
   if (note) { note.textContent = `Поточна схема: ${POWER_MODE_META[address.power?.mode]?.label || "Датчики Home Assistant"}. Змінити можна в додаткових налаштуваннях нижче.`; note.classList.toggle("hidden", !address.power?.enabled || address.power.mode === "sources"); }
 }
 function updateTelegramSetup(form, address) {
+  updateConnectionRequests(form, address);
+  updateOnboarding(form, address);
   const bot = selectedBot(address), snapshot = state.configPayload?.bots;
   const runtime = snapshot?.runtime?.find(b => b.id === bot?.id);
   const dest = destination(address);
   const receiving = snapshot?.receiving !== false;
   const active = Boolean(runtime?.ready && !runtime.error && !runtime.delivery_error);
-  const message = !bot ? "1. Оберіть або додайте бота." : snapshot?.restart_required ? "1. Бот збережений. Запустіть збережені налаштування, щоб він почав бачити одержувачів. Чернетка цього профілю залишиться незастосованою." : !receiving ? "Приймання команд вимкнено на цьому HA. Виявлення одержувачів і особисте меню не працюватимуть. Увімкніть приймання в загальних налаштуваннях лише на одному сервері для цього токена." : (runtime?.error || runtime?.delivery_error) ? `Бот потребує уваги: ${runtime.error || runtime.delivery_error}` : !active ? "Підключення бота ще не підтверджене. Оновіть стан після запуску." : dest.id ? `Бот підключений. Одержувач: ${dest.label}.` : "2. Напишіть боту /start, потім оновіть список і оберіть одержувача.";
+  const message = !bot ? "1. Оберіть або додайте бота." : snapshot?.restart_required ? "1. Бот збережений. Запустіть збережені налаштування, щоб він почав бачити одержувачів. Чернетка цього профілю залишиться незастосованою." : !receiving ? "Приймання команд вимкнено на цьому HA. Виявлення одержувачів і особисте меню не працюватимуть. Увімкніть приймання в загальних налаштуваннях лише на одному сервері для цього токена." : (runtime?.error || runtime?.delivery_error) ? `Бот потребує уваги: ${runtime.error || runtime.delivery_error}` : !active ? "Підключення бота ще не підтверджене. Оновіть стан після запуску." : dest.id ? `Бот підключений. Одержувач: ${dest.label}.` : "2. Натисніть /connect у меню бота, потім оберіть заявку нижче. Також можна ввести ID вручну.";
   const node = form.querySelector(".telegram-progress");
   if (node) {
     node.textContent = message;
@@ -2380,8 +2394,12 @@ function reviewProfile(address) {
   if (!bot || !dest.id) warnings.push("Оберіть бота та одержувача на кроці Telegram.");
   if (dest.peer?.available === false || dest.peer?.available === 0) warnings.push("Бот більше не має доступу до обраного чату.");
   if (bot?.test_mode) warnings.push(address.mode === "personal" && !personalUsers(address).some(id => String(id) === String(bot.test_chat_id)) ? "Тестовий чат не належить жодному дозволеному користувачу. Особисті повідомлення заблоковані." : `Увімкнений тестовий режим: повідомлення → ${bot.test_chat_id}.`);
+  if (address.member_access && getDraftConfig().receive_commands === false) warnings.push("Меню учасників потребує приймання команд на цьому HA. Для одного токена може бути лише один такий сервер.");
   if (address.mode === "personal" && getDraftConfig().receive_commands === false) warnings.push("Приймання команд вимкнено. Особисте меню недоступне.");
   const rows = [["Джерело", source], ["Бот", bot ? `${bot.name}${bot.username ? " · @" + bot.username : ""}` : "не обрано"], [address.mode === "personal" ? "Одержувачі" : "Одержувач", dest.label], ["Сповіщення", names.join(", ") || "вимкнені"], ["Живлення", power], ["Якість напруги", address.voltage.enabled ? (address.voltage.entities || []).map(e => sensorLabel(e.entity)).join(", ") || "датчик не обрано" : "сповіщення вимкнені"]];
+  rows.push(["Оновлення останнього графіка", address.schedule_image?.enabled ? `Кожні ${address.schedule_image.update_interval / 60} хв` : "Вимкнене"]);
+  rows.push(["Зображення до змін графіка / групи", address.schedule_change.include_image !== false ? "Усі групи, для змінених дат" : "Вимкнені"]);
+  if (address.mode !== "personal") rows.push(["Особисте меню учасників", address.member_access ? "Стан і графіки після перевірки участі; бот має бути адміністратором" : "Вимкнене"]);
   if (address.mode === "personal") rows.push(["Передача показів", address.allow_readings ? "Дозволена всім указаним користувачам, після окремого підтвердження в Telegram" : "Вимкнена"]);
   return `<h3>Перевірте перед запуском</h3><dl class="profile-review">${rows.map(([k,v])=>`<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>${warnings.map(w=>`<p class="status-warn">${escapeHtml(w)}</p>`).join("")}<p class="helper-copy">«Застосувати» перевірить і збереже всі профілі та перезапустить застосунок. Увімкнені повідомлення надходитимуть указаним одержувачам. Незбережені поля токена потрібно спершу зберегти у формі бота.</p><button type="button" class="primary-button" data-action="wizard-apply">Застосувати</button>`;
 }
@@ -2460,13 +2478,19 @@ function collectEditorConfig() {
       allow_readings: form.querySelector(".addr-allow-readings").checked,
       reading_reminders: form.querySelector(".addr-reminders").checked,
       document_notifications: form.querySelector(".addr-documents").checked,
+      member_access: !personal && form.querySelector(".addr-member-access").checked,
       entity_prefix: form.querySelector(".addr-entity-prefix").value.trim(),
       display_name: form.querySelector(".addr-display-name").value.trim(),
       telegram_chat_id: personal ? String(users[0] || "") : form.querySelector(".addr-chat-id").value.trim(),
       telegram_bot_id: form.querySelector(".addr-bot-id").value,
       selected_group: personal ? "" : form.querySelector(".addr-selected-group").value.trim(),
+      schedule_image: {
+        enabled: form.querySelector(".schedule-image-enabled").checked,
+        update_interval: Number(form.querySelector(".schedule-image-interval").value) * 60,
+      },
       schedule_change: {
         enabled: form.querySelector(".feature-schedule-change").checked,
+        include_image: form.querySelector(".schedule-include-image").checked,
         silent: form.querySelector(".schedule-silent").checked,
       },
       emergency: {
@@ -2488,6 +2512,7 @@ function collectEditorConfig() {
         hysteresis: toNumber(form.querySelector(".voltage-hysteresis").value, 5),
         delay: toNumber(form.querySelector(".voltage-delay").value, 15, Number.parseInt),
         silent: form.querySelector(".voltage-silent").checked,
+        normal_silent: form.querySelector(".voltage-normal-silent").checked,
       },
       power: {
         enabled: form.querySelector(".power-enabled").checked,
@@ -3147,7 +3172,7 @@ async function loadDashboard({ background = false } = {}) {
     updateEditorLiveParts();
     setActiveTab(state.activeTab);
 
-    lastUpdated.textContent = `Оновлено о ${new Date().toLocaleTimeString(UI_LOCALE)}`;
+    lastUpdated.textContent = `Оновлено: ${displayDateTime(new Date())}`;
     if (!reconcileActivation(config) && !state.editorDirty) {
       setEditorStatus("Редактор готовий.", "muted");
     }
@@ -3402,6 +3427,8 @@ document.addEventListener("click", (event) => {
     document.getElementById("bot-extra").open = false;
     dialog.showModal(); document.getElementById("bot-name").focus(); return;
   }
+  if (["create-onboarding", "revoke-onboarding", "copy-onboarding", "apply-onboarding"].includes(action)) { void handleOnboarding(actionEl, action); return; }
+  if (action === "accept-request" || action === "decline-request") { void handleConnectionRequest(actionEl, action === "decline-request"); return; }
   if (action === "refresh-recipients") { void loadDashboard(); return; }
   if (action === "activate-bots") { void activateBots(); return; }
   if (action === "wizard-apply") {
@@ -3534,6 +3561,135 @@ function botOptions(selected) {
   const options = profiles.map((p) => `<option value="${escapeHtml(p.id)}" ${p.id === selected ? "selected" : ""}>${escapeHtml(p.name)}${p.username ? ` · @${escapeHtml(p.username)}` : ""}</option>`);
   if (!profiles.some((p) => p.id === selected)) options.push(`<option value="${escapeHtml(selected)}" selected>Недоступний профіль: ${escapeHtml(selected)}</option>`);
   return options.join("");
+}
+
+function updateConnectionRequests(form, address) {
+  const node = form.querySelector(".connection-requests");
+  if (!node) return;
+  const botId = address.telegram_bot_id || "default";
+  const requests = (state.configPayload?.bots?.connection_requests?.[botId] || []).filter(r => !r.profile_key || r.profile_key === profileIdentity(address));
+  const users = personalUsers(address);
+  const html = requests.length ? `<h4>🔗 Заявки на підключення</h4><p class="helper-copy">Перевірте людину за ім’ям, @username та ID. Додавання змінює лише чернетку цього профілю. Доступ і сповіщення з’являться після «Застосувати». Дозвіл на передачу показів спільний для всіх одержувачів профілю.</p>` + requests.map(r => {
+    const added = users.includes(r.user_id);
+    const valid = r.target_valid !== false && (!r.profile_key || !r.target_account_entity || r.target_account_entity === address.account_entity);
+    const attrs = `data-user-id="${escapeHtml(r.user_id)}" data-request-revision="${escapeHtml(r.revision)}" data-request-profile="${escapeHtml(r.profile_key || "")}"`;
+    return `<div class="connection-request"><p>${escapeHtml(r.name || "Користувач")}${r.username ? ` · @${escapeHtml(r.username)}` : ""} · ${escapeHtml(r.user_id)}</p><div class="tool-actions">${address.mode === "personal" ? `<button type="button" class="secondary-button" data-action="accept-request" ${attrs} ${added || !valid || state.configBusy ? "disabled" : ""}>${!valid ? "Профіль змінився — потрібна нова заявка" : added ? "Додано до одержувачів" : "Додати до цього профілю"}</button>` : '<span class="helper-copy">Для особистого доступу створіть профіль «Особистий кабінет». Домовий чат залишиться без змін.</span>'}<button type="button" class="secondary-button" data-action="decline-request" ${attrs} ${added || state.configBusy ? "disabled" : ""}>Відхилити</button></div></div>`;
+  }).join("") : '<p class="helper-copy">Нових заявок немає. Для запиту доступу користувач має натиснути /connect у меню бота.</p>';
+  // Polling may update the list, but never the user's form or focus on an unchanged row.
+  if (node._requestsHtml !== html) { node.innerHTML = html; node._requestsHtml = html; }
+}
+
+async function handleConnectionRequest(button, decline) {
+  const form = button.closest(".address-editor-card");
+  const botId = form?.querySelector(".addr-bot-id")?.value;
+  const user = Number(button.dataset.userId);
+  const revision = button.dataset.requestRevision;
+  const profileKey = button.dataset.requestProfile || "";
+  const request = state.configPayload?.bots?.connection_requests?.[botId]?.find(r => r.user_id === user && r.revision === revision && (r.profile_key || "") === profileKey);
+  if (!request || !form || state.configBusy) return;
+  if (!decline) {
+    if (request.target_valid === false || (request.target_account_entity && request.target_account_entity !== form.querySelector(".addr-account").value)) return;
+    const input = form.querySelector(".addr-user-id");
+    input.value = [...new Set([...input.value.split(/[\s,;]+/).filter(Boolean), String(user)])].join(", ");
+    input.dispatchEvent(new Event("input", {bubbles: true}));
+    input.dispatchEvent(new Event("change", {bubbles: true}));
+    setEditorStatus("Користувача додано до чернетки. Перевірте рахунок і дозволи та натисніть «Застосувати», щоб надати доступ.", "status-warn");
+    return;
+  }
+  button.disabled = true;
+  try {
+    state.configPayload.bots = await fetchJson("./api/bots/requests/decline", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({bot_id: botId, user_id: user, revision, ...(profileKey ? {profile_key: profileKey} : {})})});
+    updateEditorLiveParts();
+  } catch (error) { setEditorStatus(error.message, "status-bad"); }
+  finally { if (button.isConnected) button.disabled = false; }
+}
+
+function onboardingKey(address) {
+  return `${address.telegram_bot_id || "default"}:${profileIdentity(address)}`;
+}
+
+function updateOnboarding(form, address) {
+  const node = form.querySelector(".telegram-onboarding");
+  if (!node) return;
+  const key = onboardingKey(address), botId = address.telegram_bot_id || "default";
+  const snapshot = state.configPayload?.bots;
+  const active = snapshot?.runtime?.find(b => b.id === botId);
+  const ready = snapshot?.receiving !== false && active?.ready && !active.error && !selectedBot(address)?.test_mode;
+  const busy = state.onboardingBusy[key] || state.configBusy || !ready;
+  const personal = address.mode === "personal";
+  const saved = state.configPayload?.config?.addresses?.find(p => profileIdentity(p) === profileIdentity(address));
+  const canInvite = personal && saved?.mode === "personal" && saved.account_entity === address.account_entity && saved.telegram_bot_id === address.telegram_bot_id && !state.configPayload?.restart_required;
+  const all = snapshot?.onboarding?.[botId] || [];
+  const rows = all.filter(row => row.profile_key === profileIdentity(address));
+  const allowed = personal ? ["users"] : ["private", "group", "channel"];
+  const kinds = {users: "👥 Обрати людей у Telegram", private: "👤 Особистий чат", group: "👥 Група", channel: "📣 Канал"};
+  let html = `<h4>Підключення без введення ID</h4><div class="tool-actions">${allowed.map(kind => `<button type="button" class="secondary-button" data-action="create-onboarding" data-kind="${kind}" ${busy ? "disabled" : ""}>${kinds[kind]}</button>`).join("")}${personal ? `<button type="button" class="secondary-button" data-action="create-onboarding" data-kind="invite" ${busy || !canInvite ? "disabled" : ""}>🔗 Створити запрошення</button>` : ""}</div>`;
+  html += `<p class="helper-copy">${!ready ? "Вибір і запрошення доступні на сервері, де бот уже приймає команди." : personal ? "Вибір людей відкриває Telegram для вас. Запрошення можна надіслати близьким: вони подадуть заявку саме на цей профіль. Доступ надається лише після вашого «Застосувати»." : "Telegram запропонує обрати чат і надати боту потрібні права. Результат з’явиться тут; поточний одержувач зміниться лише після додавання до чернетки й застосування."}${personal && !canInvite ? " Для запрошення спочатку застосуйте особистий профіль." : ""}</p>`;
+  for (const row of rows.slice(0, 12)) {
+    if ((row.kind === "invite" && (!personal || !canInvite)) || (row.kind !== "invite" && !allowed.includes(row.kind))) continue;
+    const live = row.target_valid !== false && row.expires * 1000 > Date.now() && !["revoked", "cancelled", "expired"].includes(row.status);
+    const link = state.onboardingLinks[`${key}:${row.kind}`];
+    const states = {open: "Очікує відкриття у Telegram", selecting: "Очікує вибору у Telegram", complete: "Вибір отримано", revoked: "Посилання відкликано", expired: "Строк посилання минув", cancelled: "Вибір скасовано", profile_changed: "Профіль змінився — створіть нове запрошення"};
+    if (!live && link?.id !== row.id) continue;
+    html += `<div class="onboarding-result"><p><strong>${row.kind === "invite" ? "Запрошення до профілю" : kinds[row.kind]}</strong> · ${escapeHtml(states[row.target_valid === false ? "profile_changed" : ["revoked", "cancelled"].includes(row.status) ? row.status : live ? row.status : "expired"] || row.status)}</p>`;
+    if (live && link?.id === row.id && /^https:\/\/t\.me\/[A-Za-z0-9_]+\?start=dtek_[A-Za-z0-9_-]{32}$/.test(link.url)) {
+      html += `<label class="field"><span>${row.kind === "invite" ? "Посилання для близьких" : "Посилання вибору для вас"}</span><input class="onboarding-url" readonly value="${escapeHtml(link.url)}" /></label><div class="tool-actions"><a class="secondary-button" href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer">${row.kind === "invite" ? "Відкрити запрошення" : "Відкрити вибір у Telegram"}</a><button type="button" class="secondary-button" data-action="copy-onboarding">Скопіювати посилання</button></div>`;
+    }
+    if (live) html += `<p class="helper-copy">Діє до ${escapeHtml(displayDateTime(row.expires * 1000))}. ${row.kind === "invite" ? "Нове запрошення відкликає попереднє. Після оновлення сторінки створіть нове, якщо потрібно знову скопіювати посилання." : "Не пересилайте це посилання іншим: воно відкриває ваш вибір одержувачів."}</p>`;
+    if (row.owner) html += `<p class="helper-copy">Вибір виконав користувач Telegram ${escapeHtml(row.owner)}.</p>`;
+    for (const choice of row.choices || []) {
+      const added = personal ? personalUsers(address).includes(Number(choice.id)) : String(address.telegram_chat_id) === choice.id;
+      html += `<div class="connection-request"><p>${escapeHtml(choice.name || "Одержувач")}${choice.username ? ` · @${escapeHtml(choice.username)}` : ""} · ${escapeHtml(choice.id)}</p><p class="helper-copy">${escapeHtml(choice.reason || (choice.type === "private" ? "Користувач уже відкривав бота." : "Права бота перевірено."))}</p><button type="button" class="secondary-button" data-action="apply-onboarding" data-link-id="${escapeHtml(row.id)}" data-recipient-id="${escapeHtml(choice.id)}" ${busy || !live || !choice.ready || added ? "disabled" : ""}>${added ? "Додано до чернетки" : "Додати до цього профілю"}</button></div>`;
+    }
+    if (live) html += `<button type="button" class="secondary-button" data-action="revoke-onboarding" data-link-id="${escapeHtml(row.id)}" ${busy ? "disabled" : ""}>${row.kind === "invite" ? "Відкликати запрошення" : "Закрити вибір"}</button>`;
+    html += "</div>";
+  }
+  if (node._onboardingHtml !== html) { node.innerHTML = html; node._onboardingHtml = html; }
+}
+
+async function handleOnboarding(button, action) {
+  if (action === "copy-onboarding") {
+    const input = button.closest(".onboarding-result").querySelector(".onboarding-url");
+    try { await navigator.clipboard.writeText(input.value); setEditorStatus("Посилання скопійовано.", "status-good"); }
+    catch { input.focus(); input.select(); setEditorStatus("Посилання виділено. Скопіюйте його через Ctrl+C або меню копіювання."); }
+    return;
+  }
+  const form = button.closest(".address-editor-card");
+  const address = collectEditorConfig().addresses[Number(form?.dataset.index)];
+  if (!address) return;
+  const key = onboardingKey(address), botId = address.telegram_bot_id || "default";
+  if (state.configBusy || state.onboardingBusy[key]) return;
+  if (action === "apply-onboarding") {
+    const row = state.configPayload?.bots?.onboarding?.[botId]?.find(r => r.id === button.dataset.linkId && r.profile_key === profileIdentity(address));
+    const choice = row?.choices?.find(c => c.id === button.dataset.recipientId && c.ready);
+    if (!choice || row.status !== "complete" || row.expires * 1000 <= Date.now()) return;
+    if ((address.mode === "personal" && (row.kind !== "users" || choice.type !== "private")) || (address.mode !== "personal" && row.kind === "users")) return;
+    const input = form.querySelector(address.mode === "personal" ? ".addr-user-id" : ".addr-chat-id");
+    if (address.mode === "personal") {
+      const users = [...new Set([...parseUserIds(input.value), Number(choice.id)])];
+      if (users.length > 50) { setEditorStatus("В одному профілі може бути до 50 користувачів.", "status-bad"); return; }
+      input.value = users.join(", ");
+    } else {
+      if (input.value && input.value !== choice.id && !window.confirm("Замінити одержувача цього профілю обраним чатом? Зміна набуде чинності після «Застосувати».")) return;
+      input.value = choice.id;
+    }
+    input.dispatchEvent(new Event("input", {bubbles:true}));
+    input.dispatchEvent(new Event("change", {bubbles:true}));
+    setEditorStatus("Одержувача додано до чернетки. Перевірте профіль та натисніть «Застосувати».", "status-warn");
+    return;
+  }
+  state.onboardingBusy[key] = true;
+  state.writeEpoch += 1;
+  updateOnboarding(form, address);
+  try {
+    const create = action === "create-onboarding";
+    const body = create ? {bot_id: botId, kind: button.dataset.kind, profile_key: profileIdentity(address), account_entity: address.account_entity, expected_revision: state.configPayload.revision, pin: Boolean(address.status_message?.enabled && address.status_message?.pin)} : {bot_id: botId, id: button.dataset.linkId};
+    const result = await fetchJson(`./api/bots/onboarding/${create ? "create" : "revoke"}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    state.configPayload.bots = result.bots;
+    if (result.link) state.onboardingLinks[`${key}:${result.link.kind}`] = result.link;
+    setEditorStatus(create ? "Посилання готове нижче. Налаштування профілю не змінено." : "Посилання відкликано. Вже наданий доступ та чернетка залишилися без змін.", "status-good");
+  } catch (error) { setEditorStatus(error.message, "status-bad"); }
+  finally { state.writeEpoch += 1; state.onboardingBusy[key] = false; updateEditorLiveParts(); }
 }
 
 function recipientPicker(target, privateOnly = false) {
@@ -3713,3 +3869,14 @@ void loadDashboard();
 window.setInterval(() => {
   void loadDashboard({ background: true });
 }, REFRESH_INTERVAL_MS);
+
+
+function displayDateTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("uk-UA", {
+    timeZone: "Europe/Kyiv", day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(date).map(part => [part.type, part.value]));
+  return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}`;
+}

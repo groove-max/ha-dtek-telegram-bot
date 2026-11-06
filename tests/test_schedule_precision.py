@@ -4,7 +4,7 @@ from io import BytesIO
 import unittest
 from PIL import Image, ImageColor
 from test_grid_members import large_grid
-from schedule_image import COLORS, render_grid, timeline_segments
+from schedule_image import COLORS, GRID_TOP, GRID_LEFT, GRID_RIGHT, PAGE_WIDTH, FULL_WIDTH, render_grid, timeline_segments
 from schedule_pages import select_page, render_page
 
 
@@ -20,8 +20,8 @@ class SchedulePrecisionTests(unittest.TestCase):
     def test_both_pngs_colour_exact_boundaries_not_legacy_cells(self):
         for start,end in ((735,825),(727,799)):
             data=self.data(start,end);original=deepcopy(data)
-            for raw,left,scale,y,origin in ((render_grid(data),210,28/30,180,0),
-                    (render_page(select_page(data)),150,670/720,294,720)):
+            for raw,left,scale,y,origin in ((render_grid(data),GRID_LEFT,(FULL_WIDTH-GRID_LEFT-GRID_RIGHT)/1440,GRID_TOP+15,0),
+                    (render_page(select_page(data)),GRID_LEFT,(PAGE_WIDTH-GRID_LEFT-GRID_RIGHT)/1440,GRID_TOP+15,0)):
                 with Image.open(BytesIO(raw)) as image:
                     for minute,kind in ((start-4,'clear'),(start+4,'outage'),(end-4,'outage'),(end+4,'clear')):
                         self.assertEqual(image.getpixel((round(left+(minute-origin)*scale),y)), ImageColor.getrgb(COLORS[kind]), (start,end,minute))

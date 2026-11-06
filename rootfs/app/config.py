@@ -48,6 +48,12 @@ class PhaseEntityConfig(BaseModel):
 class ScheduleChangeConfig(BaseModel):
     enabled: bool = True
     silent: bool = True
+    include_image: bool = True
+
+
+class ScheduleImageConfig(BaseModel):
+    enabled: bool = False
+    update_interval: int = Field(default=300, ge=60, le=3600)
 
 
 class EmergencyConfig(BaseModel):
@@ -71,6 +77,7 @@ class VoltageConfig(BaseModel):
     present_above: float = Field(default=50.0, gt=0, allow_inf_nan=False)
     unavailable_as_missing: bool = False  # Deprecated: availability never proves loss.
     silent: bool = False
+    normal_silent: bool = True
 
     @model_validator(mode="before")
     @classmethod
@@ -252,6 +259,7 @@ class AddressConfig(BaseModel):
     allow_readings: bool = False
     reading_reminders: bool = False
     document_notifications: bool = False
+    member_access: bool = False
 
     @property
     def key(self) -> str:
@@ -289,6 +297,8 @@ class AddressConfig(BaseModel):
         if self.profile_id and (len(self.profile_id) > 64 or not all(c.isalnum() or c in "_-" for c in self.profile_id)):
             raise ValueError("Invalid profile ID")
         if self.mode == "personal":
+            if self.member_access:
+                raise ValueError("Member access applies only to building profiles")
             if not self.account_entity.startswith("sensor.") or not self.telegram_user_ids:
                 raise ValueError("Personal profiles require an account entity and Telegram user ID")
             original_user = self.telegram_user_id or self.telegram_user_ids[0]
@@ -314,6 +324,7 @@ class AddressConfig(BaseModel):
     selected_group: str = ""
 
     schedule_change: ScheduleChangeConfig = Field(default_factory=ScheduleChangeConfig)
+    schedule_image: ScheduleImageConfig = Field(default_factory=ScheduleImageConfig)
     emergency: EmergencyConfig = Field(default_factory=EmergencyConfig)
     group_change: GroupChangeConfig = Field(default_factory=GroupChangeConfig)
     voltage: VoltageConfig = Field(default_factory=VoltageConfig)
@@ -337,7 +348,7 @@ class AddressConfig(BaseModel):
                 if isinstance(user, str) and user.isdigit():
                     user = int(user)
                 data["telegram_user_ids"] = [user] if user else []
-            for key in ("schedule_change", "emergency", "group_change"):
+            for key in ("schedule_change", "schedule_image", "emergency", "group_change"):
                 val = data.get(key)
                 if isinstance(val, bool):
                     data[key] = {"enabled": val}

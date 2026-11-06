@@ -48,6 +48,7 @@ class Feature(ABC):
         self.tg = telegram
         self.state = state_store
         self.templates = templates
+        self._emergency = None
         self.log = logging.getLogger(f"{__name__}.{self.name}")
 
     @property
@@ -78,6 +79,15 @@ class Feature(ABC):
         """Called during graceful shutdown. Override if needed."""
 
     # ── Helpers ──
+
+    def set_emergency(self, feature) -> None:
+        """Share outage ETA acknowledgements with schedule notifications."""
+        self._emergency = feature
+
+    async def notify_schedule_restoration(self, events, previous) -> bool:
+        if self._emergency is None:
+            return True
+        return await self._emergency.on_schedule_notification(self, events, previous)
 
     # Map logical names to actual dtek_monitor entity suffixes.
     # schedule_group supports both the current primary_schedule_group entity
@@ -225,8 +235,11 @@ class Feature(ABC):
             template=template_name,
             feature=self.name,
             address=self.profile_key,
-            power_last_change=self.state_get("power_last_change"),
         )
+        # A physical power transition must not create another schedule text
+        # while its independent image delivery is waiting for a retry.
+        if self.name not in ("schedule_change", "group_change"):
+            identity["power_last_change"] = self.state_get("power_last_change")
         fingerprint = hashlib.sha256(
             json.dumps(identity, sort_keys=True, default=str).encode()
         ).hexdigest()

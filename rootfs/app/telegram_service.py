@@ -71,7 +71,7 @@ class TelegramService:
         )
 
     async def _recorded(
-        self, operation, *, action, chat, message_id=None, text=None, context=None
+        self, operation, *, action, chat, message_id=None, text=None, context=None, retry=True
     ):
         row = (
             self.journal.begin(
@@ -85,7 +85,7 @@ class TelegramService:
             # here could deliver an obsolete countdown or voltage alert.
             result = (
                 await operation()
-                if action == "send"
+                if action == "send" or not retry
                 else await self._call_with_retry(operation, action=action)
             )
         except Exception as exc:
@@ -197,6 +197,14 @@ class TelegramService:
                 await asyncio.sleep(retry_after)
 
         raise RuntimeError("unreachable")
+
+    async def send_schedule_images(self, images, **kwargs):
+        from telegram_media import send_schedule_images
+        return await send_schedule_images(self, images, **kwargs)
+
+    async def edit_schedule_image(self, message_id, image, **kwargs):
+        from telegram_media import edit_schedule_image
+        return await edit_schedule_image(self, message_id, image, **kwargs)
 
     async def send_message(
         self,
@@ -334,6 +342,10 @@ class TelegramService:
                 for field, value in context.get("guards", {}).items()
             ):
                 self.journal.finish_delivery(key, "superseded")
+                continue
+            if context.get("feature") == "voltage":
+                # Voltage owns incident acknowledgement and rechecks the live
+                # measurement; replaying this payload would bypass both.
                 continue
             await self._send(
                 payload["text"],

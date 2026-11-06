@@ -67,8 +67,8 @@ def format_datetime(dt: datetime | str | None) -> str:
     return dt.astimezone(TZ_KYIV).strftime("%d.%m.%Y %H:%M")
 
 
-def format_date_short(dt: datetime | str | None) -> str:
-    """Format datetime to 'DD.MM' in Kyiv timezone."""
+def format_date(dt: datetime | str | None) -> str:
+    """Format a calendar date as DD.MM.YYYY in the schedule timezone."""
     if dt is None:
         return "—"
     if isinstance(dt, str):
@@ -78,7 +78,11 @@ def format_date_short(dt: datetime | str | None) -> str:
             return dt
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=TZ_KYIV)
-    return dt.astimezone(TZ_KYIV).strftime("%d.%m")
+    return dt.astimezone(TZ_KYIV).strftime("%d.%m.%Y")
+
+
+# Preserve the import name for templates/extensions using the former helper.
+format_date_short = format_date
 
 
 def format_time_short(dt: datetime | str | None) -> str:

@@ -7,6 +7,7 @@ from features.schedule_change import ScheduleChangeFeature
 from features.status_message import StatusMessageFeature
 from features.upcoming_outage import UpcomingOutageFeature
 from features.voltage import VoltageFeature
+from features.schedule_image import ScheduleImageFeature
 
 ALL_FEATURES = [
     GroupChangeFeature,
@@ -16,4 +17,5 @@ ALL_FEATURES = [
     PowerPresenceFeature,
     UpcomingOutageFeature,
     StatusMessageFeature,
+    ScheduleImageFeature,
 ]

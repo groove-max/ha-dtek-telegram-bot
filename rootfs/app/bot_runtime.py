@@ -198,6 +198,9 @@ class BotRuntime:
             logger.warning(
                 "Feedback unavailable for %s: %s", profile.id, type(exc).__name__
             )
+            return
+        if self.conversation_factory is not None:
+            await handler.sync_commands()
 
     async def enqueue(self, profile_id, method, features, args=()):
         queue = self._queues.get(profile_id)

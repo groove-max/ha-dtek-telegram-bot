@@ -70,6 +70,9 @@ class UIServer:
         self._app.router.add_post("/api/bots/save", self._save_bot)
         self._app.router.add_post("/api/bots/delete", self._delete_bot)
         self._app.router.add_post("/api/bots/activate", self._activate_bots)
+        self._app.router.add_post("/api/bots/requests/decline", self._decline_request)
+        self._app.router.add_post("/api/bots/onboarding/create", self._create_onboarding)
+        self._app.router.add_post("/api/bots/onboarding/revoke", self._revoke_onboarding)
         self._app.router.add_post("/api/config/validate", self._validate_config)
         self._app.router.add_post("/api/config/save", self._save_config)
         self._app.router.add_post("/api/templates/preview", self._preview_template)
@@ -136,6 +139,30 @@ class UIServer:
             result = await self._orchestrator.save_bot_profile(body)
         except ValueError as exc:
             return web.json_response({"message": str(exc)}, status=409 if isinstance(exc, ProfileConflict) else 400)
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+    async def _decline_request(self, request: web.Request) -> web.Response:
+        body = await self._read_json_body(request)
+        try:
+            result = self._orchestrator.decline_connection_request(body)
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=409)
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+    async def _create_onboarding(self, request: web.Request) -> web.Response:
+        body = await self._read_json_body(request)
+        try:
+            result = await self._orchestrator.create_onboarding_link(body)
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=400)
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+    async def _revoke_onboarding(self, request: web.Request) -> web.Response:
+        body = await self._read_json_body(request)
+        try:
+            result = self._orchestrator.revoke_onboarding_link(body)
+        except ValueError as exc:
+            return web.json_response({"message": str(exc)}, status=409)
         return web.json_response(result, headers={"Cache-Control": "no-store"})
 
     async def _delete_bot(self, request: web.Request) -> web.Response:

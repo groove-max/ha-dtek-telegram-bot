@@ -30,8 +30,8 @@ def legacy_schedule_signature(events: list[dict]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def schedule_signature(events: list[dict], *, now=None) -> str:
-    """Hash logical intervals using legacy Kyiv day slices for upgrade continuity."""
+def schedule_parts(events: list[dict], *, now=None) -> list[dict]:
+    """Canonical Kyiv day slices, bounded by the window actually compared."""
     parts = []
     first = now.astimezone(TZ_KYIV).replace(hour=0, minute=0, second=0, microsecond=0) if now else None
     last = first + timedelta(days=2) if first else None
@@ -49,14 +49,34 @@ def schedule_signature(events: list[dict], *, now=None) -> str:
                 description += "; source=" + str(event["source"])
             parts.append({"start": start.isoformat(), "end": stop.isoformat(), "description": description})
             start = stop
-    return "v2:" + legacy_schedule_signature(parts)
+    return parts
 
 
-def schedule_signature_matches(stored, events, previous_events=None, *, now=None):
+def schedule_signature(events: list[dict], *, now=None) -> str:
+    """Hash logical intervals using legacy Kyiv day slices for upgrade continuity."""
+    return "v2:" + legacy_schedule_signature(schedule_parts(events, now=now))
+
+
+def schedule_signature_matches(stored, events, previous_events=None, *, now=None, previous_at=None):
     """Migrate only equivalent data; an unacknowledged fetched snapshot is not proof."""
     signature = schedule_signature(events, now=now)
     if isinstance(stored, str) and stored.startswith("v2:"):
-        return stored == signature
+        if stored == signature:
+            return True
+        at = parse_event_time(previous_at)
+        if now is not None and at is not None and at.timestamp() <= now.timestamp() and isinstance(previous_events, list):
+            try:
+                # Only a snapshot matching the acknowledged hash may be rebased.
+                # Clip to its ORIGINAL window first: new future dates were never
+                # acknowledged, even if a calendar returned a longer interval.
+                old_parts = schedule_parts(previous_events, now=at)
+                return (
+                    stored == "v2:" + legacy_schedule_signature(old_parts)
+                    and signature == schedule_signature(old_parts, now=now)
+                )
+            except (ValueError, TypeError, AttributeError):
+                pass
+        return False
     if stored in (signature[3:], legacy_schedule_signature(events),
                   legacy_schedule_signature(normalize_calendar_events(events))):
         return True
@@ -71,12 +91,23 @@ def schedule_signature_matches(stored, events, previous_events=None, *, now=None
     return False
 
 
-async def acknowledge_schedule(feature, events: list[dict], lines: list[str]) -> None:
+def remember_schedule(feature, events: list[dict], *, now) -> None:
+    """Keep an independent acknowledged baseline, never the shared fetch cache."""
+    parts = schedule_parts(events, now=now)
+    feature.state_set("schedule_signature", "v2:" + legacy_schedule_signature(parts))
+    feature.state_set("schedule_baseline", {
+        "at": now.astimezone(TZ_KYIV).replace(hour=0, minute=0, second=0, microsecond=0).isoformat(),
+        "events": parts,
+    })
+
+
+async def acknowledge_schedule(feature, events: list[dict], lines: list[str], *, now=None) -> None:
     """Record exactly the schedule delivered successfully by either feature."""
-    feature.state_set("schedule_signature", schedule_signature(events, now=now_kyiv()))
+    now = now or now_kyiv()
+    remember_schedule(feature, events, now=now)
     feature.state_set("has_schedule", bool(lines))
     if lines:
-        feature.state_set("last_schedule_seen_at", now_kyiv().isoformat())
+        feature.state_set("last_schedule_seen_at", now.isoformat())
     save = getattr(feature.state, "save", None)
     if save is not None:
         await save()

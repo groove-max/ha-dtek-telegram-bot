@@ -4,11 +4,13 @@
 
 Install the bot through the **Home Assistant app store**; HACS is used for the DTEK Monitor integration. [Latest bot release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest) · [Latest integration release](https://github.com/groove-max/ha-dtek-monitor/releases/latest).
 
-## RC5 update
+## RC6 update
 
-Install **Monitor 2.0.0-rc5** and **Bot 0.5.0-rc5** for the complete feature set. Schedules start with your groups; all groups remain available. Coloured bands use the published minute boundaries on an hourly scale, including quarter-hours. Older bot/integration combinations retain their available precision. The new compact HA card loads automatically. Reload the HA page after updating.
+Install **Monitor 2.0.0-rc6** and **Bot 0.5.0-rc6** for the current release pair. Update the integration first, restart HA, then update the app and reload its editor. Existing accounts, recipients, sensors, templates and pinned messages stay in place.
 
-The bot now allows several family members in one personal profile, with separate private menus and notifications. After Apply, temporary ingress gateway errors during restart keep the progress visible; success still requires confirmation from the restarted app. Recovery notifications from periodic sensors need a new report after the configured delay; see the [bot power guide](https://github.com/groove-max/ha-dtek-telegram-bot/blob/main/docs/POWER.md).
+Telegram now has a native command menu, recipient selection and invitation links; [personal setup](PERSONAL.md) explains each option. Private status/schedules for building members are optional and do not grant cabinet access.
+
+Schedule changes now include silent images by default. Under the profile’s notifications, you can disable attachments or enable automatic updates of the latest image for today (default interval 5 minutes). A real schedule change also refreshes it immediately. Voltage-normalization notices are silent by default; change **Додаткові параметри → Тихий режим повідомлень → Напруга в нормі** independently of low/high warnings. Duration lines are omitted when telemetry gaps make the elapsed outage uncertain.
 
 ## First installation
 
@@ -18,15 +20,15 @@ Choose [building mode](BUILDING.md) for address alerts or [personal mode](PERSON
 
 ## Choose the matching versions
 
-The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC5 releases are available in the regular release channel.
+The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC6 releases are available in the regular release channel.
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
-| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc5 |
-| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc5** |
-| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc5** |
-| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc5** |
-| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc5** |
+| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc6 |
+| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc6** |
+| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc6** |
+| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc6** |
+| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc6** |
 
 Public schedules and personal household cabinets cover the four operators listed in Monitor 2.0.0-rc2. **Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental** and await real-account validation. Odesa and Kyiv city cabinet reads have been checked live; actual Day/Night submission has automated tests only.
 

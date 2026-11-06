@@ -48,7 +48,8 @@ class GridPagesTests(unittest.TestCase):
             self.assertEqual(len(view.rows), 12)
             ids.extend(r["id"] for r in view.rows)
             with Image.open(BytesIO(render_page(view))) as image:
-                self.assertEqual(image.width, 840)
+                self.assertEqual(image.width, 1600)
+                self.assertGreater(image.width, image.height)
                 self.assertLess(image.height, 1500)
         self.assertEqual(ids, [r["id"] for r in data["days"][0]["rows"]])
         self.assertEqual(data, original)
@@ -194,6 +195,102 @@ class MemberConversationTests(unittest.IsolatedAsyncioTestCase):
         self.app.ha.command.return_value = large_grid()
         await self.router.grid(123, self.profile, {"date": "2026-10-24", "scope": "all", "page": 0})
         self.assertIn("Дата вже минула", self.bot.send_message.call_args.kwargs["text"])
+
+    async def test_file_export_only_adds_value_for_multiple_operator_pages(self):
+        self.bot.send_photo = AsyncMock(return_value=SimpleNamespace(message_id=100))
+        self.bot.send_document = AsyncMock(return_value=SimpleNamespace(message_id=101))
+        label = '📎 Усі сторінки одним файлом'
+        for count, scope, full, expected in (
+            (12, 'all', False, False), (12, 'general', False, False),
+            (60, 'mine', False, False), (60, 'home', False, False),
+            (60, 'all', False, True), (60, 'general', False, True),
+            (60, 'general', True, False),
+        ):
+            self.app.ha.command.return_value = large_grid(count)
+            await self.router.grid(123, self.profile, {'date': '2026-10-25', 'scope': scope, 'full': full})
+            call = self.bot.send_document.call_args if full else self.bot.send_photo.call_args
+            labels = [b.text for row in call.kwargs['reply_markup'].inline_keyboard for b in row]
+            self.assertEqual(label in labels, expected, (count, scope, full))
+
+    async def test_general_scope_has_icons_and_private_free_caption_export_and_refresh(self):
+        data = large_grid()
+        self.app.ha.command.return_value = data
+        self.bot.send_photo = AsyncMock(return_value=SimpleNamespace(message_id=100))
+        self.bot.send_document = AsyncMock(return_value=SimpleNamespace(message_id=101))
+        await self.router.grid(123, self.profile, 0)
+        buttons = [b for row in self.bot.send_photo.call_args.kwargs['reply_markup'].inline_keyboard for b in row]
+        self.assertNotIn("🌐 Загальний графік", [b.text for b in buttons])
+        all_button = next(b for b in buttons if b.text == "📊 Усі групи")
+        await self.router.grid(123, self.profile, self.router.buttons[all_button.callback_data.removeprefix('dtek:')]['payload'])
+        buttons = [b for row in self.bot.send_photo.call_args.kwargs['reply_markup'].inline_keyboard for b in row]
+        general = next(b for b in buttons if b.text == "🙈 Приховати адресу та виділення")
+        request = self.router.buttons[general.callback_data.removeprefix('dtek:')]['payload']
+        self.assertEqual(request['scope'], 'general')
+        await self.router.grid(123, self.profile, request)
+        kwargs = self.bot.send_photo.call_args.kwargs
+        self.assertNotIn(data['address'], kwargs['caption'])
+        buttons = [b for row in kwargs['reply_markup'].inline_keyboard for b in row]
+        self.assertTrue(all(not b.text[0].isalnum() for b in buttons))
+        self.assertTrue({'👤 Моя група', '🏠 Мій будинок', '🏠 Показати адресу та виділення'} <= {b.text for b in buttons})
+        for label in ('🔄 Оновити', '📎 Усі сторінки одним файлом'):
+            button = next(b for b in buttons if b.text == label)
+            saved = self.router.buttons[button.callback_data.removeprefix('dtek:')]['payload']
+            self.assertEqual(saved['scope'], 'general')
+            await self.router.grid(123, self.profile, saved)
+        self.assertNotIn(data['address'], self.bot.send_document.call_args.kwargs['caption'])
+        self.assertIn('без адреси', self.bot.send_document.call_args.kwargs['caption'])
+
+    async def test_refresh_keeps_date_scope_and_page_and_replaces_old_picture(self):
+        self.app.ha.command.return_value = large_grid()
+        self.bot.send_photo = AsyncMock(side_effect=lambda **kw: SimpleNamespace(message_id=100+self.bot.send_photo.await_count))
+        request = {"date":"2026-10-25","scope":"all","page":3}
+        await self.router.grid(123,self.profile,request)
+        await self.router.grid(123,self.profile,{**request,"refresh":True})
+        self.assertEqual(self.app.ha.command.call_args.kwargs['action'],'refresh')
+        self.assertIn('4 із 5',self.bot.send_photo.call_args.kwargs['caption'])
+        self.assertIn('Сформовано:',self.bot.send_photo.call_args.kwargs['caption'])
+        self.bot.delete_message.assert_awaited_once_with(chat_id='123',message_id=101)
+        buttons=self.bot.send_photo.call_args.kwargs['reply_markup'].inline_keyboard
+        refresh=next(b for row in buttons for b in row if b.text=='🔄 Оновити')
+        saved=self.router.buttons[refresh.callback_data.removeprefix('dtek:')]['payload']
+        self.assertEqual(saved['date'],request['date'])
+        self.assertEqual((saved['scope'],saved['page'],saved['refresh']),('all',3,True))
+
+    async def test_refresh_does_not_bypass_shared_cooldown(self):
+        self.app.ha.command.side_effect=[HACommandError('schedule_refresh_cooldown'),large_grid()]
+        self.bot.send_photo=AsyncMock(return_value=SimpleNamespace(message_id=100))
+        await self.router.grid(123,self.profile,{'date':'2026-10-25','scope':'all','page':0,'refresh':True})
+        self.assertEqual([c.kwargs['action'] for c in self.app.ha.command.call_args_list],['refresh','grid'])
+        self.bot.send_photo.assert_awaited_once()
+
+    async def test_building_grid_uses_catalog_identity_with_renamed_status(self):
+        profile = self.profile.model_copy(update={"mode": "building", "entity_prefix": "home"})
+        catalog = [
+            {"entity": "binary_sensor.other_power", "status_entity": "sensor.other_status"},
+            {"entity": "binary_sensor.home_power", "status_entity": "sensor.renamed_availability"},
+        ]
+        self.app.ha.command.side_effect = [catalog, HACommandError("schedule_refresh_cooldown"), large_grid()]
+        self.bot.send_photo = AsyncMock(return_value=SimpleNamespace(message_id=100))
+        await self.router.grid(123, profile, 0)
+        calls = self.app.ha.command.call_args_list
+        self.assertEqual([c.args[0] for c in calls], ["dtek_monitor/buildings", "dtek_monitor/schedule_refresh", "dtek_monitor/schedule_grid"])
+        self.assertEqual([c.kwargs["entity_id"] for c in calls[1:]], ["sensor.renamed_availability"] * 2)
+        self.bot.send_photo.assert_awaited_once()
+
+    async def test_building_grid_never_substitutes_another_or_ambiguous_house(self):
+        profile = self.profile.model_copy(update={"mode": "building", "entity_prefix": "home"})
+        self.bot.send_photo = AsyncMock()
+        for catalog in (
+            [{"entity": "binary_sensor.other_power", "status_entity": "sensor.other_status"}],
+            [{"entity": "binary_sensor.home_power", "status_entity": "sensor.first"},
+             {"entity": "binary_sensor.home_power", "status_entity": "sensor.second"}],
+        ):
+            self.app.ha.command.reset_mock()
+            self.app.ha.command.return_value = catalog
+            await self.router.grid(123, profile, 0)
+            self.app.ha.command.assert_awaited_once_with("dtek_monitor/buildings")
+            self.assertIn("Графік тимчасово недоступний", self.bot.send_message.call_args.kwargs["text"])
+        self.bot.send_photo.assert_not_awaited()
 
     async def test_two_people_get_distinct_submission_principals(self):
         self.profile.telegram_user_ids = [123, 456]

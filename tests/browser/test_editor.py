@@ -84,6 +84,58 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.page.locator('.nav-tools > summary').click()
         await self.page.locator('.global-settings > summary').click()
 
+    async def test_schedule_image_toggle_survives_poll_and_save(self):
+        form = self.page.locator('.address-editor-card').first
+        toggle = form.locator('.schedule-include-image')
+        await expect(toggle).to_be_checked()
+        await toggle.uncheck()
+        await self.refresh_via_poll()
+        await expect(toggle).not_to_be_checked()
+        async with self.page.expect_request('**/api/config/save') as request:
+            await self.page.locator('#save-button').click()
+        data = (await request.value).post_data_json['config']
+        self.assertFalse(data['addresses'][0]['schedule_change']['include_image'])
+        self.assertTrue(data['addresses'][1]['schedule_change']['include_image'])
+
+    async def test_live_schedule_control_and_interval_survive_background_refresh(self):
+        form = self.page.locator('.address-editor-card').first
+        toggle = form.locator('.schedule-image-enabled')
+        await expect(toggle).not_to_be_checked()
+        await toggle.check()
+        await form.locator('.schedule-image-interval').fill('10')
+        await self.refresh_via_poll()
+        await expect(toggle).to_be_checked()
+        await expect(form.locator('.schedule-image-interval')).to_have_value('10')
+        async with self.page.expect_request('**/api/config/save') as request:
+            await self.page.locator('#save-button').click()
+        data = (await request.value).post_data_json['config']
+        self.assertEqual(data['addresses'][0]['schedule_image'], {'enabled': True, 'update_interval': 600})
+        self.assertFalse(data['addresses'][1]['schedule_image']['enabled'])
+
+    async def test_voltage_recovery_sound_is_independent_and_draft_survives_polling(self):
+        form = self.page.locator('.address-editor-card').first
+        section = form.locator('.subpanel:has(.voltage-normal-silent)')
+        if 'collapsed' in (await section.get_attribute('class') or ''):
+            await section.locator('.subpanel-head').click()
+        quiet = form.locator('.voltage-normal-silent')
+        await expect(quiet).to_be_checked()
+        await quiet.uncheck()
+        await form.locator('.voltage-silent').check()
+        await self.refresh_via_poll()
+        await expect(quiet).not_to_be_checked()
+        await expect(form.locator('.voltage-silent')).to_be_checked()
+        async with self.page.expect_request('**/api/config/save') as request:
+            await self.page.locator('#save-button').click()
+        data = (await request.value).post_data_json['config']
+        self.assertFalse(data['addresses'][0]['voltage']['normal_silent'])
+        self.assertTrue(data['addresses'][0]['voltage']['silent'])
+        self.assertTrue(data['addresses'][1]['voltage']['normal_silent'])
+
+    async def test_admin_timestamps_use_explicit_format_and_schedule_timezone(self):
+        await self.page.clock.set_fixed_time("2026-11-06T10:00:00Z")
+        await self.refresh()
+        await expect(self.page.locator('#last-updated')).to_contain_text('06.11.2026 12:00')
+
     async def asyncTearDown(self):
         for gate in self.gates.values():
             gate.set()
@@ -184,6 +236,23 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             self.bot_profiles["revision"] = "bots-2"
             self.bot_profiles["restart_required"] = True
             payload = {**copy.deepcopy(self.bot_profiles), "profile": profile}
+        elif endpoint == "bots/onboarding/create":
+            import time
+            rows = self.bot_profiles.setdefault('onboarding', {}).setdefault(body['bot_id'], [])
+            for row in rows:
+                if row['profile_key'] == body['profile_key'] and row['kind'] == body['kind']:
+                    row['status'] = 'revoked'
+            row = {'id': 'link-' + str(len(rows)), 'kind': body['kind'], 'profile_key': body['profile_key'], 'binding': '', 'expires': time.time() + 900, 'owner': None, 'status': 'open', 'choices': []}
+            rows.insert(0, row)
+            payload = {'link': {**copy.deepcopy(row), 'url': 'https://t.me/example_bot?start=dtek_' + 'A' * 32}, 'bots': copy.deepcopy(self.bot_profiles)}
+        elif endpoint == "bots/onboarding/revoke":
+            for row in self.bot_profiles['onboarding'][body['bot_id']]:
+                if row['id'] == body['id']: row['status'] = 'revoked'
+            payload = {'bots': copy.deepcopy(self.bot_profiles)}
+        elif endpoint == "bots/requests/decline":
+            rows = self.bot_profiles.get("connection_requests", {}).get(body["bot_id"], [])
+            self.bot_profiles["connection_requests"][body["bot_id"]] = [r for r in rows if r["user_id"] != body["user_id"]]
+            payload = copy.deepcopy(self.bot_profiles)
         elif endpoint == "bots/activate":
             self.restart_status = {'state':'scheduled'}
             payload = {"restart_scheduled": True, 'process_id':self.process_id}
@@ -785,6 +854,109 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b)
         self.assertEqual(self.errors, [])
 
+    async def test_native_picker_result_requires_apply_and_preserves_focused_draft(self):
+        self.bot_profiles['runtime'] = [{'id':'default','ready':True}]
+        self.bot_profiles['receiving'] = True
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.addr-mode').select_option('personal')
+        await form.locator('.addr-user-id').fill('123')
+        await form.locator('.addr-display-name').fill('Unsaved name')
+        await self.refresh()
+        await form.locator('[data-action="create-onboarding"][data-kind="users"]').click()
+        await expect(form.locator('.onboarding-url')).to_have_value('https://t.me/example_bot?start=dtek_' + 'A'*32)
+        row = self.bot_profiles['onboarding']['default'][0]
+        row.update(status='complete', owner=123, choices=[{'id':'789','type':'private','name':'<img src=x>','username':'example','ready':False,'reason':'Попросіть користувача відкрити бота'}])
+        await form.locator('.addr-user-id').fill('123, 456')
+        await self.refresh()
+        await expect(form.locator('.addr-user-id')).to_have_value('123, 456')
+        await expect(form.locator('.telegram-onboarding img')).to_have_count(0)
+        await expect(form.locator('[data-action="apply-onboarding"]')).to_be_disabled()
+        row['choices'][0].update(ready=True, reason='')
+        await self.refresh()
+        await form.locator('[data-action="apply-onboarding"]').click()
+        await expect(form.locator('.addr-user-id')).to_have_value('123, 456, 789')
+        await expect(form.locator('.addr-display-name')).to_have_value('Unsaved name')
+        self.assertFalse(any(e=='config/save' for e,_ in self.calls))
+        await form.locator('[data-action="revoke-onboarding"]').click()
+        await expect(form.locator('.telegram-onboarding')).to_contain_text('Посилання відкликано')
+        await expect(form.locator('.addr-user-id')).to_have_value('123, 456, 789')
+
+    async def test_native_picker_never_changes_building_chat_on_arrival_or_profile_switch(self):
+        import time
+        self.bot_profiles['runtime'] = [{'id':'default','ready':True}]
+        self.bot_profiles['onboarding'] = {'default': [{'id':'choice','kind':'channel','profile_key':'demo_a','expires':time.time()+900,'owner':123,'status':'complete','choices':[{'id':'-100999','type':'channel','name':'Chosen','ready':True}]}]}
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.addr-chat-id').fill('-100111')
+        await self.refresh()
+        await expect(form.locator('.addr-chat-id')).to_have_value('-100111')
+        await expect(self.page.locator('.address-editor-card').nth(1).locator('[data-action="apply-onboarding"]')).to_have_count(0)
+        await form.locator('[data-action="apply-onboarding"]').click()
+        await expect(form.locator('.addr-chat-id')).to_have_value('-100999')
+        self.assertFalse(any(e=='config/save' for e,_ in self.calls))
+        await form.locator('.addr-mode').select_option('personal')
+        await expect(form.locator('[data-action="apply-onboarding"]')).to_have_count(0)
+
+    async def test_profile_invitation_requests_are_scoped_and_source_change_blocks_acceptance(self):
+        self.bot_profiles['connection_requests'] = {'default': [
+            {'user_id':789,'name':'For A','username':'','revision':'a','profile_key':'demo_a','target_valid':True},
+            {'user_id':456,'name':'For B','username':'','revision':'b','profile_key':'demo_b','target_valid':True}]}
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.addr-mode').select_option('personal')
+        await self.refresh()
+        await expect(form.locator('.connection-requests')).to_contain_text('For A')
+        await expect(form.locator('.connection-requests')).not_to_contain_text('For B')
+        self.bot_profiles['connection_requests']['default'][0]['target_valid']=False
+        await self.refresh()
+        await expect(form.locator('[data-action="accept-request"]')).to_be_disabled()
+        await form.locator('[data-action="decline-request"]').click()
+        body=next(body for e,body in self.calls if e=='bots/requests/decline')
+        self.assertEqual(body['profile_key'],'demo_a')
+
+    async def test_send_only_server_disables_native_onboarding(self):
+        self.bot_profiles['runtime'] = [{'id':'default','ready':True}]
+        self.bot_profiles['receiving'] = False
+        await self.refresh()
+        form=self.page.locator('.address-editor-card').first
+        for button in await form.locator('[data-action="create-onboarding"]').all():
+            await expect(button).to_be_disabled()
+
+    async def test_connection_request_adds_only_to_draft_and_poll_keeps_input(self):
+        self.bot_profiles['connection_requests'] = {'default': [
+            {'user_id': 789, 'name': '<b>Applicant</b>', 'username': 'example', 'revision': 'r1', 'created': 1}],
+            'other': [{'user_id': 900, 'name': 'Other bot', 'revision': 'r2', 'created': 1}]}
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.addr-mode').select_option('personal')
+        await form.locator('.addr-user-id').fill('123')
+        await form.locator('.addr-display-name').fill('Unsaved name')
+        await self.refresh()
+        requests = form.locator('.connection-requests')
+        await expect(requests).to_contain_text('<b>Applicant</b>')
+        await expect(requests.locator('b')).to_have_count(0)
+        await expect(requests).not_to_contain_text('Other bot')
+        await form.locator('[data-action="accept-request"]').click()
+        await expect(form.locator('.addr-user-id')).to_have_value('123, 789')
+        await expect(form.locator('.addr-display-name')).to_have_value('Unsaved name')
+        await expect(form.locator('[data-action="accept-request"]')).to_be_disabled()
+        self.assertFalse(any(e == 'config/save' for e, _ in self.calls))
+        await form.locator('.addr-user-id').fill('123, 789, 456')
+        await self.refresh()
+        await expect(form.locator('.addr-user-id')).to_have_value('123, 789, 456')
+        await expect(form.locator('.addr-display-name')).to_have_value('Unsaved name')
+
+    async def test_declining_request_preserves_draft_and_building_chat(self):
+        self.bot_profiles['connection_requests'] = {'default': [
+            {'user_id': 789, 'name': 'Applicant', 'username': '', 'revision': 'r1', 'created': 1}]}
+        form = self.page.locator('.address-editor-card').first
+        await form.locator('.addr-chat-id').fill('-100111')
+        await self.refresh()
+        await expect(form.locator('[data-action="accept-request"]')).to_have_count(0)
+        await form.locator('[data-action="decline-request"]').click()
+        await expect(form.locator('.connection-requests')).to_contain_text('Нових заявок немає')
+        await expect(form.locator('.addr-chat-id')).to_have_value('-100111')
+        self.assertFalse(any(e == 'config/save' for e, _ in self.calls))
+        body = next(body for e, body in self.calls if e == 'bots/requests/decline')
+        self.assertEqual(body, {'bot_id': 'default', 'user_id': 789, 'revision': 'r1'})
+
     async def test_recipient_selection_is_scoped_and_refresh_never_replaces_typed_id(self):
         self.bot_profiles["profiles"].append({"id": "bot_2", "name": "Second bot"})
         self.bot_profiles["recipients"] = {
@@ -1052,6 +1224,33 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         personal=next(a for a in payload['addresses'] if a['mode']=='personal')
         self.assertEqual(personal['telegram_user_ids'], [456,789,901,902])
         AddressConfig.model_validate(personal)
+
+    async def test_building_member_menu_toggle_survives_poll_and_save_but_not_personal_mode(self):
+        form = self.page.locator('.address-editor-card').first
+        toggle = form.locator('.addr-member-access')
+        await expect(toggle).not_to_be_checked()
+        await toggle.check()
+        await form.locator('.addr-chat-id').fill('-100123456')
+        await self.refresh()
+        await expect(toggle).to_be_checked()
+        async with self.page.expect_request('**/api/config/save') as request:
+            await self.page.locator('#save-button').click()
+        payload = (await request.value).post_data_json['config']
+        self.assertTrue(payload['addresses'][0]['member_access'])
+        AddressConfig.model_validate(payload['addresses'][0])
+        await self.refresh()
+        await expect(toggle).to_be_checked()
+        self.accounts = [{'entity_id':'sensor.demo_account','masked':'••••1111','address':'Приклад, 1'}]
+        await self.refresh()
+        await form.locator('.addr-mode').select_option('personal')
+        await expect(toggle).not_to_be_visible()
+        await form.locator('.addr-account').select_option('sensor.demo_account')
+        await form.locator('.addr-user-id').fill('123456')
+        async with self.page.expect_request('**/api/config/validate') as request:
+            await self.page.locator('#validate-button').click()
+        payload = (await request.value).post_data_json['config']
+        self.assertFalse(payload['addresses'][0]['member_access'])
+        AddressConfig.model_validate(payload['addresses'][0])
 
     async def test_summary_refreshes_recipient_while_preserving_focused_draft(self):
         form=self.page.locator('.address-editor-card').first
