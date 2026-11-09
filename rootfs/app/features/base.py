@@ -17,7 +17,7 @@ from telegram_service import TelegramService
 from template_engine import TemplateEngine
 from groups import state_groups, select_events, presentation_context
 from utils import format_datetime, now_kyiv
-from provider_notice import forecast_suspended, notice_enabled, warning_html, contract_identity, append_warning
+from provider_notice import forecast_suspended, notice_enabled, warning_text, contract_identity, append_warning
 from outage_calendar import ScheduleUnavailable, verified_coverage_end
 
 logger = logging.getLogger(__name__)
@@ -233,7 +233,7 @@ class Feature(ABC):
         }
         ctx.update(extra_context)
         notice_option = "show_in_status" if self.name == "status_message" else "show_in_schedule_messages"
-        provider_warning = warning_html((self.state_get("groups_snapshot") or {}).get("attributes", {})) if self.name in ("status_message", "schedule_change", "group_change") and notice_enabled(self.config, notice_option) else ""
+        provider_warning = warning_text((self.state_get("groups_snapshot") or {}).get("attributes", {})) if self.name in ("status_message", "schedule_change", "group_change") and notice_enabled(self.config, notice_option) else ""
         ctx["provider_notice"] = provider_warning
         identity = {k: v for k, v in ctx.items() if k != "timestamp"}
         identity.update(

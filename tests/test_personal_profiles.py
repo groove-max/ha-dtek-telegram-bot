@@ -242,6 +242,26 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent["reply_markup"].inline_keyboard[0][0].text, "🏠 Меню")
         self.app.ha.command.assert_not_awaited()
 
+    async def test_private_status_keeps_announcement_url_without_literal_html_link(self):
+        from html import unescape
+        from provider_notice import append_warning
+        from utils import now_kyiv
+        from datetime import timedelta
+        now=now_kyiv()
+        source='https://www.dtek-oem.com.ua/ua/shutdowns'
+        text=append_warning('Дім <A & B>',dict(
+            provider_notice_state='unverified',provider_notice_text='Оголошення',
+            provider_notice_valid_until=(now+timedelta(minutes=10)).isoformat(),
+            provider_notice_source=source),now=now)
+        self.app.render_status=AsyncMock(return_value=text)
+        await self.router.action(123,self.profile,'status',None)
+        sent=self.bot.send_message.call_args.kwargs
+        self.assertEqual(sent['parse_mode'],'HTML')
+        self.assertEqual(unescape(sent['text']),text)
+        self.assertIn('&lt;A &amp; B&gt;',sent['text'])
+        self.assertNotIn('&lt;a ',sent['text'])
+        self.assertTrue(sent['text'].endswith(source))
+
     async def test_status_button_covers_automatic_and_manual_modes_for_each_profile_type(self):
         for mode, enabled, pin, delivery, interval in itertools.product(
             ("personal", "building"), (False, True), (False, True),

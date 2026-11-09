@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Keep announcement links readable and clickable in plain-text status, schedule and group notifications, including private status replies. Preserve custom template text; use HTML links only in captions explicitly sent as HTML.
 - Correctly record Telegram replies containing link preview options. Successful status edits and sends no longer fail locally because of omitted aiogram defaults; incoming updates with link previews remain processable.
 - Add a dedicated per-profile **DTEK announcements** settings block: enable/disable notices, choose status/schedule-message/PNG placement, and independently control emergency forecast pauses. Preserve drafts during polling and disabled sub-options across saves; default existing profiles to enabled.
 

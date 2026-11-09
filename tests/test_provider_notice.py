@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'rootfs/app'))
-from provider_notice import applicability, warning_html, append_warning, warning, caption_notice, configured_grid, forecast_suspended
+from provider_notice import applicability, warning_text, warning_html, append_warning, warning, caption_notice, configured_grid, forecast_suspended
 from config import AddressConfig, ProviderNoticeConfig
 from types import SimpleNamespace
 from schedule_image_state import image_content_hash
@@ -50,14 +50,30 @@ class ContractTests(unittest.TestCase):
         self.assertIn('Графік може не відповідати',value)
         self.assertLess(len(value),700)
 
-    def test_long_custom_template_preserves_warning_and_valid_html(self):
-        from html import unescape
-        import re
-        value=append_warning('<b>'+('😀 &amp; '*1500)+'</b>', {**notice(fixtures.NOW,False), 'provider_notice_text':'Test'},now=fixtures.NOW)
+    def test_long_plain_template_preserves_text_and_bounded_notice(self):
+        source='https://www.dtek-oem.com.ua/ua/shutdowns'
+        value=append_warning('Дім <A & B> '+('😀 '*3000), {**notice(fixtures.NOW,False), 'provider_notice_source':source},now=fixtures.NOW)
         self.assertIn('Графік може не відповідати',value)
-        self.assertNotIn('<b>',value)
-        plain=unescape(re.sub('<[^>]*>','',value))
-        self.assertLessEqual(len(plain.encode('utf-16-le'))//2,4096)
+        self.assertTrue(value.startswith('Дім <A & B> '))
+        self.assertTrue(value.endswith(source))
+        self.assertNotIn('<a ',value)
+        self.assertNotIn('&amp;',value)
+        self.assertLessEqual(len(value.encode('utf-16-le'))//2,4096)
+
+    def test_plain_and_html_notice_use_their_own_link_format(self):
+        source='https://www.dtek-oem.com.ua/ua/shutdowns?one=1&two=2'
+        attrs={**notice(fixtures.NOW,None),'provider_notice_source':source}
+        text=warning_text(attrs,now=fixtures.NOW)
+        self.assertTrue(text.endswith('\n'+source))
+        self.assertNotIn('<a ',text)
+        self.assertIn('one=1&amp;two=2',warning_html(attrs,now=fixtures.NOW))
+        # Templates may choose the location of the supplied notice variable.
+        custom='Дім <A & B>'+text+'\nДякуємо!'
+        self.assertEqual(append_warning(custom,attrs,now=fixtures.NOW),custom)
+        attrs['provider_notice_source']=source+'x'*4096
+        bounded=append_warning('😀'*4000,attrs,now=fixtures.NOW)
+        self.assertLessEqual(len(bounded.encode('utf-16-le'))//2,4096)
+        self.assertNotIn(source,bounded)
 
     def test_neutral_empty_failed_and_safe_source_presentation(self):
         now=fixtures.NOW
@@ -189,6 +205,40 @@ class ForecastTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('прогноз призупинено',value)
         self.assertIn('23:00',value)
         self.assertIn('Є оголошення ДТЕК',value)
+
+    async def test_status_creation_and_edit_send_plain_notice_without_tags(self):
+        source='https://www.dtek-oem.com.ua/ua/shutdowns'
+        self.snapshot['attributes'].update(notice(self.now,None),provider_notice_source=source)
+        self.base.config.status_message=AddressConfig(entity_prefix='example').status_message
+        self.base.config.status_message.pin=False
+        self.telegram.send_message=AsyncMock(return_value=44)
+        self.telegram.edit_message_result=AsyncMock(return_value='ok')
+        feature=self.feature(StatusMessageFeature)
+        await feature._update_status_message()
+        await feature._update_status_message()
+        self.telegram.send_message.assert_awaited_once()
+        self.telegram.edit_message_result.assert_awaited_once()
+        for call,index in ((self.telegram.send_message.call_args,0), (self.telegram.edit_message_result.call_args,1)):
+            text=call.args[index]
+            self.assertTrue(text.endswith(source))
+            self.assertNotIn('<a ',text)
+            self.assertNotIn('&lt;a',text)
+            self.assertIsNone(call.kwargs.get('parse_mode'))
+
+    async def test_schedule_and_group_custom_templates_keep_plain_text_and_one_notice(self):
+        from features.schedule_change import ScheduleChangeFeature
+        from features.group_change import GroupChangeFeature
+        source='https://www.dtek-oem.com.ua/ua/shutdowns'
+        self.snapshot['attributes'].update(notice(self.now,None),provider_notice_source=source)
+        for cls,name in ((ScheduleChangeFeature,'schedule_change'),(GroupChangeFeature,'group_change')):
+            feature=self.feature(cls)
+            await feature.read_groups()
+            self.base.templates.save_override(name,'Дім <A & B>{{ provider_notice }}\nКінець')
+            text=feature.render(name)
+            self.assertTrue(text.startswith('Дім <A & B>'))
+            self.assertEqual(text.count(source),1)
+            self.assertNotIn('<a ',text)
+            self.assertTrue(text.endswith('Кінець'))
 
     async def test_admin_switches_control_runtime_status_and_final_forecast_delivery(self):
         self.snapshot['attributes'].update(notice(self.now,False))

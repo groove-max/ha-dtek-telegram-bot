@@ -75,6 +75,8 @@ def notice_kind(attrs, *, now=None, at=None):
 
 def notice_source(attrs):
     source = str(attrs.get('provider_notice_source') or '')
+    if len(source.encode('utf-16-le')) // 2 > 2048:
+        return ''
     try:
         url = urlsplit(source)
         if (url.scheme == 'https' and not url.username and not url.password and not url.port
@@ -104,7 +106,7 @@ def image_notice(attrs, *, now=None):
     return 'Не вдалося перевірити оголошення ДТЕК' if kind == 'unavailable' else 'Є оголошення ДТЕК'
 
 
-def warning_html(attrs, *, now=None, at=None, general=False):
+def _notice_message(attrs, *, now=None, at=None, general=False, html=False):
     text = warning(attrs, now=now, at=at)
     if not text:
         return ''
@@ -112,15 +114,28 @@ def warning_html(attrs, *, now=None, at=None, general=False):
     if general and kind == 'warning':
         text = 'Є оголошення ДТЕК щодо відключень. Перевірте територію та час дії.'
     icon = '⚠️' if kind == 'warning' and not general else 'ℹ️' if kind == 'unavailable' else '📢'
-    result = '\n\n' + icon + ' ' + escape(text)
+    format_text = escape if html else str
+    result = '\n\n' + icon + ' ' + format_text(text)
     source = notice_source(attrs)
     if source:
-        return result + '\n<a href="' + escape(source, quote=True) + '">Повідомлення на сайті ДТЕК ↗</a>'
+        if html:
+            return result + '\n<a href="' + escape(source, quote=True) + '">Повідомлення на сайті ДТЕК ↗</a>'
+        return result + '\n' + source
     # The original may still be useful when no safe source URL was supplied.
     original = str(attrs.get('provider_notice_text') or '').strip()
     if original and kind != 'unavailable':
-        result += '\n' + escape(original[:300] + ('…' if len(original) > 300 else ''))
+        result += '\n' + format_text(original[:300] + ('…' if len(original) > 300 else ''))
     return result
+
+
+def warning_text(attrs, *, now=None, at=None):
+    """Notice for text templates; Telegram recognizes the source URL directly."""
+    return _notice_message(attrs, now=now, at=at)
+
+
+def warning_html(attrs, *, now=None, at=None, general=False):
+    """Notice for callers that explicitly send with parse_mode=HTML."""
+    return _notice_message(attrs, now=now, at=at, general=general, html=True)
 
 
 def caption_notice(attrs, *, now=None, at=None):
@@ -138,24 +153,16 @@ def contract_identity(attrs):
 
 
 def append_warning(text, attrs, *, now=None):
-    """Keep Telegram's size limit even for a long custom template/announcement."""
-    tail = warning_html(attrs, now=now)
+    """Append a text notice without changing the template's text semantics."""
+    tail = warning_text(attrs, now=now)
     if not tail:
+        return text
+    # An override may already place the supplied provider_notice variable.
+    if tail.strip() in text and len(text.encode('utf-16-le')) // 2 <= 4096:
         return text
     if len((text+tail).encode('utf-16-le')) // 2 <= 4096:
         return text+tail
-    # Keep the warning, shorten the original as plain text, never cut an HTML tag.
-    from html.parser import HTMLParser
-
-    class PlainText(HTMLParser):
-        def __init__(self):
-            super().__init__(convert_charrefs=True)
-            self.parts=[]
-
-        def handle_data(self, data):
-            self.parts.append(data)
-
-    parser=PlainText()
-    parser.feed(text)
-    short=''.join(parser.parts).encode('utf-16-le')[:4800].decode('utf-16-le',errors='ignore')
-    return escape(short)+'…'+tail
+    # Do not interpret literal <, > or & in existing plain-text overrides.
+    budget = 4096 - len(tail.encode('utf-16-le')) // 2 - 1
+    short = text.encode('utf-16-le')[:max(0, budget)*2].decode('utf-16-le', errors='ignore')
+    return short+'…'+tail
