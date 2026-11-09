@@ -2,7 +2,7 @@
 
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
-> Recommended release pair: **bot 0.5.0-rc6** and **DTEK Monitor 2.0.0-rc6**. See [minimum versions by feature](UPGRADING.md#choose-the-matching-versions) for older installations. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
+> Recommended release pair: **bot 0.5.0-rc7** and **DTEK Monitor 2.0.0-rc7**. See [minimum versions by feature](UPGRADING.md#choose-the-matching-versions) for older installations. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
 Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipients; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
 
@@ -188,7 +188,7 @@ Both servers can send through the same bot. Keep `receive_commands: true` on the
 
 ## If DTEK data is unavailable
 
-Install **Monitor 2.0.0-rc6 or newer** and **Bot 0.5.0-rc6 or newer** for recovery from known meter-service authorization changes and clearer error messages. The integration checks supported formats automatically on reads; it never retries a meter submission automatically.
+Install **Monitor 2.0.0-rc7 or newer** and **Bot 0.5.0-rc7 or newer** for recovery from known meter-service authorization changes and clearer error messages. The integration checks supported formats automatically on reads; it never retries a meter submission automatically.
 
 If a service is incompatible, the bot links to the latest integration release and the issue tracker. Open **Settings → System → Repairs** in HA for details. Update the integration first; if it is already current, report the problem without passwords, tokens or full account details. Sign in again only if HA specifically asks for authentication.
 

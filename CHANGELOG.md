@@ -2,15 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [0.5.0-rc7] - 2026-11-09
 
-- Keep announcement links readable and clickable in plain-text status, schedule and group notifications, including private status replies. Preserve custom template text; use HTML links only in captions explicitly sent as HTML.
-- Correctly record Telegram replies containing link preview options. Successful status edits and sends no longer fail locally because of omitted aiogram defaults; incoming updates with link previews remain processable.
-- Add a dedicated per-profile **DTEK announcements** settings block: enable/disable notices, choose status/schedule-message/PNG placement, and independently control emergency forecast pauses. Preserve drafts during polling and disabled sub-options across saves; default existing profiles to enabled.
+**Regular GitHub release**, without the Pre-release flag. Requires Home Assistant 2026.3.0+ on amd64/aarch64. Regional announcements require **DTEK Monitor 2.0.0-rc7**.
 
-- Consume regional DTEK announcements from the integration in both building and personal modes. Show short notices with official source links in status/schedule messages and photo captions, and compact markers on PNG tables. Keep published schedules available and retrieval errors distinct from emergency warnings.
-- Pause upcoming-outage warnings and timetable-derived restoration estimates only for fresh, unambiguous emergency declarations matching the address/date. Ambiguous, absent or unavailable announcements do not suspend forecasts. Recheck before delivery and do not replay a cached restoration prediction after a Telegram failure.
-- Refresh tracked schedule images when announcement conditions change, without treating a successful recheck timestamp as new table content. Physical power and voltage monitoring remain independent; older integrations keep their existing behavior.
+- Show regional DTEK announcements in building and personal statuses, schedule/group notifications and schedule images, with a link to the official source. Keep published schedules accessible and distinguish retrieval errors from emergency warnings.
+- Add **3. Сповіщення → 📢 Оголошення ДТЕК** for each profile. Enable or disable notices, choose status/message/image placement and control forecast pauses independently. Existing profiles default to enabled; background refresh preserves drafts and disabled sub-options.
+- Pause upcoming-outage warnings and timetable-derived restoration estimates only when the integration reports a fresh, unambiguous emergency declaration matching the address and date. Recheck before sending; do not replay a cached restoration prediction after a Telegram failure. Physical power and voltage monitoring remain independent.
+- Refresh tracked schedule images when announcement conditions change, without treating each successful recheck timestamp as new image content.
+- Fix status edits, sends and incoming updates containing Telegram link-preview options. Omitted aiogram defaults no longer cause a local error after a successful Telegram response.
+- Fix literal HTML links in plain-text status, schedule and group notifications, including private status replies. Keep source URLs clickable and preserve custom template text; HTML captions retain their own formatting.
+
+**Upgrade:** update **Monitor to 2.0.0-rc7**, restart HA, then update **Bot to 0.5.0-rc7** through the HA app store and reload its editor. Existing recipients, sensor bindings, templates, pinned messages and delivery history are retained. Review the new announcement switches per profile. Older integrations keep their previous behavior without announcement support; they can be retained for existing compatible features. No readings are sent by the update.
+
+[Building announcements](docs/BUILDING.md#dtek-announcements-next-to-the-schedule) · [Особисті сповіщення](docs/PERSONAL.uk.md) · [Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md)
 
 ## [0.5.0-rc6] - 2026-11-06
 

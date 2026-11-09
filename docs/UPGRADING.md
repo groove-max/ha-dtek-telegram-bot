@@ -4,21 +4,18 @@
 
 Install the bot through the **Home Assistant app store**; HACS is used for the DTEK Monitor integration. [Latest bot release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest) · [Latest integration release](https://github.com/groove-max/ha-dtek-monitor/releases/latest).
 
-## RC6 update
+## RC7 update
 
-Install **Monitor 2.0.0-rc6** and **Bot 0.5.0-rc6** for the current release pair. Update the integration first, restart HA, then update the app and reload its editor. Existing accounts, recipients, sensors, templates and pinned messages stay in place.
+Install **Monitor 2.0.0-rc7** and **Bot 0.5.0-rc7** for regional DTEK announcements. Update the integration first, restart HA, then update the app and reload its editor. Existing accounts, recipients, sensors, templates and pinned messages stay in place.
 
-Telegram now has a native command menu, recipient selection and invitation links; [personal setup](PERSONAL.md) explains each option. Private status/schedules for building members are optional and do not grant cabinet access.
+Open each profile → **3. Сповіщення → 📢 Оголошення ДТЕК**. You can show notices in status, schedule-change messages and images, or turn them off. Forecast pauses have a separate switch. These options default to enabled, but a pause requires a fresh, unambiguous emergency declaration matching the address and date. Ambiguous or unavailable notices do not confirm that the schedule applies. Actual power and voltage monitoring stay independent. See the [building guide](BUILDING.md#dtek-announcements-next-to-the-schedule) or [personal guide](PERSONAL.md#dtek-announcements-next-to-the-schedule).
 
-Schedule changes now include silent images by default. Under the profile’s notifications, you can disable attachments or enable automatic updates of the latest image for today (default interval 5 minutes). A real schedule change also refreshes it immediately. Voltage-normalization notices are silent by default; change **Додаткові параметри → Тихий режим повідомлень → Напруга в нормі** independently of low/high warnings. Duration lines are omitted when telemetry gaps make the elapsed outage uncertain.
+This release also fixes literal HTML links in notifications and errors recording Telegram replies with link previews. Native menus, silent schedule images and optional image refresh from RC6 remain available.
 
 <a id="main-code"></a>
 ## Try code from `main` before a release
 
-For announcements, first install the integration's matching
-[main code](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md#main-code)
-and restart HA. The bot can still show **0.5.0-rc6**: rebuilding its image installs
-source changes without a version bump. Restarting alone keeps the old image.
+Use this only when an issue asks you to test an unreleased change. **Announcements are already included in RC7 and do not require `main`.** If the change needs matching integration code, install it first and restart HA. Development builds can retain the previous version number: rebuild the app image to install source changes. Restarting alone keeps the old image.
 
 For an existing app installed from this GitHub repository:
 
@@ -53,15 +50,16 @@ Choose [building mode](BUILDING.md) for address alerts or [personal mode](PERSON
 
 ## Choose the matching versions
 
-The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC6 releases are available in the regular release channel.
+The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC7 releases are available in the regular release channel.
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
-| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc6 |
-| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc6** |
-| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc6** |
-| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc6** |
-| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc6** |
+| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc7 |
+| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc7** |
+| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc7** |
+| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc7** |
+| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc7** |
+| Regional announcements and forecast guards | **2.0.0-rc7** | **0.5.0-rc7** |
 
 Public schedules and personal household cabinets cover the four operators listed in Monitor 2.0.0-rc2. **Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental** and await real-account validation. Odesa and Kyiv city cabinet reads have been checked live; actual Day/Night submission has automated tests only.
 
