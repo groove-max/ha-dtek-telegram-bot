@@ -196,7 +196,7 @@ A failure of monthly consumption does not erase available reading history. Other
 
 ## Meter photos and DTEK documents
 
-Available since **DTEK Monitor 2.0.0-rc4** and **Telegram Bot 0.5.0-rc4**; the current recommended pair is RC6. Update the integration first. Document retrieval remains experimental; the availability of a controller’s act through the cabinet is not yet verified.
+Available since **DTEK Monitor 2.0.0-rc4** and **Telegram Bot 0.5.0-rc4**; the current recommended pair is RC7. Update the integration first. Document retrieval remains experimental; the availability of a controller’s act through the cabinet is not yet verified.
 
 After entering readings (or choosing a sensor estimate), press **📷 Додати фото** on the review screen. Select a tariff, then send one photo or a JPEG, PNG or WebP file. Check the preview and repeat for the second tariff if applicable. Albums are not accepted. If you use photos, every tariff needs its own photo; otherwise remove all photos to submit numerical readings only. The numbers must match the official meter in the photos, even when a sensor provided the estimate.
 
