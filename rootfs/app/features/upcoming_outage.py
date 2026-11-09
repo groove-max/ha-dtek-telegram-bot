@@ -66,7 +66,7 @@ class UpcomingOutageFeature(Feature):
         selected = getattr(self.config, "selected_group", "")
         events = upcoming_schedule_events(
             events, now=now, group_state=self.state_get("groups_snapshot"),
-            groups=[selected] if selected else groups,
+            groups=[selected] if selected else groups, config=self.config,
         )
         if not events:
             return

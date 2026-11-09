@@ -8,6 +8,7 @@ from ha_client import HACommandError
 from schedule_notifications import schedule_parts
 from schedule_pages import select_page, render_page
 from utils import now_kyiv, format_date, format_datetime
+from provider_notice import caption_notice, configured_grid
 from schedule_image_state import image_binding, image_content_hash
 
 
@@ -23,9 +24,11 @@ async def building_grid_entity(ha, profile):
 
 async def fetch_grid(ha, profile):
     if getattr(profile, "mode", "building") == "personal":
-        return await ha.command("dtek_monitor/bot_account", entity_id=profile.account_entity, action="grid")
+        data = await ha.command("dtek_monitor/bot_account", entity_id=profile.account_entity, action="grid")
+        return configured_grid(data, profile)
     entity = await building_grid_entity(ha, profile)
-    return await ha.command("dtek_monitor/schedule_grid", entity_id=entity)
+    data = await ha.command("dtek_monitor/schedule_grid", entity_id=entity)
+    return configured_grid(data, profile)
 
 
 async def render_day_images(data, offset, personal, now):
@@ -38,6 +41,7 @@ async def render_day_images(data, offset, personal, now):
         if first.pages > 1:
             caption += f" · {page + 1}/{first.pages}"
         caption += f"\n🕒 Сформовано: {format_datetime(now)}"
+        caption += caption_notice(view.day, now=now)
         pages.append((png, f"dtek-{view.day['date']}-{page+1}.png", caption))
     return pages
 

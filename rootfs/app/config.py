@@ -56,6 +56,16 @@ class ScheduleImageConfig(BaseModel):
     update_interval: int = Field(default=300, ge=60, le=3600)
 
 
+class ProviderNoticeConfig(BaseModel):
+    """Per-profile presentation and forecast policy for official announcements."""
+
+    enabled: bool = True
+    show_in_status: bool = True
+    show_in_schedule_messages: bool = True
+    show_on_images: bool = True
+    pause_forecasts: bool = True
+
+
 class EmergencyConfig(BaseModel):
     enabled: bool = True
     silent: bool = False
@@ -325,6 +335,7 @@ class AddressConfig(BaseModel):
 
     schedule_change: ScheduleChangeConfig = Field(default_factory=ScheduleChangeConfig)
     schedule_image: ScheduleImageConfig = Field(default_factory=ScheduleImageConfig)
+    provider_notice: ProviderNoticeConfig = Field(default_factory=ProviderNoticeConfig)
     emergency: EmergencyConfig = Field(default_factory=EmergencyConfig)
     group_change: GroupChangeConfig = Field(default_factory=GroupChangeConfig)
     voltage: VoltageConfig = Field(default_factory=VoltageConfig)
@@ -348,7 +359,7 @@ class AddressConfig(BaseModel):
                 if isinstance(user, str) and user.isdigit():
                     user = int(user)
                 data["telegram_user_ids"] = [user] if user else []
-            for key in ("schedule_change", "schedule_image", "emergency", "group_change"):
+            for key in ("schedule_change", "schedule_image", "provider_notice", "emergency", "group_change"):
                 val = data.get(key)
                 if isinstance(val, bool):
                     data[key] = {"enabled": val}

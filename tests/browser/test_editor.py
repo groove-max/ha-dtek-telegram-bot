@@ -84,6 +84,32 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.page.locator('.nav-tools > summary').click()
         await self.page.locator('.global-settings > summary').click()
 
+    async def test_notice_admin_preserves_per_profile_draft_across_poll_save_and_reload(self):
+        form=self.page.locator('.address-editor-card').first
+        section=form.locator('.provider-notice-settings')
+        await section.locator('summary').click()
+        await expect(form.locator('.notice-enabled')).to_be_checked()
+        await form.locator('.notice-status').uncheck()
+        await form.locator('.notice-images').uncheck()
+        await form.locator('.notice-pause').uncheck()
+        await form.locator('.notice-enabled').uncheck()
+        await expect(form.locator('.notice-status')).to_be_disabled()
+        await self.refresh_via_poll()
+        await expect(form.locator('.notice-enabled')).not_to_be_checked()
+        await self.page.reload()
+        await self.page.locator('.notice-enabled').first.wait_for(state='attached')
+        await expect(self.page.locator('.notice-images').first).not_to_be_checked()
+        await expect(self.page.locator('.notice-schedule').first).to_be_checked()
+        await self.page.locator('[data-tab="configure"]').click()
+        await self.page.locator('.editor-tools > summary').click()
+        async with self.page.expect_request('**/api/config/save') as request:
+            await self.page.locator('#save-button').click()
+        data=(await request.value).post_data_json['config']
+        self.assertEqual(data['addresses'][0]['provider_notice'],{
+            'enabled':False,'show_in_status':False,'show_in_schedule_messages':True,
+            'show_on_images':False,'pause_forecasts':False})
+        self.assertTrue(all(data['addresses'][1]['provider_notice'].values()))
+
     async def test_schedule_image_toggle_survives_poll_and_save(self):
         form = self.page.locator('.address-editor-card').first
         toggle = form.locator('.schedule-include-image')

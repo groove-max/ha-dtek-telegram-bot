@@ -225,7 +225,10 @@ def render_schedule(
     general=False,
 ):
     """An uninterrupted day table, followed by a separate per-group range key."""
+    from provider_notice import image_notice
     now = now or datetime.now(KYIV)
+    notice = image_notice(day, now=now)
+    grid_top = GRID_TOP + (48 if notice else 0)
     marker = current_minute(day, now)
     left, right = GRID_LEFT, GRID_RIGHT
     plot_width = width - left - right
@@ -243,7 +246,7 @@ def render_schedule(
         18 + line_height * max(len(lines) for lines in summaries[i : i + 2])
         for i in range(0, len(summaries), 2)
     ]
-    table_bottom = GRID_TOP + BAR_HEIGHT * len(rows)
+    table_bottom = grid_top + BAR_HEIGHT * len(rows)
     legend_top = table_bottom + 22
     detail_top = legend_top + 104
     footer = detail_top + sum(detail_heights) + 16
@@ -275,6 +278,9 @@ def render_schedule(
         fill="#526273",
     )
 
+    if notice:
+        draw.text((24, 151), _fit_text(draw, notice, width - 48, font(20, True)), font=font(20, True), fill="#9b4b00")
+
     def highlighted(row):
         return not general and bool(
             row.get("selected") if personal else row.get("home")
@@ -291,13 +297,13 @@ def render_schedule(
     if page is not None:
         note += f" · {page[0] + 1} / {page[1]}"
     draw.text((24, 120), note, font=font(19), fill="#006b8d")
-    draw.text((30, GRID_TOP - 25), "Група", font=font(19), fill="#526273")
+    draw.text((30, grid_top - 25), "Група", font=font(19), fill="#526273")
     for i, slot in enumerate(day["slots"]):
         if not slot["label"].endswith(":00"):
             continue
         x = left + i * 30 / duration * plot_width
         draw.text(
-            (x, GRID_TOP - 25),
+            (x, grid_top - 25),
             slot["label"][:2],
             font=font(19),
             fill="#526273",
@@ -305,18 +311,18 @@ def render_schedule(
         )
         if sum(s["label"] == slot["label"] for s in day["slots"]) > 1:
             draw.text(
-                (x, GRID_TOP - 7),
+                (x, grid_top - 7),
                 slot.get("offset", "")[:3],
                 font=font(9),
                 fill="#526273",
                 anchor="mt",
             )
     draw.text(
-        (width - right, GRID_TOP - 25), "24", font=font(19), fill="#526273", anchor="mt"
+        (width - right, grid_top - 25), "24", font=font(19), fill="#526273", anchor="mt"
     )
 
     for i, row in enumerate(rows):
-        y = GRID_TOP + i * BAR_HEIGHT
+        y = grid_top + i * BAR_HEIGHT
         highlight = highlighted(row)
         draw.rectangle(
             (24, y, left, y + BAR_HEIGHT), fill="#e7f5fb" if highlight else "#f5f8fa"
@@ -342,12 +348,12 @@ def render_schedule(
     )
     if cursor_x is not None:
         if cursor_x > left:
-            box = (left, GRID_TOP, cursor_x, table_bottom + 1)
+            box = (left, grid_top, cursor_x, table_bottom + 1)
             image.paste(
                 Image.blend(
                     image.crop(box),
                     Image.new(
-                        "RGB", (cursor_x - left, table_bottom + 1 - GRID_TOP), "white"
+                        "RGB", (cursor_x - left, table_bottom + 1 - grid_top), "white"
                     ),
                     PAST_FADE,
                 ),
@@ -364,15 +370,15 @@ def render_schedule(
         )
         draw.text((label_x + 9, 153), label, font=font(19, True), fill="white")
         draw.line(
-            (cursor_x, GRID_TOP - 4, cursor_x, table_bottom), fill=NOW_COLOR, width=2
+            (cursor_x, grid_top - 4, cursor_x, table_bottom), fill=NOW_COLOR, width=2
         )
     for i, row in enumerate(rows):
         if highlighted(row):
-            y = GRID_TOP + i * BAR_HEIGHT
+            y = grid_top + i * BAR_HEIGHT
             draw.rectangle(
                 (24, y, width - right, y + BAR_HEIGHT), outline="#008fb3", width=2
             )
-    draw.rectangle((24, GRID_TOP, width - right, table_bottom), outline="#91a8b4")
+    draw.rectangle((24, grid_top, width - right, table_bottom), outline="#91a8b4")
 
     for i, (kind, label) in enumerate(LABELS.items()):
         x, y = 24 + (i % 3) * ((width - 48) // 3), legend_top + (i // 3) * 28

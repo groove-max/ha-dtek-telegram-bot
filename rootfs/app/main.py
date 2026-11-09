@@ -1162,7 +1162,7 @@ class Orchestrator:
         elif template_name == "upcoming_outage":
             upcoming = upcoming_schedule_events(
                 events, now=now_kyiv(), group_state=group_state,
-                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state), config=address,
             )
             if upcoming:
                 event = upcoming[0]
@@ -1194,7 +1194,7 @@ class Orchestrator:
             next_outage = format_next_outage(
                 events, header_group=group,
                 group_state=group_state,
-                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state), config=address,
             )
             context.update(
                 short_name=display_name,
@@ -1223,7 +1223,7 @@ class Orchestrator:
             next_outage = format_next_outage(
                 events, header_group=group,
                 group_state=group_state,
-                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state), config=address,
             )
             context.update(
                 short_name=display_name,
@@ -1236,7 +1236,7 @@ class Orchestrator:
             context["next_outage"] = format_next_outage(
                 events, header_group=group,
                 group_state=group_state,
-                groups=[address.selected_group] if address.selected_group else state_groups(group_state),
+                groups=[address.selected_group] if address.selected_group else state_groups(group_state), config=address,
             )
         elif template_name == "status_off":
             outage_type_raw = await self._get_entity_value(address, "status")

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
 from outage_calendar import parse_event_time
+from provider_notice import forecast_suspended
 from schedule_restoration import changed_restoration_end
 from utils import (
     OUTAGE_TYPE_UA,
@@ -62,7 +63,7 @@ class EmergencyFeature(Feature):
             relevant = [selected] if selected in groups else groups
             end = changed_restoration_end(
                 events, previous, relevant, self.state_get("groups_snapshot"), now_kyiv(),
-                started=parse_event_time(scope["start"]),
+                started=parse_event_time(scope["start"]), config=self.config,
             )
             if end is None:
                 return True
@@ -82,10 +83,11 @@ class EmergencyFeature(Feature):
                     and await self._get_entity_value("status") == "stabilization"
                     and await self._eta_scope() == scope
                     and now_kyiv() < end
+                    and not forecast_suspended((self.state_get("groups_snapshot") or {}).get("attributes", {}), self.config, at=end)
                 )
 
             text = self.render("schedule_restoration", new_end=format_datetime(end))
-            delivered = await self.send_message(text, disable_notification=True, before_send=still_current)
+            delivered = await self.send_message(text, disable_notification=True, before_send=still_current, delivery_context={"schedule_prediction": True})
             if not delivered:
                 return False
             await self._remember_eta(scope, end_raw)

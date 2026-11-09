@@ -17,6 +17,7 @@ from telegram_service import TelegramService
 from template_engine import TemplateEngine
 from groups import state_groups, select_events, presentation_context
 from utils import format_datetime, now_kyiv
+from provider_notice import forecast_suspended, notice_enabled, warning_html, contract_identity, append_warning
 from outage_calendar import ScheduleUnavailable, verified_coverage_end
 
 logger = logging.getLogger(__name__)
@@ -214,11 +215,12 @@ class Feature(ABC):
         return attrs.get("provider_id"), attrs.get("address_id")
 
     def _schedule_revision(self) -> str | None:
-        return (
-            (self.state_get("groups_snapshot") or {})
-            .get("attributes", {})
-            .get("schedule_snapshot_id")
-        )
+        attrs = (self.state_get("groups_snapshot") or {}).get("attributes", {})
+        revision = attrs.get("schedule_snapshot_id")
+        notice = contract_identity(attrs)
+        if notice is None:
+            return revision
+        return hashlib.sha256(json.dumps([revision, notice], sort_keys=True).encode()).hexdigest()
 
     def render(self, template_name: str, **extra_context: Any) -> str:
         """Render a template with common context + extra variables."""
@@ -230,6 +232,9 @@ class Feature(ABC):
             "timestamp": format_datetime(now_kyiv()),
         }
         ctx.update(extra_context)
+        notice_option = "show_in_status" if self.name == "status_message" else "show_in_schedule_messages"
+        provider_warning = warning_html((self.state_get("groups_snapshot") or {}).get("attributes", {})) if self.name in ("status_message", "schedule_change", "group_change") and notice_enabled(self.config, notice_option) else ""
+        ctx["provider_notice"] = provider_warning
         identity = {k: v for k, v in ctx.items() if k != "timestamp"}
         identity.update(
             template=template_name,
@@ -250,7 +255,8 @@ class Feature(ABC):
             self.state_set(f"delivery_identity_{self.name}", fingerprint)
             self.state_set(f"delivery_revision_{self.name}", revision)
         self._delivery_key = f"{fingerprint}:{revision}"
-        return self.templates.render(template_name, **presentation_context(ctx, self.state_get("groups_snapshot")))
+        text = self.templates.render(template_name, **presentation_context(ctx, self.state_get("groups_snapshot")))
+        return append_warning(text, (self.state_get("groups_snapshot") or {}).get("attributes", {})) if provider_warning else text
 
     def state_get(self, key: str, default: Any = None) -> Any:
         """Get a value from persistent state for this address."""
@@ -317,6 +323,11 @@ class Feature(ABC):
                 and verified_calendar != (tuple(groups), revision, self._schedule_source())
             ) or (revision is not None and verified_calendar is None)):
                 raise ValueError("Schedule changed before send; fetch it again")
+        if self.name == "upcoming_outage":
+            at = datetime.fromtimestamp(delivery_context["expires"], now_kyiv().tzinfo) if delivery_context.get("expires") else None
+            attrs = (self.state_get("groups_snapshot") or {}).get("attributes", {})
+            if forecast_suspended(attrs, self.config, at=at):
+                return None
         expires = delivery_context.get("expires")
         if expires is not None and now_kyiv().timestamp() >= expires:
             self.log.info("Notification expired while validating; skipping send")

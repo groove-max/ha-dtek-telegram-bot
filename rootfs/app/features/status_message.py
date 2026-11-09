@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from features.base import Feature
+from provider_notice import forecast_suspended
 from outage_calendar import extract_calendar_events, format_next_outage, calendar_query_end
 from utils import OUTAGE_TYPE_UA, format_datetime, format_duration, now_kyiv
 
@@ -338,13 +339,15 @@ class StatusMessageFeature(Feature):
     async def _get_next_outage(self) -> str | None:
         """Get the next planned outage as a formatted string."""
         events = await self.calendar_snapshot(self._fetch_next_outage_events)
+        if forecast_suspended((self.state_get("groups_snapshot") or {}).get("attributes", {}), self.config):
+            return "прогноз призупинено"
         selected = getattr(self.config, "selected_group", "")
         groups = self.state_get("current_groups", [])
         return format_next_outage(
             events,
             header_group=await self._resolve_current_group(),
             now=now_kyiv(), group_state=self.state_get("groups_snapshot"),
-            groups=[selected] if selected else groups,
+            groups=[selected] if selected else groups, config=self.config,
         )
 
     async def _fetch_next_outage_events(self) -> list[dict]:

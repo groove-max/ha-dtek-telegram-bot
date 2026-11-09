@@ -525,6 +525,7 @@ function createBlankAddress(prefill = {}) {
     selected_group: "",
     schedule_change: { enabled: true, silent: true, include_image: true },
     schedule_image: { enabled: false, update_interval: 300 },
+    provider_notice: { enabled: true, show_in_status: true, show_in_schedule_messages: true, show_on_images: true, pause_forecasts: true },
     emergency: { enabled: true, silent: false },
     group_change: { enabled: true, silent: false },
     voltage: {
@@ -1897,6 +1898,18 @@ function renderAddressEditor(address, index) {
         </div>
       </div>
 
+      <details class="provider-notice-settings addr-section">
+        <summary><strong>📢 Оголошення ДТЕК</strong></summary>
+        <p class="helper-copy">Повідомлення з регіонального сайту ДТЕК можуть стосуватися лише частини області. Оригінал доступний за посиланням у Telegram та в HA. Ці налаштування діють тільки для цього профілю бота.</p>
+        <label class="toggle"><input class="notice-enabled" type="checkbox" ${address.provider_notice?.enabled !== false ? "checked" : ""} /><span>Використовувати оголошення ДТЕК</span></label>
+        <div class="feature-grid notice-options">
+          <label class="toggle"><input class="notice-status" type="checkbox" ${address.provider_notice?.show_in_status !== false ? "checked" : ""} /><span>Показувати в статусі</span><small>У закріпленому повідомленні або у відповіді на запит стану.</small></label>
+          <label class="toggle"><input class="notice-schedule" type="checkbox" ${address.provider_notice?.show_in_schedule_messages !== false ? "checked" : ""} /><span>Додавати до повідомлень про зміну графіка й групи</span><small>Коротка примітка з джерелом. Окремих розсилок оголошень немає.</small></label>
+          <label class="toggle"><input class="notice-images" type="checkbox" ${address.provider_notice?.show_on_images !== false ? "checked" : ""} /><span>Позначати на зображеннях графіка</span><small>На PNG — позначка; у підписі — посилання. Діє і для меню, і для автоматичних зображень.</small></label>
+          <label class="toggle"><input class="notice-pause" type="checkbox" ${address.provider_notice?.pause_forecasts !== false ? "checked" : ""} /><span>Призупиняти прогнози за екстреного оголошення</span><small>Лише коли актуальне повідомлення однозначно стосується вашої території й дати. Неоднозначний текст або помилка перевірки не зупиняють прогнози. Фактичне живлення й напруга визначаються окремо.</small></label>
+        </div>
+      </details>
+
       <div class="inline-fields schedule-image-options">
         <label class="field"><span>Оновлення зображення, хв</span><input class="schedule-image-interval" type="number" min="1" max="60" step="1" value="${escapeHtml((address.schedule_image?.update_interval ?? 300) / 60)}" /><small>Потрібні зображення до сповіщень. Лінія часу оновлюється в останній таблиці за сьогодні, без нового повідомлення. Вчорашні зображення та екрани меню не змінюються.</small></label>
       </div>
@@ -2397,6 +2410,9 @@ function reviewProfile(address) {
   if (address.member_access && getDraftConfig().receive_commands === false) warnings.push("Меню учасників потребує приймання команд на цьому HA. Для одного токена може бути лише один такий сервер.");
   if (address.mode === "personal" && getDraftConfig().receive_commands === false) warnings.push("Приймання команд вимкнено. Особисте меню недоступне.");
   const rows = [["Джерело", source], ["Бот", bot ? `${bot.name}${bot.username ? " · @" + bot.username : ""}` : "не обрано"], [address.mode === "personal" ? "Одержувачі" : "Одержувач", dest.label], ["Сповіщення", names.join(", ") || "вимкнені"], ["Живлення", power], ["Якість напруги", address.voltage.enabled ? (address.voltage.entities || []).map(e => sensorLabel(e.entity)).join(", ") || "датчик не обрано" : "сповіщення вимкнені"]];
+  const notice=address.provider_notice || {};
+  const noticePlaces=[notice.show_in_status !== false && "статус", notice.show_in_schedule_messages !== false && "повідомлення про зміни", notice.show_on_images !== false && "зображення"].filter(Boolean);
+  rows.push(["Оголошення ДТЕК", notice.enabled === false ? "Вимкнені для цього профілю" : `${noticePlaces.join(", ") || "Показ вимкнений"}; ${notice.pause_forecasts !== false ? "прогнози призупиняються за однозначного екстреного оголошення" : "оголошення не призупиняють прогнози"}`]);
   rows.push(["Оновлення останнього графіка", address.schedule_image?.enabled ? `Кожні ${address.schedule_image.update_interval / 60} хв` : "Вимкнене"]);
   rows.push(["Зображення до змін графіка / групи", address.schedule_change.include_image !== false ? "Усі групи, для змінених дат" : "Вимкнені"]);
   if (address.mode !== "personal") rows.push(["Особисте меню учасників", address.member_access ? "Стан і графіки після перевірки участі; бот має бути адміністратором" : "Вимкнене"]);
@@ -2488,6 +2504,13 @@ function collectEditorConfig() {
         enabled: form.querySelector(".schedule-image-enabled").checked,
         update_interval: Number(form.querySelector(".schedule-image-interval").value) * 60,
       },
+      provider_notice: {
+        enabled: form.querySelector(".notice-enabled").checked,
+        show_in_status: form.querySelector(".notice-status").checked,
+        show_in_schedule_messages: form.querySelector(".notice-schedule").checked,
+        show_on_images: form.querySelector(".notice-images").checked,
+        pause_forecasts: form.querySelector(".notice-pause").checked,
+      },
       schedule_change: {
         enabled: form.querySelector(".feature-schedule-change").checked,
         include_image: form.querySelector(".schedule-include-image").checked,
@@ -2558,6 +2581,8 @@ function collectEditorConfig() {
 }
 
 function syncAddressFormVisibility(form) {
+  const noticeEnabled = form.querySelector(".notice-enabled")?.checked !== false;
+  form.querySelectorAll(".notice-options input").forEach(input => { input.disabled = !noticeEnabled; });
   updateRecipientPickers(form);
   syncPowerSources(form);
   const personal = form.querySelector(".addr-mode")?.value === "personal";

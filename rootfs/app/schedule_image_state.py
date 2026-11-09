@@ -11,7 +11,7 @@ def image_content_hash(data, offset, personal):
     """Hash the whole displayed day, excluding moving time and poll timestamps."""
     view = select_page(data, offset, personal, "all")
     return hashlib.sha256(json.dumps({
-        "day": view.day, "address": data.get("address", ""), "personal": personal,
+        "day": {k: v for k, v in view.day.items() if k not in ("provider_notice_checked_at", "provider_notice_valid_until")}, "address": data.get("address", ""), "personal": personal,
         "time_zone": data.get("time_zone"),
     }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 

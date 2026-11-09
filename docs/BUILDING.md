@@ -59,3 +59,46 @@ Review the recipient first. Use an optional [test destination](../DOCS.md#testin
 Check **Current status** in the editor: HA connected, correct address/groups and correct destination. A missing daily schedule or absent physical sensor can legitimately show unavailable/unknown data.
 
 [Troubleshooting](../README.md#troubleshooting) · [All notification settings](../DOCS.md#notifications)
+
+## DTEK announcements next to the schedule
+
+With an updated integration, the status and schedule-change messages include a
+short DTEK announcement note and a link to its original text. A PNG has a compact
+announcement marker; its caption contains the source. Rechecking the same text
+does not send another notification. The settings below let you choose where notices appear.
+
+Read the territory and dates in the announcement: a message about part of the
+region may not concern your building. The table remains available. Only a fresh,
+unambiguous emergency declaration matching your territory/date pauses
+upcoming-outage warnings and restoration estimates derived from the timetable.
+An ambiguous, absent or unavailable announcement does not pause these forecasts.
+A failed check is labelled separately; it never means “power on” or “power off”.
+Schedule/group changes and measured power/voltage alerts keep working.
+
+Update **both the integration and the add-on**. Older integrations retain their
+previous behavior. In HA, open **Schedule → DTEK announcement** for the original
+text and last successful check time (not publication time).
+[How announcements are interpreted](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/SCHEDULES.md#regional-announcements-and-emergency-outages).
+
+### Configure announcements for each profile
+
+Open the app's web interface, edit a profile, and select **3. Сповіщення →
+📢 Оголошення ДТЕК**. Settings apply only to that profile:
+
+- **Використовувати оголошення ДТЕК** — master switch. Turning it off hides
+  announcement notes in this bot profile and stops them pausing its forecasts.
+- **Показувати в статусі** — include a note and source in the pinned status or
+  the response to a status request.
+- **Додавати до повідомлень про зміну графіка й групи** — include a short note
+  in those existing messages. There is no separate announcement broadcast.
+- **Позначати на зображеннях графіка** — show the PNG marker and caption source
+  for both menu requests and automatic schedule photos.
+- **Призупиняти прогнози за екстреного оголошення** — pause timetable-derived
+  forecasts only for fresh, unambiguous matching emergency declarations.
+
+All switches are on by default. Choose **Apply** to save and restart the app.
+Turning the master switch off preserves the other choices for later. These
+settings do not change announcement displays or sensors in the HA integration.
+For YAML configuration, use `provider_notice.enabled`, `show_in_status`,
+`show_in_schedule_messages`, `show_on_images`, and `pause_forecasts` under each
+address's `provider_notice` block.

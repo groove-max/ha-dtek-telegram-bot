@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from groups import event_group
+from provider_notice import forecast_suspended
 from utils import TZ_KYIV, format_date_short, format_time_short, now_kyiv
 
 
@@ -148,9 +149,12 @@ def verified_coverage_end(group_state, groups, now, kind="outage"):
     return datetime.fromtimestamp(min(horizons), timezone.utc)
 
 
-def upcoming_schedule_events(events, *, now=None, group_state=None, groups=None):
+def upcoming_schedule_events(events, *, now=None, group_state=None, groups=None, config=None):
     """Future starts within coverage, with explicit confidence in their end times."""
     now = now or now_kyiv()
+    attrs = (group_state or {}).get("attributes", {})
+    if forecast_suspended(attrs, config, now=now):
+        return []
     events = normalize_calendar_events(events)
     if groups is None:
         groups = sorted({event_group(e) for e in events if event_group(e)})
@@ -162,7 +166,9 @@ def upcoming_schedule_events(events, *, now=None, group_state=None, groups=None)
         start, end = parse_event_time(event["start"]), parse_event_time(event["end"])
         if start.timestamp() <= now.timestamp() or (horizon and start.timestamp() >= horizon.timestamp()):
             continue
-        end_confirmed = horizon is None or end.timestamp() < horizon.timestamp()
+        if forecast_suspended(attrs, config, now=now, at=start):
+            continue
+        end_confirmed = (horizon is None or end.timestamp() < horizon.timestamp()) and not forecast_suspended(attrs, config, now=now, at=end)
         if any(
             event_group(other) == event_group(event)
             and parse_event_time(other["start"]).timestamp() <= end.timestamp() < parse_event_time(other["end"]).timestamp()
@@ -282,9 +288,10 @@ def format_next_outage(
     now: datetime | None = None,
     group_state: dict | None = None,
     groups: list[str] | None = None,
+    config=None,
 ) -> str | None:
     """Format status/preview identically, retaining only necessary group labels."""
-    events = upcoming_schedule_events(events, now=now, group_state=group_state, groups=groups)
+    events = upcoming_schedule_events(events, now=now, group_state=group_state, groups=groups, config=config)
     if not events:
         return None
     first = events[0]

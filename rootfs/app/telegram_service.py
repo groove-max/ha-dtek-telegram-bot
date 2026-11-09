@@ -110,7 +110,9 @@ class TelegramService:
         self.last_error = ""
         if row is not None:
             payload = (
-                result.model_dump(mode="json", exclude_none=True)
+                # Telegram responses may contain LinkPreviewOptions whose
+                # omitted fields use aiogram's non-JSON Default sentinels.
+                result.model_dump(mode="json", exclude_none=True, exclude_unset=True)
                 if hasattr(result, "model_dump")
                 else result
             )
@@ -151,9 +153,10 @@ class TelegramService:
                     if update.update_id < self.journal.offset:
                         continue
                     # Commit before executing commands: a crash cannot replay a write.
-                    self.journal.ingest(update.update_id, update.model_dump(mode="json", exclude_none=True, by_alias=True),
+                    payload = update.model_dump(mode="json", exclude_none=True, exclude_unset=True, by_alias=True)
+                    self.journal.ingest(update.update_id, payload,
                                         self._test_chat_id if getattr(self, "_capture_feedback", False) else "")
-                    self.journal.recipients.observe(update.model_dump(mode="json", exclude_none=True, by_alias=True), self._bot.id)
+                    self.journal.recipients.observe(payload, self._bot.id)
                     if getattr(self, "_incoming_handler", None):
                         try:
                             await self._incoming_handler(update)
@@ -313,7 +316,7 @@ class TelegramService:
             context = payload.get("context") or {}
             # These features retry only after fetching a consistent, fresh
             # observation themselves. Never replay cached schedules or power alerts.
-            if context.get("feature") in (
+            if context.get("schedule_prediction") or context.get("feature") in (
                 "group_change",
                 "schedule_change",
                 "upcoming_outage",

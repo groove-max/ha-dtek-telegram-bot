@@ -12,6 +12,39 @@ Telegram now has a native command menu, recipient selection and invitation links
 
 Schedule changes now include silent images by default. Under the profile’s notifications, you can disable attachments or enable automatic updates of the latest image for today (default interval 5 minutes). A real schedule change also refreshes it immediately. Voltage-normalization notices are silent by default; change **Додаткові параметри → Тихий режим повідомлень → Напруга в нормі** independently of low/high warnings. Duration lines are omitted when telemetry gaps make the elapsed outage uncertain.
 
+<a id="main-code"></a>
+## Try code from `main` before a release
+
+For announcements, first install the integration's matching
+[main code](https://github.com/groove-max/ha-dtek-monitor/blob/main/docs/UPGRADING.md#main-code)
+and restart HA. The bot can still show **0.5.0-rc6**: rebuilding its image installs
+source changes without a version bump. Restarting alone keeps the old image.
+
+For an existing app installed from this GitHub repository:
+
+1. Create an HA backup including the app and its data. Keep your token, recipients, templates and sensor settings.
+2. In an HA terminal with the `ha` command, run `ha addons list` and find the **slug** of your installed DTEK Telegram Bot. Replace `YOUR_BOT_SLUG` below with that exact value.
+3. Refresh the repository and rebuild the existing app:
+
+   ```bash
+   ha store reload
+   ha addons rebuild YOUR_BOT_SLUG
+   ha addons start YOUR_BOT_SLUG
+   ```
+
+4. Wait for the build, check the app log for its HA connection and reload the editor. Open your profile → **3. Сповіщення → 📢 Оголошення ДТЕК**. Existing profiles start with these options enabled.
+5. Keep the existing app installed. A second instance using the same token can compete for incoming Telegram commands.
+
+For a **local app**, first replace its source folder under `/addons` with the
+complete code from the [main archive](https://github.com/groove-max/ha-dtek-telegram-bot/archive/refs/heads/main.zip),
+keeping the same folder and slug, then rebuild. Keep the app's persistent data
+and HA configuration. To undo a development build, restore the app backup made
+before it. After the next release, normal app updates apply again.
+
+See the official [store reload](https://contributors.home-assistant.io/apps/supervisor-api/store/)
+and [app rebuild](https://contributors.home-assistant.io/apps/supervisor-api/apps/)
+operations for the distinction.
+
 ## First installation
 
 Use **Home Assistant OS**, HA **2026.3.0+** and `amd64` or `aarch64`. [Add the app repository](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fgroove-max%2Fha-dtek-telegram-bot), install DTEK Telegram Bot, enter your BotFather token and open its web UI. The [step-by-step installation](../README.md#installation) covers creating the bot and discovering your chat.

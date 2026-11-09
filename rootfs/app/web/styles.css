@@ -591,6 +591,21 @@ input[readonly] {
   gap: 6px;
 }
 
+.notice-options .toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  width: 100%;
+  gap: 5px 8px;
+  padding: 9px;
+}
+
+.notice-options .toggle small {
+  grid-column: 2;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
 /* ── Inline fields (horizontal row) ──────────────────────────── */
 .inline-fields {
   display: flex;

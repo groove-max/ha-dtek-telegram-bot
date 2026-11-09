@@ -105,7 +105,7 @@ class Conversations(CommandNavigation, ReadingPhotos, PersonalDocuments):
 
     async def handle(self, update):
         payload = (
-            update.model_dump(mode="json", exclude_none=True, by_alias=True)
+            update.model_dump(mode="json", exclude_none=True, exclude_unset=True, by_alias=True)
             if hasattr(update, "model_dump")
             else update
         )
@@ -794,6 +794,8 @@ class Conversations(CommandNavigation, ReadingPhotos, PersonalDocuments):
                     "dtek_monitor/schedule_grid", entity_id=entity
                 )
             )
+        from provider_notice import configured_grid
+        data = configured_grid(data, profile)
         if navigating:
             offset = next((i for i, day in enumerate(data.get("days", [])[:2]) if day["date"] == request["date"]), None)
             if offset is None:
@@ -840,7 +842,9 @@ class Conversations(CommandNavigation, ReadingPhotos, PersonalDocuments):
         if view.unassigned:
             caption += "\nℹ️ Вашу групу ще не підтверджено."
         caption += "\n🕒 Сформовано: " + format_datetime(rendered_at) + ". «Оновити» — свіжий графік і лінія часу."
-        caption += "\n\n⚠️ При аварійних відключеннях графік може не діяти."
+        from provider_notice import warning_html
+        announcement = warning_html(view.day, now=rendered_at, general=view.scope == "general")
+        caption += announcement or "\n\n⚠️ При аварійних відключеннях графік може не діяти."
         async def send():
             args = dict(chat_id=user, caption=caption, parse_mode="HTML", reply_markup=self.navigation(user, profile, actions))
             file = BufferedInputFile(png, filename=f"dtek-schedule-{date}.png")

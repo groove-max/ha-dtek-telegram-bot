@@ -309,6 +309,13 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("GitHub", self.bot.send_message.call_args.kwargs["text"])
         self.app.ha.command.assert_not_awaited()
 
+    async def test_real_link_preview_update_can_open_menu(self):
+        payload = self.message(user=123)
+        payload["message"]["link_preview_options"] = {"is_disabled": True}
+        await self.router.handle(self.telegram_update(payload))
+        self.assertTrue(self.bot.send_message.await_count)
+        self.app.ha.command.assert_not_awaited()
+
     async def test_unknown_gets_links_once_and_no_private_data(self):
         await self.router.handle(self.message())
         await self.router.handle(self.message(text="hello again"))

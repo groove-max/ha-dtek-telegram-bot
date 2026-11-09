@@ -1,5 +1,7 @@
 """Destination-independent delivery using real Telegram types and mocked I/O."""
 
+import asyncio
+import json
 import sys
 import unittest
 from datetime import datetime, timezone
@@ -10,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import aiogram
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.methods import PinChatMessage, SendMessage
-from aiogram.types import Chat, Message
+from aiogram.types import Chat, Message, Update
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rootfs/app"))
 from config import AddressConfig, FullConfig
@@ -73,6 +75,46 @@ class TelegramDestinationTests(unittest.IsolatedAsyncioTestCase):
         service, bot = self.service("-1009876543210", "private")
         await service.send_message("alert", chat_id=address.telegram_chat_id)
         self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], "123456789")
+
+    async def test_link_preview_response_is_recorded_without_resending_success(self):
+        service, bot = self.service("123456789", "private")
+        message = Message.model_validate({
+            "message_id": 71, "date": 0,
+            "chat": {"id": 123456789, "type": "private"},
+            "text": "Announcement with a source link",
+            "link_preview_options": {"is_disabled": False},
+        })
+        bot.send_message.return_value = message
+        bot.edit_message_text.return_value = message
+        for _ in range(2):
+            self.assertEqual(await service.send_message("notice", delivery_key="notice-1"), 71)
+        bot.send_message.assert_awaited_once()
+        self.assertEqual(await service.edit_message_result(71, "notice updated"), "ok")
+        rows = service.journal.db.execute("SELECT status,response FROM events").fetchall()
+        self.assertEqual(len(rows), 2)
+        for status, response in rows:
+            self.assertEqual(status, "ok")
+            self.assertEqual(json.loads(response)["link_preview_options"], {"is_disabled": False})
+        self.assertTrue(service.journal.owns("123456789", 71))
+        self.assertEqual(service.last_error, "")
+
+    async def test_link_preview_incoming_update_advances_cursor_and_runs_once(self):
+        service, bot = self.service("123456789", "private")
+        bot.id = 99
+        update = Update.model_validate({
+            "update_id": 10, "message": {
+                "message_id": 71, "date": 0,
+                "chat": {"id": 123456789, "type": "private"},
+                "from": {"id": 123456789, "is_bot": False, "first_name": "Example"},
+                "text": "A source link", "link_preview_options": {"is_disabled": True},
+            },
+        })
+        service._incoming_handler = AsyncMock()
+        bot.get_updates.side_effect = [[update, update], asyncio.CancelledError()]
+        with self.assertRaises(asyncio.CancelledError):
+            await service._poll_feedback()
+        self.assertEqual(service.journal.offset, 11)
+        service._incoming_handler.assert_awaited_once_with(update)
 
     async def test_personal_test_destination_overrides_all_operations(self):
         service, bot = self.service(
