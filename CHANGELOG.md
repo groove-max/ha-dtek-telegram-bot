@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0-rc9] - 2026-11-10
+
+**Regular GitHub release**, without the Pre-release flag. Requires Home Assistant 2026.3.0+. Status automation actions require **DTEK Monitor 2.0.0-rc8 + DTEK Telegram Bot 0.5.0-rc9**. Existing features retain their earlier compatibility.
+
+- Accept authenticated Home Assistant actions to refresh the existing pinned status or send a new status using the selected profile’s templates and configured recipients. Sending works with automatic status disabled. Requires the matching DTEK Monitor update.
+- Add bounded requests, cooldowns, persistent duplicate suppression, per-bot worker routing and explicit delivery acknowledgements. Preserve private recipients, test routing, status message ownership and existing notification settings.
+- Document native HA automation setup and conditional battery templates in English and Ukrainian. Battery thresholds remain standard HA automations; no rules or new notifications are enabled automatically.
+
+
+**Upgrade:** update Monitor through HACS and restart HA, then update the bot through the HA app store and restart the app. Existing profiles, recipients, templates and status IDs are preserved. No new automation or notification is enabled automatically. Allow up to 30 seconds for profiles to appear in the native HA action selector.
+
+**Validation:** 640 bot tests and 832 integration tests passed locally, including the new actions on HA 2026.3.0. An isolated cross-component check verified rendered sensor values, editing the same status message and duplicate suppression after a process restart.
+
+[Automation setup and battery example](DOCS.md#ha-status-actions) · [Автоматизації та приклад батареї](DOCS.uk.md#ha-status-actions)
+
 ## [0.5.0-rc8] - 2026-11-10
 
 **Regular GitHub release**, without the Pre-release flag. Requires Home Assistant 2026.3.0+ on amd64/aarch64. These template features do not require a new DTEK Monitor version.

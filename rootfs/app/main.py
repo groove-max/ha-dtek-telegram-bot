@@ -40,6 +40,7 @@ from bot_runtime import BotRuntime
 from telegram_service import TelegramService
 from template_engine import TemplateEngine
 from template_sensors import sensor_context
+from status_actions import StatusActions
 from ui_server import UIServer
 from utils import OUTAGE_TYPE_UA, TZ_KYIV, format_datetime, format_duration, now_kyiv, parse_condition
 
@@ -109,6 +110,7 @@ class Orchestrator:
         self._run_task: asyncio.Task | None = None
         self._ha_task: asyncio.Task[None] | None = None
         self._tick_task: asyncio.Task[None] | None = None
+        self.status_actions: StatusActions | None = None
 
     async def render_status(self, address: AddressConfig) -> str:
         """Render the shared status templates without sending or editing a post."""
@@ -283,6 +285,13 @@ class Orchestrator:
                 logger.warning("Personal source unavailable; automatic ticks will retry")
         await self._enqueue_features("on_start", self.features)
 
+        try:
+            self.status_actions = StatusActions(self, self.bots.data_dir)
+            self.status_actions.start()
+        except Exception as exc:
+            # An optional command bridge must not stop existing outage alerts.
+            logger.error("HA status actions unavailable: %s", type(exc).__name__)
+
         logger.info("DTEK Telegram Bot started successfully")
 
         # Wait for shutdown
@@ -383,6 +392,8 @@ class Orchestrator:
             self._tick_task.cancel()
             await asyncio.gather(self._tick_task, return_exceptions=True)
         await self.bots.stop_workers()
+        if self.status_actions:
+            await self.status_actions.stop()
         for feature in self.features:
             try:
                 await feature.on_stop()

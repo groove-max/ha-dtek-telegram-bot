@@ -13,7 +13,7 @@ Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 
 | --- | --- |
 | Building channel/group or private address alerts | Building mode; select an address from discovery. |
 | Building linked to an account in My DTEK | Check the building link in cabinet settings, then select that building in the bot. |
-| Personal cabinet groups, readings and reminders | Personal profile; recommended pair: bot 0.5.0-rc8 and Monitor 2.0.0-rc7. [Complete setup guide](docs/PERSONAL.md). |
+| Personal cabinet groups, readings and reminders | Personal profile; recommended pair: bot 0.5.0-rc9 and Monitor 2.0.0-rc8. [Complete setup guide](docs/PERSONAL.md). |
 
 For a shared chat, leave `selected_group` empty: building mode keeps all address groups. You may manually choose a confirmed group in this mode; a selection in My DTEK does not change it. Personal mode instead uses only the cabinet API groups, without manual substitution or fallback to building groups.
 
@@ -497,3 +497,72 @@ Explicit temporary send failures may be retried within a bounded window after re
 The default Telegram token stays in Supervisor-managed options. Additional tokens are stored unencrypted in the app’s private `/data/telegram_bots.json` file with owner-only permissions (0600); they are not included in the editor’s JSON exports or diagnostics. App backups contain this private file. A fallback HA token may also be present in runtime YAML. Include these only in private backups. If a token is exposed, replace it through the service that issued it.
 
 For unresolved problems, use the [troubleshooting table](README.md#troubleshooting), then open an issue with versions, mode, reporting cadence and sanitized relevant logs. Development details are in [Contributing](CONTRIBUTING.md).
+
+
+<a id="ha-status-actions"></a>
+## Trigger status from Home Assistant automations
+
+**Available with Monitor 2.0.0-rc8 + Bot 0.5.0-rc9 or newer:** update both components. Bot 0.5.0-rc8 provides sensor templates only. No new thresholds or notifications are enabled automatically.
+
+1. Configure the building/personal profile and its recipients. Select it in **Tools → Templates**, add your desired data to `status_on`, `status_off`, `status_partial`, `status_unknown`, and preview. All personal recipients share the profile’s template.
+2. Restart HA after updating Monitor and restart the bot after updating the app. Allow up to 30 seconds, then open **Settings → Automations & scenes → Create automation**.
+3. Add an HA trigger, for example **Numeric state**, your battery percentage sensor, **below 30**, lasting **1 minute**. Other entities and triggers work too. Numeric triggers fire on crossing the threshold; restarting HA/reloading automations resets a pending `for` duration.
+4. Add a DTEK action and select **Bot profile** from the dropdown:
+   - **Send current bot status** (`dtek_monitor.send_bot_status`) creates a separate message. Automatic status may remain disabled. **Silent** is enabled by default; turn it off if you want a notification sound.
+   - **Refresh pinned bot status** (`dtek_monitor.refresh_bot_status`) updates the reusable message. Enable status in **Edit pinned message** (`pinned_edit`) mode for this profile first.
+5. Save the automation. Running it manually performs the real action in the configured chats; it is not a preview. Test with your own private profile or a separate test profile.
+
+The action uses current templates and all configured recipients of this profile. No token or arbitrary chat_id is accepted. Building and personal profiles use the same actions; private data cannot be redirected into a public chat. Administrators and HA automations may invoke them.
+
+A sensor referenced in a template does not send messages by itself: the automation decides when to act. You can also trigger only a pinned refresh when a sensor changes. Configure thresholds, delays and recovery conditions in HA; do not substitute zero for `unknown`/`unavailable`.
+
+For the battery example, replace the previous battery line in each status template with this block, using your own entity_id:
+
+```jinja
+{% set raw = states('sensor.battery_level') %}
+{% set level = raw | float(none) %}
+{{ '\n' }}{% if level is none or not (0 <= level <= 100) %}
+🔋 Battery: no data
+{% elif level <= 10 %}
+🛑 Battery: {{ raw }}% — almost depleted!
+{% elif level <= 20 %}
+⚠️ Battery: {{ raw }}% — CRITICALLY LOW
+{% elif level <= 30 %}
+🔋 Battery: {{ raw }}% (Warning!)
+{% else %}
+🔋 Battery: {{ raw }}%
+{% endif %}
+```
+
+These are formatting thresholds, not automatic triggers. HA’s numeric “below 30” is strict; the template warns at exactly 30% too. Use an HA template trigger if you need the action at exactly 30%. Low charge alone does not prove that the battery is switched off.
+
+**Limits and diagnostics.** Pinned refresh keeps the profile’s minimum interval; separate sends allow one request per profile every 10 seconds. Over-frequent requests return an error. HA waits up to 60 seconds for the result. A disconnected add-on, missing profile, partial delivery or unconfirmed outcome appears in the automation trace. Check Telegram before resending. Expired requests are not replayed after reconnection. Receiving the same request again does not duplicate a send after restart; manually running the automation again is a new request.
+
+If the profile list is empty, check both component updates, the running app and its HA connection, then reopen the action editor. Pinned refresh also filters out disabled statuses and `send_new` mode. Include `/data/status_action_instance` and `/data/status_actions.sqlite` in backups with the configuration: they preserve the app identity and duplicate-delivery protection.
+
+
+<a id="battery-threshold-automation"></a>
+### Ready example: alerts when crossing 50/30/20/10%
+
+If you already have a script or automation with the desired thresholds, keep its triggers and conditions. Replace only its send action with **DTEK → Send current bot status**, choose the profile and turn off **Silent** if you want a notification sound.
+
+To configure it from scratch in the automation editor:
+
+1. Add a **State** trigger for your battery percentage sensor. Leave From/To and duration empty.
+2. Add a **Template** condition with the code below. It uses the sensor that triggered the automation, so you do not repeat its entity_id:
+
+```jinja
+{% set old = trigger.from_state.state | float(none) if trigger.from_state else none %}
+{% set new = trigger.to_state.state | float(none) if trigger.to_state else none %}
+{{ old is not none and new is not none
+   and 0 <= new < old <= 100
+   and (old > 50 >= new or old > 30 >= new
+        or old > 20 >= new or old > 10 >= new) }}
+```
+
+3. Add **DTEK → Send current bot status**, select the profile and sound preference, and save. The default **Single** execution mode is suitable.
+4. Use the conditional battery text from the previous example in the bot’s four status templates, referencing the same battery entity.
+
+51→50, 31→30, 21→20 and 11→10 each trigger a message. A jump from 35→9 creates one request showing the current critical level. 30→29, attribute-only updates and charging from 19→21 do not send. Initial state, `unknown`, `unavailable` and values outside 0–100 are skipped. After charging above a threshold, the next downward crossing can trigger again; add your own conditions if readings oscillate. Message text uses the current charge when the bot processes the request.
+
+Do not test this with **Run actions** in a production chat: that button bypasses conditions and really sends the status. Inspect automation traces or use a separate test profile.

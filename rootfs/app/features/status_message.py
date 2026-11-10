@@ -110,9 +110,28 @@ class StatusMessageFeature(Feature):
             self._delayed_task.cancel()
         self._delayed_task = None
 
-    async def _update_status_message(self) -> None:
+    async def refresh_from_automation(self, expires: float, *, valid=None) -> str:
+        """Refresh explicitly, preserving the shared cooldown and message ID."""
+        if not self.enabled or self.config.status_message.delivery_mode != "pinned_edit":
+            return "disabled"
+        if not self._update_lock.locked():
+            self._cancel_delayed()
+        result = await self._update_status_message(retry=False, expires=expires, valid=valid)
+        return result if isinstance(result, str) else "updated" if result else "unknown"
+
+    async def _update_status_message(self, *, retry: bool = True, expires: float | None = None, valid=None) -> bool | str:
         """Build and deliver the status message using configured mode."""
         async with self._update_lock:
+            if expires is not None:
+                # Check inside the lock: a timer may have refreshed while this
+                # explicit request was waiting for the previous delivery.
+                if time.time() >= expires or (valid is not None and not valid()):
+                    return "expired"
+                remaining = self.config.status_message.min_update_interval - (time.monotonic() - self._last_attempt_ts)
+                if remaining > 0:
+                    if time.time() + remaining + 5 >= expires:
+                        return "rate_limited"
+                    await asyncio.sleep(remaining)
             self._last_attempt_ts = time.monotonic()
 
             house_state = (
@@ -121,6 +140,11 @@ class StatusMessageFeature(Feature):
                 else "unknown"
             )
             text = await self._build_status_text(house_state)
+            if expires is not None:
+                if time.time() >= expires or (valid is not None and not valid()):
+                    return "expired"
+                if not text or "[Template error:" in text:
+                    return "failed"
             delivery_mode = self.config.status_message.delivery_mode
             silent = self.config.status_message.silent
 
@@ -178,8 +202,10 @@ class StatusMessageFeature(Feature):
                     delivery_mode,
                     msg_id,
                 )
-                return
+                return True
 
+        if not retry:
+            return False
         retry_delay = min(
             5.0,
             max(float(self.config.status_message.min_update_interval), 1.0),
@@ -189,6 +215,7 @@ class StatusMessageFeature(Feature):
         if not self._delayed_task or self._delayed_task.done():
             self._delayed_task = asyncio.create_task(self._delayed_update(retry_delay))
         self.log.warning("Status message update failed; retrying in %.1fs", retry_delay)
+        return False
 
     async def _build_status_text(self, house_state: str) -> str:
         """Build the status message text."""

@@ -2,7 +2,7 @@
 
 **English** · [Українська](PERSONAL.uk.md) · [Main guide](../DOCS.md)
 
-> Recommended release pair: **bot 0.5.0-rc7** and **DTEK Monitor 2.0.0-rc7**. See [minimum versions by feature](UPGRADING.md#choose-the-matching-versions) for older installations. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
+> Recommended release pair: **bot 0.5.0-rc9** and **DTEK Monitor 2.0.0-rc8**. See [minimum versions by feature](UPGRADING.md#choose-the-matching-versions) for older installations. Both are regular GitHub releases. Update the integration first, then the bot. Building mode continues to work without a cabinet.
 
 Use one bot for a building channel and your own private cabinet. Each profile selects its own source and recipients; you do not need another bot token. Account setup, detailed history, sensor bindings and scheduled-check settings remain in **My DTEK** in Home Assistant. Version 0.5.0-rc2 also lets you confirm a calibration correction during reading entry.
 
@@ -196,7 +196,7 @@ A failure of monthly consumption does not erase available reading history. Other
 
 ## Meter photos and DTEK documents
 
-Available since **DTEK Monitor 2.0.0-rc4** and **Telegram Bot 0.5.0-rc4**; the current recommended pair is RC7. Update the integration first. Document retrieval remains experimental; the availability of a controller’s act through the cabinet is not yet verified.
+Available since **DTEK Monitor 2.0.0-rc4** and **Telegram Bot 0.5.0-rc4**; the current recommended pair is Monitor 2.0.0-rc8 + Bot 0.5.0-rc9. Update the integration first. Document retrieval remains experimental; the availability of a controller’s act through the cabinet is not yet verified.
 
 After entering readings (or choosing a sensor estimate), press **📷 Додати фото** on the review screen. Select a tariff, then send one photo or a JPEG, PNG or WebP file. Check the preview and repeat for the second tariff if applicable. Albums are not accepted. If you use photos, every tariff needs its own photo; otherwise remove all photos to submit numerical readings only. The numbers must match the official meter in the photos, even when a sensor provided the estimate.
 

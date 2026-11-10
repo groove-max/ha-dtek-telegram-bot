@@ -321,6 +321,7 @@ class TelegramService:
                 "schedule_change",
                 "upcoming_outage",
                 "power_presence",
+                "automation_status",
             ):
                 continue
             recorded = context.get("state") or {}

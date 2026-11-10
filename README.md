@@ -70,7 +70,7 @@ The built-in web editor and Telegram messages currently use Ukrainian. English d
 
 Use **Home Assistant OS**, Home Assistant **2026.3.0+**, and an `amd64` or `aarch64` device. You also need a DTEK Monitor building or connected cabinet and your own Telegram bot token. Select your recipient from detected users/chats after `/start`, or enter the numeric ID manually.
 
-**Bot 0.5.0-rc8** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. For a new installation, we recommend **bot 0.5.0-rc8** with **Monitor 2.0.0-rc7**. See [minimum versions by feature](docs/UPGRADING.md#choose-the-matching-versions) if you are keeping an older integration. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
+**Bot 0.5.0-rc9** keeps building alerts compatible with Monitor 1.7.0 and 2.0.0b1. For a new installation, we recommend **bot 0.5.0-rc9** with **Monitor 2.0.0-rc8**. See [minimum versions by feature](docs/UPGRADING.md#choose-the-matching-versions) if you are keeping an older integration. The projects have independent version numbers. [Compatibility and setup →](DOCS.md#dtek-monitor)
 
 **Two modes in one installation.** Address schedules send alerts to a private chat, group or channel without a cabinet login. Personal cabinet mode adds apartment groups, reading history, reminders and confirmed submissions, only for explicitly authorized private users. Both modes support local power sensors. [Personal mode guide](docs/PERSONAL.md). Attach optional meter photos during reading review and open cabinet documents from the same private menu. Document retrieval is experimental; [photo and document instructions](docs/PERSONAL.md#meter-photos-and-dtek-documents).
 
@@ -166,3 +166,5 @@ Standalone telemetry-loss/recovery notices are **off by default** (`power.teleme
 - [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md).
 
 This is an independent community project, not an official DTEK or Telegram product. Licensed under [PolyForm Noncommercial 1.0.0](LICENSE). Noncommercial use, modification and redistribution are permitted under its terms; commercial use is not granted. This is source-available software, not an OSI open-source license. Earlier MIT releases retain their original terms. Dependencies keep their own licenses. See [NOTICE](NOTICE).
+
+[Status from HA automations](DOCS.md#ha-status-actions) — universal send/refresh actions (Monitor 2.0.0-rc8 + Bot 0.5.0-rc9).

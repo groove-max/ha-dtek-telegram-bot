@@ -4,6 +4,14 @@
 
 Install the bot through the **Home Assistant app store**; HACS is used for the DTEK Monitor integration. [Latest bot release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest) · [Latest integration release](https://github.com/groove-max/ha-dtek-monitor/releases/latest).
 
+## RC9 update
+
+Install **Monitor 2.0.0-rc8** through HACS and restart HA, then update **Bot to 0.5.0-rc9** in the HA app store and start it. Both are regular releases without Pre-release. New actions send the current status or refresh its pinned message from any HA automation. Select a profile from the list; recipients and templates are preserved. No new automation is enabled automatically.
+
+Allow up to 30 seconds after bot startup, then reopen the action editor. Rolling either component back disables these actions; disable the corresponding automations. Existing notifications keep working. Preserve app data, including `status_action_instance` and `status_actions.sqlite`, to keep profile identity and duplicate-delivery protection.
+
+[Setup and battery example](../DOCS.md#ha-status-actions).
+
 ## RC8 update: sensor values and profile templates
 
 Update **Bot to 0.5.0-rc8**, then reload its web editor. This is a regular release, without the Pre-release flag. The app update restarts the bot; no full HA restart or DTEK Monitor update is needed just for this feature.
@@ -62,12 +70,13 @@ The table lists minimum integration versions and the current recommended bot. Us
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
-| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc8 |
-| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc8** |
-| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc8** |
-| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc8** |
-| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc8** |
-| Regional announcements and forecast guards | **2.0.0-rc7** | **0.5.0-rc8** |
+| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc9 |
+| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc9** |
+| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc9** |
+| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc9** |
+| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc9** |
+| Regional announcements and forecast guards | **2.0.0-rc7** | **0.5.0-rc9** |
+| HA status automation actions | **2.0.0-rc8** | **0.5.0-rc9** |
 
 Public schedules and personal household cabinets cover the four operators listed in Monitor 2.0.0-rc2. **Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental** and await real-account validation. Odesa and Kyiv city cabinet reads have been checked live; actual Day/Night submission has automated tests only.
 

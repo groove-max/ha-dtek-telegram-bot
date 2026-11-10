@@ -52,6 +52,8 @@ class HAClient:
         self._callbacks: list[StateChangeCallback] = []
         self._watched_entities: set[str] = set()
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
+        self._subscriptions: dict[int, Callable] = {}
+        self._subscription_tasks: set[asyncio.Task] = set()
         self._event_queue: asyncio.Queue[tuple[str, dict[str, Any], dict[str, Any]]] = (
             asyncio.Queue()
         )
@@ -114,6 +116,9 @@ class HAClient:
                 logger.warning("WebSocket error: %s", e)
             if self._running:
                 self._connected.clear()
+                self._subscriptions.clear()
+                for task in tuple(self._subscription_tasks):
+                    task.cancel()
                 for future in list(self._pending.values()):
                     if not future.done():
                         future.set_exception(ConnectionError("HA disconnected"))
@@ -126,6 +131,10 @@ class HAClient:
         """Stop the client and close connections."""
         self._running = False
         self._connected.clear()
+        self._subscriptions.clear()
+        for task in tuple(self._subscription_tasks):
+            task.cancel()
+        await asyncio.gather(*self._subscription_tasks, return_exceptions=True)
         for future in self._pending.values():
             if not future.done():
                 future.cancel()
@@ -228,6 +237,15 @@ class HAClient:
         msg_type = msg.get("type")
 
         msg_id = msg.get("id")
+
+        if msg_type == "event" and msg_id in self._subscriptions:
+            # Keep the WebSocket reader free to receive HA responses needed by
+            # the action itself. The integration bounds outstanding requests.
+            if len(self._subscription_tasks) < 20:
+                task = asyncio.create_task(self._subscriptions[msg_id](msg.get("event", {})))
+                self._subscription_tasks.add(task)
+                task.add_done_callback(self._subscription_tasks.discard)
+            return
         if msg_id in self._mqtt_subscriptions:
             topic = self._mqtt_subscriptions[msg_id]
             if msg_type == "result" and not msg.get("success"):
@@ -294,7 +312,7 @@ class HAClient:
         except Exception:
             logger.exception("Error in state_change callback for %s", entity_id)
 
-    async def _send_command(self, payload: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
+    async def _send_command(self, payload: dict[str, Any], timeout: float = 30.0, *, subscription_callback=None) -> dict[str, Any]:
         """Send a command and wait for the response."""
         await self.wait_connected()
         assert self._ws is not None
@@ -304,10 +322,18 @@ class HAClient:
 
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = future
+        if subscription_callback is not None:
+            self._subscriptions[msg_id] = subscription_callback
 
         try:
             await self._ws.send_json(payload)
-            return await asyncio.wait_for(future, timeout=timeout)
+            result = await asyncio.wait_for(future, timeout=timeout)
+            if not result.get("success"):
+                self._subscriptions.pop(msg_id, None)
+            return result
+        except BaseException:
+            self._subscriptions.pop(msg_id, None)
+            raise
         finally:
             self._pending.pop(msg_id, None)
 
