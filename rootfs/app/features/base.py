@@ -15,6 +15,8 @@ from ha_client import HAClient
 from state_store import StateStore
 from telegram_service import TelegramService
 from template_engine import TemplateEngine
+from template_sensors import sensor_context
+from personal_source import PersonalSource
 from groups import state_groups, select_events, presentation_context
 from utils import format_datetime, now_kyiv
 from provider_notice import forecast_suspended, notice_enabled, warning_text, contract_identity, append_warning
@@ -222,8 +224,20 @@ class Feature(ABC):
             return revision
         return hashlib.sha256(json.dumps([revision, notice], sort_keys=True).encode()).hexdigest()
 
+    async def async_render(self, template_name: str, **extra_context: Any) -> str:
+        if not isinstance(self.templates, TemplateEngine):
+            return self.render(template_name, **extra_context)
+        source = self.templates.get_template_details(
+            template_name, profile_id=getattr(self.config, "template_scope", self.profile_key)
+        )["source"]
+        helpers = await sensor_context(source, self.ha.ha if isinstance(self.ha, PersonalSource) else self.ha)
+        return self.render(template_name, _template_source=source,
+                           _sensor_context=helpers, **extra_context)
+
     def render(self, template_name: str, **extra_context: Any) -> str:
         """Render a template with common context + extra variables."""
+        source = extra_context.pop("_template_source", None)
+        helpers = extra_context.pop("_sensor_context", {})
         ctx = {
             "display_name": self.config.display_name,
             "group": self.state_get("current_group", "—"),
@@ -255,7 +269,13 @@ class Feature(ABC):
             self.state_set(f"delivery_identity_{self.name}", fingerprint)
             self.state_set(f"delivery_revision_{self.name}", revision)
         self._delivery_key = f"{fingerprint}:{revision}"
-        text = self.templates.render(template_name, **presentation_context(ctx, self.state_get("groups_snapshot")))
+        context = presentation_context(ctx, self.state_get("groups_snapshot"))
+        if source is not None:
+            text = self.templates.render_source(source, **context, **helpers)
+        elif isinstance(self.templates, TemplateEngine):
+            text = self.templates.render(template_name, profile_id=getattr(self.config, "template_scope", self.profile_key), **context)
+        else:
+            text = self.templates.render(template_name, **context)
         return append_warning(text, (self.state_get("groups_snapshot") or {}).get("attributes", {})) if provider_warning else text
 
     def state_get(self, key: str, default: Any = None) -> Any:

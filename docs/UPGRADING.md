@@ -4,6 +4,14 @@
 
 Install the bot through the **Home Assistant app store**; HACS is used for the DTEK Monitor integration. [Latest bot release](https://github.com/groove-max/ha-dtek-telegram-bot/releases/latest) · [Latest integration release](https://github.com/groove-max/ha-dtek-monitor/releases/latest).
 
+## RC8 update: sensor values and profile templates
+
+Update **Bot to 0.5.0-rc8**, then reload its web editor. This is a regular release, without the Pre-release flag. The app update restarts the bot; no full HA restart or DTEK Monitor update is needed just for this feature.
+
+Use **Tools → Templates** to customize one profile or a shared template, insert HA sensor values/attributes and preview the result. Existing templates stay shared and unchanged; no battery line is added automatically. All personal recipients of a profile share its template. [Battery example and setup](../DOCS.md#battery-template-example).
+
+Template saves apply without restarting. Configuration changes such as enabling notifications still need **Apply**. Back up the entire `/data/templates/` directory, including the new `profiles/` subdirectory. Older bot releases ignore profile overrides and sensor helpers are unavailable there; restore your matching app-data backup when rolling back.
+
 ## RC7 update
 
 Install **Monitor 2.0.0-rc7** and **Bot 0.5.0-rc7** for regional DTEK announcements. Update the integration first, restart HA, then update the app and reload its editor. Existing accounts, recipients, sensors, templates and pinned messages stay in place.
@@ -50,16 +58,16 @@ Choose [building mode](BUILDING.md) for address alerts or [personal mode](PERSON
 
 ## Choose the matching versions
 
-The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. RC7 releases are available in the regular release channel.
+The table lists minimum integration versions and the current recommended bot. Use the latest compatible releases for a new installation. The recommended releases are available in the regular release channel.
 
 | Your use | DTEK Monitor | Telegram Bot |
 | --- | --- | --- |
-| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc7 |
-| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc7** |
-| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc7** |
-| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc7** |
-| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc7** |
-| Regional announcements and forecast guards | **2.0.0-rc7** | **0.5.0-rc7** |
+| Existing building alerts | 1.7.0, 2.0.0b1 or 2.0.0-rc2 | 0.5.0-rc8 |
+| Personal cabinet, readings and history | **2.0.0-rc3** | **0.5.0-rc8** |
+| Today/tomorrow PNG schedule menu | **2.0.0-rc3** | **0.5.0-rc8** |
+| Exact-minute schedule PNGs | **2.0.0-rc5** | **0.5.0-rc8** |
+| Meter photos and private DTEK documents (experimental) | **2.0.0-rc4** | **0.5.0-rc8** |
+| Regional announcements and forecast guards | **2.0.0-rc7** | **0.5.0-rc8** |
 
 Public schedules and personal household cabinets cover the four operators listed in Monitor 2.0.0-rc2. **Kyiv oblast and Dnipropetrovsk oblast cabinets and apartment-group lookup are experimental** and await real-account validation. Odesa and Kyiv city cabinet reads have been checked live; actual Day/Night submission has automated tests only.
 

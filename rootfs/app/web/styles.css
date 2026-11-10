@@ -1217,3 +1217,11 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, .subpanel-he
 
 .bot-extra > summary { cursor: pointer; padding: 14px 0; }
 #bot-dialog #bot-new, #bot-dialog #bot-reload { display: none; }
+
+/* Sensor insertion stays outside the textarea, preserving selection and drafts. */
+.sensor-picker { margin-top: 12px; padding: 14px; border: 1px solid var(--border, #64748b); border-radius: 12px; }
+.sensor-picker[hidden], #template-attribute-field[hidden] { display: none; }
+#template-sensor-results { max-height: 300px; overflow-y: auto; margin: 10px 0; }
+.sensor-suggestion { display: grid; gap: 4px; width: 100%; text-align: left; padding: 10px; margin: 4px 0; background: transparent; color: inherit; border: 1px solid transparent; border-radius: 8px; overflow-wrap: anywhere; }
+.sensor-suggestion:hover, .sensor-suggestion:focus { border-color: var(--accent, #0891b2); outline: 2px solid var(--accent, #0891b2); }
+.sensor-suggestion span { font-size: .85em; opacity: .85; }

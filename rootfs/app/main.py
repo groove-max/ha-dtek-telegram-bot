@@ -39,6 +39,7 @@ from bot_profiles import BotProfileStore, default_profile, validate_destinations
 from bot_runtime import BotRuntime
 from telegram_service import TelegramService
 from template_engine import TemplateEngine
+from template_sensors import sensor_context
 from ui_server import UIServer
 from utils import OUTAGE_TYPE_UA, TZ_KYIV, format_datetime, format_duration, now_kyiv, parse_condition
 
@@ -826,9 +827,13 @@ class Orchestrator:
             "available": raw_state not in (None, "unknown", "unavailable"),
         }
 
-    def get_templates_snapshot(self) -> dict[str, Any]:
+    def get_templates_snapshot(self, profile_id: str = "") -> dict[str, Any]:
         """Return template metadata for the ingress template workspace."""
+        if profile_id:
+            self._validate_template_profile(profile_id)
         return {
+            "profiles": {a.key: self.templates.list_templates(profile_id=a.key)
+                         for a in self.config.addresses} if not profile_id else {},
             "templates_dir": str(self.templates.templates_dir),
             "templates": [
                 {
@@ -836,7 +841,7 @@ class Orchestrator:
                     "group": TEMPLATE_GROUPS.get(item["name"], "Custom"),
                     "built_in": item["name"] in DEFAULT_TEMPLATES,
                 }
-                for item in self.templates.list_templates()
+                for item in self.templates.list_templates(profile_id=profile_id)
             ],
         }
 
@@ -851,13 +856,11 @@ class Orchestrator:
         """Render a template preview for a draft address config."""
         address = self._get_address_by_index(config, address_index)
         profile = self._profile_for(address)
-        details = self.templates.get_template_details(template_name)
+        details = self.templates.get_template_details(template_name, profile_id="" if template_name == "welcome" else address.template_scope)
         context = await self._build_template_context(address, template_name)
-        rendered = (
-            self.templates.render_source(source_override, **context)
-            if source_override is not None
-            else self.templates.render(template_name, **context)
-        )
+        source = source_override if source_override is not None else details["source"]
+        helpers = await sensor_context(source, self.ha, public=template_name == "welcome")
+        rendered = self.templates.render_source(source, **context, **helpers)
         return {
             "template": {
                 **details,
@@ -911,20 +914,31 @@ class Orchestrator:
         }
         return preview
 
-    def save_template_override(self, template_name: str, source: str) -> dict[str, Any]:
+    def _validate_template_profile(self, profile_id: str) -> None:
+        if profile_id and profile_id not in {a.key for a in self.config.addresses}:
+            raise ValueError("Профіль недоступний. Спочатку застосуйте налаштування профілю.")
+
+    async def get_template_sensors(self) -> dict:
+        states = await self.ha.get_states()
+        return {"sensors": [self._state_snapshot(s["entity_id"], s) for s in states
+                            if s.get("entity_id", "").split(".", 1)[0] in {"sensor", "binary_sensor"}]}
+
+    def save_template_override(self, template_name: str, source: str, profile_id: str = "") -> dict[str, Any]:
         """Persist a template override and return updated metadata."""
-        path = self.templates.save_override(template_name, source)
-        details = self.templates.get_template_details(template_name)
+        self._validate_template_profile(profile_id)
+        path = self.templates.save_override(template_name, source, profile_id=profile_id)
+        details = self.templates.get_template_details(template_name, profile_id=profile_id)
         return {
             **details,
             "group": TEMPLATE_GROUPS.get(template_name, "Custom"),
             "path": str(path),
         }
 
-    def reset_template_override(self, template_name: str) -> dict[str, Any]:
+    def reset_template_override(self, template_name: str, profile_id: str = "") -> dict[str, Any]:
         """Delete a template override and return updated metadata."""
-        removed = self.templates.delete_override(template_name)
-        details = self.templates.get_template_details(template_name)
+        self._validate_template_profile(profile_id)
+        removed = self.templates.delete_override(template_name, profile_id=profile_id)
+        details = self.templates.get_template_details(template_name, profile_id=profile_id)
         return {
             **details,
             "group": TEMPLATE_GROUPS.get(template_name, "Custom"),

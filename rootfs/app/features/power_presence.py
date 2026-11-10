@@ -375,7 +375,7 @@ class PowerPresenceFeature(Feature):
     async def _send_house(self, template: str, **context: Any) -> int | None:
         # Freeze text and identity across retries, including an ambiguous timeout.
         if self._pending_house is None or self._pending_house[0] != template:
-            text = self.render(template, **context)
+            text = await self.async_render(template, **context)
             self._pending_house = (template, text, getattr(self, "_delivery_key", None))
         _, text, key = self._pending_house
 
@@ -425,7 +425,7 @@ class PowerPresenceFeature(Feature):
                 and self.state_get("power_last_confirmed_state") != "off"
             ):
                 delivered = await self.send_message(
-                    self.render(
+                    await self.async_render(
                         "phase_restored" if available else "phase_lost",
                         phase_label=phase["label"],
                         phases=snapshot["phases"],

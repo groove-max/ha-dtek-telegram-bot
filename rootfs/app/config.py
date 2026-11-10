@@ -261,6 +261,7 @@ class AddressConfig(BaseModel):
 
     entity_prefix: str = ""
     profile_id: str = ""
+    template_profile_id: str = Field(default="", exclude=True)
     mode: Literal["building", "personal"] = "building"
     account_entity: str = ""
     telegram_user_id: int = Field(default=0, ge=0)
@@ -275,6 +276,10 @@ class AddressConfig(BaseModel):
     def key(self) -> str:
         return self.profile_id or self.entity_prefix
 
+    @property
+    def template_scope(self) -> str:
+        return self.template_profile_id or self.key
+
     def for_user(self, user_id: int) -> "AddressConfig":
         """A private delivery route, with stable state for each authorized person.
 
@@ -288,6 +293,7 @@ class AddressConfig(BaseModel):
         ).hexdigest()[:24]
         return self.model_copy(deep=True, update={
             "profile_id": key, "entity_prefix": key,
+            "template_profile_id": self.template_scope if key != self.key else self.template_profile_id,
             "telegram_user_id": user_id, "telegram_user_ids": [user_id],
             "telegram_chat_id": str(user_id),
         })

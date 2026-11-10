@@ -167,6 +167,27 @@ class UIConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status['process_id'], saved['process_id'])
         self.assertEqual(status['restart_status'], {'state':'failed','reason':'permission_denied'})
 
+    async def test_profile_templates_conflict_with_only_their_effective_source(self):
+        self.orchestrator.config = config.FullConfig(addresses=[config.AddressConfig(entity_prefix='a'), config.AddressConfig(entity_prefix='b')])
+        self.orchestrator._validate_template_profile.side_effect = lambda scope: Orchestrator._validate_template_profile(self.orchestrator, scope)
+        self.orchestrator.get_templates_snapshot.side_effect = lambda **kw: Orchestrator.get_templates_snapshot(self.orchestrator, **kw)
+        self.orchestrator.save_template_override.side_effect = lambda name, source, **kw: Orchestrator.save_template_override(self.orchestrator, name, source, **kw)
+        self.orchestrator.reset_template_override.side_effect = lambda name, **kw: Orchestrator.reset_template_override(self.orchestrator, name, **kw)
+        name = 'power_lost'
+        base = self.orchestrator.templates.get_template_details(name)['source']
+        async def save(scope, source, expected):
+            return await self.client.post('/api/templates/save', json=dict(template_name=name, profile_id=scope, source=source, expected_source=expected))
+        self.assertEqual((await save('a', 'A', base)).status, 200)
+        self.assertEqual((await save('b', 'B', base)).status, 200)
+        self.assertEqual((await save('a', 'stale', base)).status, 409)
+        self.assertEqual((await save('missing', 'X', base)).status, 400)
+        self.assertEqual((await save('', 'Shared', base)).status, 200)
+        self.assertEqual(self.orchestrator.templates.render(name, profile_id='a'), 'A')
+        response = await self.client.post('/api/templates/reset', json=dict(template_name=name, profile_id='a', expected_source='A'))
+        self.assertEqual(response.status, 200)
+        self.assertEqual((await response.json())['template']['source'], 'Shared')
+        self.assertEqual(self.orchestrator.templates.render(name, profile_id='b'), 'B')
+
     async def test_template_save_and_reset_reject_stale_source(self):
         name = "power_off"
         original = self.orchestrator.templates.get_template_details(name)["source"]

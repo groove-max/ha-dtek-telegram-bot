@@ -317,7 +317,7 @@ class VoltageFeature(Feature):
     ) -> int | None:
         """Send voltage alert message."""
         template = "voltage_low" if alert_type == "low" else "voltage_high"
-        text = self.render(template, voltage=voltage, phase_label=label)
+        text = await self.async_render(template, voltage=voltage, phase_label=label)
         delivered = await self.send_message(
             text,
             delivery_key=self._incident_key(entity_id, "alert"),
@@ -335,7 +335,7 @@ class VoltageFeature(Feature):
         self, entity_id: str, label: str, voltage: float
     ) -> bool:
         """Send voltage normalized message."""
-        text = self.render("voltage_normal", voltage=voltage, phase_label=label)
+        text = await self.async_render("voltage_normal", voltage=voltage, phase_label=label)
         key = self._incident_key(entity_id, "normal")
         delivered = await self.send_message(
             text,

@@ -90,7 +90,7 @@ class GroupChangeFeature(Feature):
         lines = build_schedule_lines(events, header_group=display)
         start = now_kyiv().replace(hour=0, minute=0, second=0, microsecond=0)
         complete = not groups_only and self.has_schedule_coverage(start, start + timedelta(days=2))
-        text = self.render(
+        text = await self.async_render(
             "group_change",
             old_group=", ".join(previous),
             new_group=display,

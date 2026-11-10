@@ -86,7 +86,7 @@ class EmergencyFeature(Feature):
                     and not forecast_suspended((self.state_get("groups_snapshot") or {}).get("attributes", {}), self.config, at=end)
                 )
 
-            text = self.render("schedule_restoration", new_end=format_datetime(end))
+            text = await self.async_render("schedule_restoration", new_end=format_datetime(end))
             delivered = await self.send_message(text, disable_notification=True, before_send=still_current, delivery_context={"schedule_prediction": True})
             if not delivered:
                 return False
@@ -362,7 +362,7 @@ class EmergencyFeature(Feature):
                 duration_str,
             )
         else:
-            text = self.render("emergency_end", duration=duration_str)
+            text = await self.async_render("emergency_end", duration=duration_str)
             await self.send_message(
                 text,
                 disable_notification=self.config.emergency.silent,
@@ -422,7 +422,7 @@ class EmergencyFeature(Feature):
 
         self.state_set("last_emergency_snapshot_key", snapshot_key)
 
-        text = self.render(
+        text = await self.async_render(
             "emergency_start",
             outage_type=OUTAGE_TYPE_UA.get(outage_type, outage_type),
             description=description,
@@ -510,7 +510,7 @@ class EmergencyFeature(Feature):
         if not reason_changed and not end_changed:
             return
 
-        text = self.render(
+        text = await self.async_render(
             "emergency_update",
             reason_changed=reason_changed,
             old_reason=pending.get("reason_old") or "—",

@@ -90,14 +90,14 @@ class ScheduleChangeFeature(Feature):
         had_recent_schedule = self._had_recent_schedule()
         if schedule_lines:
             self.state_set("last_schedule_seen_at", now_kyiv().isoformat())
-            text = self.render("schedule_change", schedule_lines=schedule_lines)
+            text = await self.async_render("schedule_change", schedule_lines=schedule_lines)
         elif had_schedule and had_recent_schedule:
             # Only send "no outages" if a non-empty schedule existed recently.
             start = now_kyiv().replace(hour=0, minute=0, second=0, microsecond=0)
             if not self.has_schedule_coverage(start, start + timedelta(days=2)):
                 self.log.debug("Incomplete published coverage; suppressing all-clear")
                 return
-            text = self.render("schedule_empty")
+            text = await self.async_render("schedule_empty")
         else:
             if had_schedule:
                 self.log.info(

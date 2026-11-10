@@ -66,6 +66,7 @@ class UIServer:
         self._app.router.add_get("/api/discovery", self._discovery)
         self._app.router.add_get("/api/diagnostics", self._diagnostics)
         self._app.router.add_get("/api/templates", self._templates)
+        self._app.router.add_get("/api/templates/sensors", self._template_sensors)
         self._app.router.add_get("/api/bots", self._bots)
         self._app.router.add_post("/api/bots/save", self._save_bot)
         self._app.router.add_post("/api/bots/delete", self._delete_bot)
@@ -129,6 +130,14 @@ class UIServer:
 
     async def _templates(self, request: web.Request) -> web.Response:
         return web.json_response(self._orchestrator.get_templates_snapshot())
+
+    async def _template_sensors(self, request: web.Request) -> web.Response:
+        try:
+            async with asyncio.timeout(10):
+                payload = await self._orchestrator.get_template_sensors()
+        except Exception:
+            return web.json_response({"message": "Сенсори HA зараз недоступні. Спробуйте ще раз."}, status=503)
+        return web.json_response(payload, headers={"Cache-Control": "no-store"})
 
     async def _bots(self, request: web.Request) -> web.Response:
         return web.json_response(self._orchestrator.get_bot_profiles(), headers={"Cache-Control": "no-store"})
@@ -324,11 +333,12 @@ class UIServer:
         body = await self._read_json_body(request)
         template_name = str(body.get("template_name", "")).strip()
         source = str(body.get("source", ""))
-        conflict = self._template_conflict(template_name, body)
-        if conflict is not None:
-            return conflict
         try:
-            details = self._orchestrator.save_template_override(template_name, source)
+            conflict = self._template_conflict(template_name, body)
+            if conflict is not None:
+                return conflict
+            scope = str(body.get("profile_id", ""))
+            details = self._orchestrator.save_template_override(template_name, source, **({"profile_id": scope} if scope else {}))
         except ValueError as exc:
             return web.json_response({"ok": False, "message": str(exc)}, status=400)
         return web.json_response({"ok": True, "template": details})
@@ -336,25 +346,30 @@ class UIServer:
     async def _reset_template(self, request: web.Request) -> web.Response:
         body = await self._read_json_body(request)
         template_name = str(body.get("template_name", "")).strip()
-        conflict = self._template_conflict(template_name, body)
-        if conflict is not None:
-            return conflict
         try:
-            details = self._orchestrator.reset_template_override(template_name)
+            conflict = self._template_conflict(template_name, body)
+            if conflict is not None:
+                return conflict
+            scope = str(body.get("profile_id", ""))
+            details = self._orchestrator.reset_template_override(template_name, **({"profile_id": scope} if scope else {}))
         except ValueError as exc:
             return web.json_response({"ok": False, "message": str(exc)}, status=400)
         return web.json_response({"ok": True, "template": details})
 
     def _template_conflict(self, name: str, body: dict) -> web.Response | None:
+        scope = str(body.get("profile_id", ""))
+        snapshot = self._orchestrator.get_templates_snapshot(**({"profile_id": scope} if scope else {}))
         current = next(
             (
                 item
-                for item in self._orchestrator.get_templates_snapshot()["templates"]
+                for item in snapshot["templates"]
                 if item["name"] == name
             ),
             None,
         )
-        if current is not None and body.get("expected_source") != current["source"]:
+        if current is None:
+            current = self._orchestrator.templates.get_template_details(name, profile_id=scope)
+        if body.get("expected_source") != current["source"]:
             return web.json_response(
                 {
                     "ok": False,

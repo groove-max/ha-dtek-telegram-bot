@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0-rc8] - 2026-11-10
+
+**Regular GitHub release**, without the Pre-release flag. Requires Home Assistant 2026.3.0+ on amd64/aarch64. These template features do not require a new DTEK Monitor version.
+
+- Add per-profile message templates with shared/default inheritance, immediate saving and independent editor drafts. All recipients of one personal profile share its template; existing overrides retain their behavior.
+- Insert any HA sensor or binary sensor into notifications and reusable statuses using Jinja state/attribute helpers. Add searchable sensor suggestions, keyboard navigation and live preview. Missing telemetry does not become zero or trigger repeat outage notifications; public greetings cannot read home sensors.
+
+- Document the complete battery example in English and Ukrainian, including which templates to edit for power loss/restoration, schedule changes and every status variant. Clarify unavailable values, profile inheritance, test destinations and rollback.
+
+**Upgrade:** update the bot through the HA app store and reload its web editor. Existing templates stay shared, and recipients, sensor bindings and notification settings are retained. No new battery text or notifications are enabled automatically. Profile-template saves take effect without restarting; configuration changes still require **Apply**.
+
+**Validation:** 620 unit tests and 67 browser scenarios, plus a live apartment-HA check with a battery sensor and a private Telegram test. Release CI checks both supported image architectures.
+
+[Battery setup](DOCS.md#battery-template-example) · [Приклад заряду батареї](DOCS.uk.md#battery-template-example) · [Upgrade guide](docs/UPGRADING.md) · [Оновлення](docs/UPGRADING.uk.md)
+
 ## [0.5.0-rc7] - 2026-11-09
 
 **Regular GitHub release**, without the Pre-release flag. Requires Home Assistant 2026.3.0+ on amd64/aarch64. Regional announcements require **DTEK Monitor 2.0.0-rc7**.

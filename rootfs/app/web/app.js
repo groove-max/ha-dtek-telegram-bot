@@ -102,6 +102,7 @@ const state = {
     tone: "muted",
   },
   templateSelection: {
+    scope: "",
     addressIndex: 0,
     addressPrefix: "",
     templateName: "",
@@ -234,6 +235,7 @@ function restorePersistedUiState() {
       ? savedTemplateDraft.templateSelection
       : {};
     state.templateSelection = {
+      scope: String(savedSelection.scope || ""),
       addressIndex: Number.parseInt(savedSelection.addressIndex, 10) || 0,
       addressPrefix: String(savedSelection.addressPrefix || ""),
       templateName: String(savedSelection.templateName || ""),
@@ -2856,8 +2858,22 @@ async function saveConfig({ restart }) {
   }
 }
 
-function getTemplateList() {
-  return state.templatesPayload?.templates || [];
+function templateScope() {
+  return state.templateSelection.scope || "";
+}
+
+function templateDraftKey(name = state.templateSelection.templateName, scope = templateScope()) {
+  return scope ? `${scope}::${name}` : name;
+}
+
+function getTemplateList(scope = templateScope()) {
+  const common = state.templatesPayload?.templates || [];
+  if (!scope) return common;
+  const scoped = state.templatesPayload?.profiles?.[scope] || [];
+  return common.filter(t => t.name !== "welcome").map(t => {
+    const own = scoped.find(item => item.name === t.name);
+    return own && !own.inherited ? {...t, ...own} : {...t, profile_id: scope, inherited: true};
+  });
 }
 
 function ensureTemplateSelection() {
@@ -2887,11 +2903,11 @@ function syncTemplateSource() {
   rememberTemplateDraft();
   const meta = getSelectedTemplateMeta();
   if (!meta) return;
-  const draft = state.templateDrafts[meta.name];
+  const draft = state.templateDrafts[templateDraftKey(meta.name)];
   state.templateSourceDraft = draft?.dirty ? draft.source : meta.source || "";
   state.templateSourceDirty = Boolean(draft?.dirty);
   state.templateBaseSource = draft?.dirty ? draft.baseSource : meta.source || "";
-  state.templateSourceName = meta.name;
+  state.templateSourceName = templateDraftKey(meta.name);
   persistTemplateDraftSnapshot();
 }
 
@@ -2899,6 +2915,93 @@ function updateTemplatePreview() {
   const panel = templatesContainer.querySelector(".side-stack");
   if (panel) panel.innerHTML = renderTemplatePreviewPanel();
 }
+
+let sensorChoices = [];
+let sensorChoicesAt = 0;
+let sensorChoicesRequest = null;
+let sensorInsertion = null;
+
+async function openSensorPicker({start, end, query = "", focus = true} = {}) {
+  const textarea = document.getElementById("template-source");
+  const picker = document.getElementById("template-sensor-picker");
+  if (!textarea || !picker) return;
+  sensorInsertion = {start: start ?? textarea.selectionStart, end: end ?? textarea.selectionEnd,
+    key: templateDraftKey(), source: textarea.value};
+  picker.hidden = false;
+  const search = document.getElementById("template-sensor-search");
+  search.value = query;
+  if (focus) search.focus();
+  if (Date.now() - sensorChoicesAt > 30000) {
+    document.getElementById("template-sensor-results").textContent = "Завантаження сенсорів…";
+    sensorChoicesRequest ||= fetchJson("./api/templates/sensors").then(payload => {
+      sensorChoices = Array.isArray(payload.sensors) ? payload.sensors : [];
+      sensorChoicesAt = Date.now();
+    }).finally(() => { sensorChoicesRequest = null; });
+    await sensorChoicesRequest;
+  }
+  if (picker === document.getElementById("template-sensor-picker") && !picker.hidden) renderSensorSuggestions();
+}
+
+function renderSensorSuggestions() {
+  const results = document.getElementById("template-sensor-results");
+  const search = document.getElementById("template-sensor-search");
+  if (!results || !search) return;
+  const query = search.value.toLocaleLowerCase().trim();
+  const choices = sensorChoices.filter(item => `${item.friendly_name} ${item.entity_id}`.toLocaleLowerCase().includes(query)).slice(0, 40);
+  results.innerHTML = choices.length ? choices.map(item => `
+    <button type="button" role="option" class="sensor-suggestion" data-sensor-id="${escapeHtml(item.entity_id)}">
+      <strong>${escapeHtml(item.friendly_name || item.entity_id)}</strong>
+      <span>${escapeHtml(item.entity_id)}</span>
+      <span>${escapeHtml(item.available ? `${item.state} ${item.unit || ""}` : "немає даних")}</span>
+    </button>`).join("") : '<p class="helper-copy">Сенсорів не знайдено. Перевірте назву або доступність HA.</p>';
+}
+
+function insertTemplateSensor(entity) {
+  const textarea = document.getElementById("template-source");
+  if (!textarea || !sensorInsertion || sensorInsertion.key !== templateDraftKey() || sensorInsertion.source !== textarea.value) {
+    setTemplateStatus("Текст змінився. Поставте курсор і ще раз натисніть «Вставити сенсор».", "status-warn");
+    return;
+  }
+  if (!/^(sensor|binary_sensor)\.[a-z0-9_]+$/.test(entity)) return;
+  const mode = document.getElementById("template-sensor-mode").value;
+  let expression = `{{ states('${entity}') }}`;
+  if (mode === "unit") expression += `{{ ' ' ~ state_attr('${entity}', 'unit_of_measurement', '') if has_value('${entity}') else '' }}`;
+  if (mode === "attribute") {
+    const attribute = document.getElementById("template-sensor-attribute").value.trim();
+    if (!/^[a-zA-Z0-9_]+$/.test(attribute)) {
+      setTemplateStatus("Вкажіть назву атрибута (літери, цифри, підкреслення).", "status-warn"); return;
+    }
+    expression = `{{ state_attr('${entity}', '${attribute}', 'немає даних') }}`;
+  }
+  textarea.setRangeText(expression, sensorInsertion.start, sensorInsertion.end, "end");
+  document.getElementById("template-sensor-picker").hidden = true;
+  textarea.focus();
+  textarea.dispatchEvent(new Event("input", {bubbles: true}));
+}
+
+templatesContainer.addEventListener("click", event => {
+  const option = event.target.closest("[data-sensor-id]");
+  if (option) insertTemplateSensor(option.dataset.sensorId);
+  if (event.target.closest('[data-action="template-insert-sensor"]')) {
+    openSensorPicker().catch(error => setTemplateStatus(error.message, "status-bad"));
+  }
+  if (event.target.closest('[data-action="template-close-sensors"]')) document.getElementById("template-sensor-picker").hidden = true;
+});
+
+templatesContainer.addEventListener("keydown", event => {
+  const picker = document.getElementById("template-sensor-picker");
+  if (!picker || picker.hidden) return;
+  if (event.key === "Escape") { picker.hidden = true; event.preventDefault(); return; }
+  const options = [...picker.querySelectorAll("[data-sensor-id]")];
+  if (["ArrowDown", "ArrowUp"].includes(event.key) && options.length && event.target.id !== "template-sensor-mode") {
+    event.preventDefault();
+    const index = options.indexOf(document.activeElement);
+    options[(index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length].focus();
+  }
+  if (event.key === "Enter" && event.target.id === "template-sensor-search" && options.length) {
+    event.preventDefault(); insertTemplateSensor(options[0].dataset.sensorId);
+  }
+});
 
 function renderTemplatePreviewPanel() {
   const preview = state.templatePreview;
@@ -2958,7 +3061,7 @@ function renderTemplates(force = false) {
   const addresses = config.addresses || [];
   const selectedMeta = getSelectedTemplateMeta();
   const previewLabel = selectedMeta
-    ? `${selectedMeta.group} · ${selectedMeta.origin === "override" ? "змінений" : "стандартний"}`
+    ? `${selectedMeta.group} · ${selectedMeta.inherited ? "успадкований спільний" : selectedMeta.origin === "profile" ? "для цього профілю" : selectedMeta.origin === "override" ? "змінений спільний" : "стандартний"}`
     : "Шаблон не вибрано";
 
   templatesContainer.innerHTML = `
@@ -2966,7 +3069,14 @@ function renderTemplates(force = false) {
       <section class="editor-card">
         <div class="field-grid template-toolbar-grid">
           <label class="field">
-            <span>Адреса</span>
+            <span>Для кого змінюємо шаблон</span>
+            <select id="template-scope-select">
+              <option value="" ${!templateScope() ? "selected" : ""}>Усі профілі · спільний шаблон</option>
+              ${addresses.map(a => `<option value="${escapeHtml(profileIdentity(a))}" ${templateScope() === profileIdentity(a) ? "selected" : ""}>Лише ${escapeHtml(a.display_name || profileIdentity(a))}</option>`).join("")}
+            </select>
+          </label>
+          <label class="field">
+            <span>Профіль для прев’ю</span>
             <select id="template-address-select">
               ${addresses
                 .map(
@@ -3000,11 +3110,11 @@ function renderTemplates(force = false) {
           <p class="helper-copy">Тест надсилається лише в тестовий чат бота, обраного для адреси. Робочий чат не використовується.</p>
           <button class="secondary-button" type="button" data-action="template-save">Зберегти шаблон</button>
           <button class="secondary-button" type="button" data-action="template-reload">Завантажити збережений текст</button>
-          <button class="secondary-button" type="button" data-action="template-reset">Повернути стандартний</button>
+          <button class="secondary-button" type="button" data-action="template-reset">${templateScope() ? "Використовувати спільний" : "Повернути стандартний"}</button>
         </div>
         <div class="template-meta-bar">
           <span class="badge neutral">${escapeHtml(previewLabel)}</span>
-          <span class="template-meta-copy">Зміни зберігаються всередині add-on. Окремий експорт у файли не потрібен.</span>
+          <span class="template-meta-copy">${templateScope() ? "Збереження створить окремий шаблон лише для цього профілю та всіх його одержувачів." : "Зміни застосовуються до всіх профілів без власного шаблону."} Збереження діє одразу, без перезапуску.</span>
         </div>
       </section>
 
@@ -3017,7 +3127,17 @@ function renderTemplates(force = false) {
               використовують поточний текст ще до збереження.
             </p>
           </div>
-          <textarea id="template-source" class="template-source">${escapeHtml(state.templateSourceDraft)}</textarea>
+          <textarea id="template-source" class="template-source" aria-label="Текст шаблону">${escapeHtml(state.templateSourceDraft)}</textarea>
+          ${selectedMeta?.name === "welcome" ? '<p class="helper-copy">Публічне привітання не має доступу до домашніх сенсорів.</p>' : `
+          <button type="button" class="secondary-button" data-action="template-insert-sensor">＋ Вставити сенсор</button>
+          <p class="helper-copy">Введіть {{ для підказок або оберіть сенсор кнопкою. Підтримуються states, state_attr, has_value та is_state. Недоступне значення: «немає даних».</p>
+          <div id="template-sensor-picker" class="sensor-picker" hidden>
+            <label class="field"><span>Знайти сенсор за назвою або entity_id</span><input id="template-sensor-search" type="search" autocomplete="off" aria-controls="template-sensor-results"></label>
+            <label class="field"><span>Вставити</span><select id="template-sensor-mode"><option value="value">Значення</option><option value="unit">Значення з одиницею виміру</option><option value="attribute">Атрибут</option></select></label>
+            <label class="field" id="template-attribute-field" hidden><span>Назва атрибута</span><input id="template-sensor-attribute" value="unit_of_measurement"></label>
+            <div id="template-sensor-results" role="listbox" aria-label="Сенсори Home Assistant"></div>
+            <button type="button" class="secondary-button" data-action="template-close-sensors">Закрити</button>
+          </div>`}
         </section>
 
         <div class="side-stack">
@@ -3039,7 +3159,8 @@ async function previewSelectedTemplate({ sendTest = false } = {}) {
   const requestId = ++state.previewRequest;
   const revision = state.editorRevision;
   const body = { config, template_name: state.templateSelection.templateName,
-    address_index: state.templateSelection.addressIndex, source_override: state.templateSourceDraft };
+    address_index: state.templateSelection.addressIndex, source_override: state.templateSourceDraft,
+    profile_id: templateScope() };
   state.templateBusy = true;
   updateBusyControls();
   try {
@@ -3047,6 +3168,7 @@ async function previewSelectedTemplate({ sendTest = false } = {}) {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     if (requestId !== state.previewRequest || revision !== state.editorRevision ||
+        body.profile_id !== templateScope() ||
         body.template_name !== state.templateSelection.templateName ||
         body.address_index !== state.templateSelection.addressIndex ||
         body.source_override !== state.templateSourceDraft) {
@@ -3068,8 +3190,10 @@ async function writeTemplate(reset = false) {
   if (state.templateBusy) return;
   ensureTemplateSelection();
   const name = state.templateSelection.templateName;
+  const scope = templateScope();
+  const key = templateDraftKey(name, scope);
   const source = state.templateSourceDraft;
-  if (reset && !window.confirm("Повернути стандартний шаблон? Незбережений текст цього шаблону буде замінено.")) return;
+  if (reset && !window.confirm(scope ? "Використовувати спільний шаблон для цього профілю? Його власний текст буде видалено." : "Повернути стандартний шаблон? Незбережений текст цього шаблону буде замінено.")) return;
   state.templateBusy = true;
   state.writeEpoch += 1;
   persistTemplateDraftSnapshot();
@@ -3077,19 +3201,24 @@ async function writeTemplate(reset = false) {
   try {
     const result = await fetchJson(reset ? "./api/templates/reset" : "./api/templates/save", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ template_name: name, source, expected_source: state.templateBaseSource }),
+      body: JSON.stringify({ template_name: name, source, profile_id: scope, expected_source: state.templateBaseSource }),
     });
     if (result.template?.name !== name || typeof result.template?.source !== "string") {
       throw new Error("Сервер не підтвердив збережений текст. Чернетку не змінено.");
     }
     rememberTemplateDraft();
-    const draft = state.templateDrafts[name];
+    const draft = state.templateDrafts[key];
     const changed = draft && draft.source !== source;
-    state.templateDrafts[name] = { source: changed ? draft.source : result.template.source,
+    state.templateDrafts[key] = { source: changed ? draft.source : result.template.source,
       dirty: Boolean(changed), baseSource: result.template.source };
-    const templates = getTemplateList();
+    if (scope) {
+      state.templatesPayload.profiles ||= {};
+      state.templatesPayload.profiles[scope] ||= [];
+    }
+    const templates = scope ? state.templatesPayload.profiles[scope] : state.templatesPayload.templates;
     const index = templates.findIndex((item) => item.name === name);
     if (index >= 0) templates[index] = { ...templates[index], ...result.template };
+    else templates.push(result.template);
     // Forget the previous active snapshot before reading the acknowledged draft.
     state.templateSourceName = "";
     syncTemplateSource();
@@ -3097,26 +3226,31 @@ async function writeTemplate(reset = false) {
     if (textarea && textarea.value !== state.templateSourceDraft) textarea.value = state.templateSourceDraft;
     state.templatePreview = null;
     updateTemplatePreview();
+    const badge = templatesContainer.querySelector('.template-meta-bar .badge');
+    const meta = getSelectedTemplateMeta();
+    if (badge && meta) badge.textContent = `${meta.group} · ${meta.inherited ? 'успадкований спільний' : meta.origin === 'profile' ? 'для цього профілю' : meta.origin === 'override' ? 'змінений спільний' : 'стандартний'}`;
     setTemplateStatus(changed ? "Попередній текст збережено. Нові зміни залишилися у чернетці."
-      : `${name}: ${reset ? "стандартний шаблон відновлено" : "збережено"}.`, changed ? "status-warn" : "status-good");
+      : `${name}: ${reset ? (scope ? "спільний шаблон відновлено" : "стандартний шаблон відновлено") : "збережено"}.`, changed ? "status-warn" : "status-good");
   } finally { state.templateBusy = false; state.writeEpoch += 1; updateBusyControls(); }
 }
 
 async function reloadTemplate() {
   if (state.templateBusy) return;
   const name = state.templateSelection.templateName;
+  const scope = templateScope();
+  const key = templateDraftKey(name, scope);
   const requestId = state.previewRequest;
   if (state.templateSourceDirty && !window.confirm("Відкинути чернетку цього шаблону й завантажити збережений текст?")) return;
   state.templateBusy = true;
   updateBusyControls();
   try {
     const payload = await fetchJson("./api/templates");
-    if (name !== state.templateSelection.templateName || requestId !== state.previewRequest) {
+    if (scope !== templateScope() || name !== state.templateSelection.templateName || requestId !== state.previewRequest) {
       setTemplateStatus("Під час завантаження чернетка змінилася. Ваш ввід збережено.", "status-warn");
       return;
     }
     state.templatesPayload = payload;
-    delete state.templateDrafts[name];
+    delete state.templateDrafts[key];
     state.templateSourceName = "";
     state.templatePreview = null;
     renderTemplates(true);
@@ -3370,8 +3504,25 @@ templatesContainer.addEventListener("change", (event) => {
   if (!(target instanceof HTMLElement)) {
     return;
   }
+  if (target.id === "template-scope-select") {
+    persistTemplateDraftSnapshot();
+    state.templateSelection.scope = target.value;
+    const i = getDraftConfig().addresses?.findIndex(a => profileIdentity(a) === target.value) ?? -1;
+    if (i >= 0) {
+      state.templateSelection.addressIndex = i;
+      state.templateSelection.addressPrefix = target.value;
+    }
+    state.templatePreview = null;
+    state.previewRequest += 1;
+    renderTemplates(true);
+    return;
+  }
+  if (target.id === "template-sensor-mode") {
+    document.getElementById("template-attribute-field").hidden = target.value !== "attribute";
+  }
   if (target.id === "template-address-select") {
     state.templateSelection.addressIndex = Number.parseInt(target.value, 10) || 0;
+    if (templateScope()) state.templateSelection.scope = profileIdentity(getDraftConfig().addresses?.[state.templateSelection.addressIndex]);
     state.templateSelection.addressPrefix = profileIdentity(getDraftConfig().addresses?.[state.templateSelection.addressIndex]);
     state.templatePreview = null;
     persistTemplateDraftSnapshot();
@@ -3392,6 +3543,7 @@ templatesContainer.addEventListener("input", (event) => {
   if (!(target instanceof HTMLElement)) {
     return;
   }
+  if (target.id === "template-sensor-search") renderSensorSuggestions();
   if (target.id === "template-source") {
     state.templateSourceDraft = target.value;
     state.templateSourceDirty = true;
@@ -3400,6 +3552,10 @@ templatesContainer.addEventListener("input", (event) => {
     updateTemplatePreview();
     persistTemplateDraftSnapshot();
     setTemplateStatus("Джерело шаблону змінено. Побудуйте прев'ю, щоб рендерити поточну чернетку.", "muted");
+    const match = target.value.slice(0, target.selectionStart).match(/{{\s*([\w. -]*)$/);
+    if (match && state.templateSelection.templateName !== "welcome") {
+      openSensorPicker({start: target.selectionStart - match[0].length, end: target.selectionEnd, query: match[1], focus: false}).catch(error => setTemplateStatus(error.message, "status-bad"));
+    }
   }
 });
 

@@ -57,6 +57,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             {"name": name, "source": text, "group": "Живлення", "origin": "default"}
             for name, text in [("power_off", "Немає світла"), ("power_on", "Є світло")]
         ]
+        self.profile_templates = {}
         self.calls = []
         self.gates = {}
         self.started = {}
@@ -205,7 +206,7 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
         if endpoint == "config":
             payload = self.config_payload()  # Capture before a simulated network delay.
         elif endpoint == "templates":
-            payload = {"templates": copy.deepcopy(self.templates)}
+            payload = {"templates": copy.deepcopy(self.templates), "profiles": copy.deepcopy(self.profile_templates)}
         self.started.setdefault(endpoint, asyncio.Event()).set()
         if endpoint in self.gates:
             await self.gates[endpoint].wait()
@@ -253,6 +254,8 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
                     ]
                 },
             }
+        elif endpoint == "templates/sensors":
+            payload = {"sensors": [{"entity_id": "sensor.battery", "friendly_name": "Батарея інвертора", "state": "85", "unit": "%", "available": True}, {"entity_id": "binary_sensor.grid", "friendly_name": "Мережа", "state": "on", "available": True}]}
         elif endpoint == "diagnostics":
             payload = {"connected": True}
         elif endpoint == "bots/save":
@@ -313,12 +316,21 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             meta = next(
                 item for item in self.templates if item["name"] == body["template_name"]
             )
+            scope = body.get('profile_id', '')
+            if scope:
+                common = meta
+                rows = self.profile_templates.setdefault(scope, [])
+                meta = next((t for t in rows if t['name'] == body['template_name']), None)
+                if meta is None:
+                    meta = copy.deepcopy(common); rows.append(meta)
             meta.update(
                 source=(
                     body["source"] if endpoint.endswith("save") else "Стандартний текст"
                 ),
-                origin="override",
+                origin="profile" if scope else "override",
+                profile_id=scope, inherited=bool(scope and endpoint.endswith('reset')),
             )
+            if scope and endpoint.endswith('reset'): meta['source'] = common['source']
             payload = {"ok": True, "template": copy.deepcopy(meta)}
         await route.fulfill(json=payload or {})
 
@@ -469,6 +481,67 @@ class EditorBrowserTests(unittest.IsolatedAsyncioTestCase):
             "Не втрачати"
         )
         await expect(self.page.locator("#save-button")).to_be_enabled()
+
+    async def test_profile_template_drafts_inherit_and_survive_reload_and_delayed_save(self):
+        await self.templates_tab()
+        source = self.page.locator('#template-source')
+        await source.fill('Shared draft')
+        await self.page.locator('#template-scope-select').select_option('demo_a')
+        await expect(source).to_have_value('Немає світла')
+        await source.fill('A draft')
+        gate = self.delay('templates/save')
+        await self.page.locator('[data-action="template-save"]').click()
+        await self.wait_started('templates/save')
+        await source.fill('A newer draft')
+        await self.page.locator('#template-scope-select').select_option('demo_b')
+        await source.fill('B draft')
+        gate.set()
+        await expect(self.page.locator('#template-status')).to_contain_text('Нові зміни')
+        await expect(source).to_have_value('B draft')
+        await self.refresh_via_poll()
+        await self.page.reload()
+        await self.page.locator('#template-source').wait_for()
+        await expect(self.page.locator('#template-scope-select')).to_have_value('demo_b')
+        await expect(source).to_have_value('B draft')
+        await self.page.locator('#template-scope-select').select_option('demo_a')
+        await expect(source).to_have_value('A newer draft')
+        await self.page.locator('[data-action="template-save"]').click()
+        await expect(self.page.locator('#template-status')).to_contain_text('збережено')
+        saves = [b for e,b in self.calls if e == 'templates/save']
+        self.assertEqual(saves[-1]['profile_id'], 'demo_a')
+        self.assertEqual(saves[-1]['expected_source'], 'A draft')
+        await self.page.locator('[data-action="template-reset"]').click()
+        await expect(source).to_have_value('Немає світла')
+        await self.page.locator('#template-scope-select').select_option('')
+        await expect(source).to_have_value('Shared draft')
+
+    async def test_sensor_picker_inserts_at_selection_and_autocomplete_preserves_draft(self):
+        await self.templates_tab()
+        source = self.page.locator('#template-source')
+        await source.fill('🔋 Battery: REPLACE tail')
+        await source.evaluate("el => { const i = el.value.indexOf('REPLACE'); el.focus(); el.setSelectionRange(i,i+7); }")
+        await self.page.locator('[data-action="template-insert-sensor"]').click()
+        await self.page.locator('#template-sensor-search').fill('battery')
+        await expect(self.page.locator('[data-sensor-id]')).to_have_count(1)
+        await self.page.locator('#template-sensor-search').press('Enter')
+        await expect(source).to_have_value("🔋 Battery: {{ states('sensor.battery') }} tail")
+        await self.refresh_via_poll()
+        await expect(source).to_have_value("🔋 Battery: {{ states('sensor.battery') }} tail")
+        await source.fill('Before ')
+        await source.press('End')
+        await source.press_sequentially('{{bat')
+        await expect(self.page.locator('#template-sensor-picker')).to_be_visible()
+        await expect(self.page.locator('[data-sensor-id]')).to_have_count(1)
+        await source.press('ArrowDown')
+        await self.page.keyboard.press('Enter')
+        await expect(source).to_have_value("Before {{ states('sensor.battery') }}")
+        await self.page.set_viewport_size({'width':390,'height':844})
+        await self.page.locator('[data-action="template-insert-sensor"]').click()
+        await expect(self.page.locator('#template-sensor-picker')).to_be_visible()
+        self.assertTrue(await self.page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
+        await self.page.locator('#template-sensor-search').press('Escape')
+        await expect(self.page.locator('#template-sensor-picker')).to_be_hidden()
+        self.assertFalse(self.errors)
 
     async def test_template_preview_and_switches_preserve_each_draft(self):
         await self.templates_tab()

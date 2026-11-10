@@ -13,7 +13,7 @@ Building mode supports the public entities from DTEK Monitor 1.7.0, 2.0.0b1 and 
 | --- | --- |
 | Building channel/group or private address alerts | Building mode; select an address from discovery. |
 | Building linked to an account in My DTEK | Check the building link in cabinet settings, then select that building in the bot. |
-| Personal cabinet groups, readings and reminders | Personal profile; recommended pair: bot 0.5.0-rc7 and Monitor 2.0.0-rc7. [Complete setup guide](docs/PERSONAL.md). |
+| Personal cabinet groups, readings and reminders | Personal profile; recommended pair: bot 0.5.0-rc8 and Monitor 2.0.0-rc7. [Complete setup guide](docs/PERSONAL.md). |
 
 For a shared chat, leave `selected_group` empty: building mode keeps all address groups. You may manually choose a confirmed group in this mode; a selection in My DTEK does not change it. Personal mode instead uses only the cabinet API groups, without manual substitution or fallback to building groups.
 
@@ -389,7 +389,36 @@ enable new notifications; the bot continues to use the building's outage calenda
 <a id="templates"></a>
 ## Change message wording
 
-Open **Templates**, choose a template, preview it, edit and save an override. Reset removes the override and restores the built-in text. Sending a test publishes a real message only to the selected bot’s test chat. Configure it first; the button never uses the production chat as a fallback.
+Open **Tools → Templates**. Choose **Для кого змінюємо шаблон** (Who this template applies to): **Усі профілі** for a shared template, or a particular building/account for its own text. Pick the message type, edit, preview and save. Saving takes effect on the next message or status refresh without restarting the app.
+
+A profile first uses its own template, then your shared template, then the built-in default. **Використовувати спільний** removes only that profile’s override; **Повернути стандартний** removes the shared override. Existing overrides remain shared after upgrading. All personal recipients of one profile use the same profile template. **Профіль для прев’ю** selects sample address/account data; when editing shared text it does not limit who receives the change.
+
+Drafts stay separate by profile and message type, including when you switch profiles or reload the page in the same tab. Sending a test publishes a real message only to the selected bot’s test chat. Configure it first; the button never uses the production chat as a fallback.
+
+<a id="sensor-templates"></a>
+### Insert a Home Assistant sensor
+
+No separate sensor list or manufacturer-specific setup is needed. In a profile’s template, click **＋ Вставити сенсор** or type `{{` to open suggestions. Search by name or entity ID, then choose a value, a value with its unit, or an attribute. Arrow keys and Enter select an item; Escape closes the suggestions. Preview uses the same sensor values and formatting rules as actual notifications.
+
+For example, replace `sensor.battery_percent` with your own entity:
+
+```jinja
+🔋 Battery: {{ states('sensor.battery_percent') }}
+```
+
+**Value with unit** inserts a guarded unit expression, so an unavailable battery does not become `0%`. For custom wording:
+
+```jinja
+{% if has_value('sensor.battery_percent') %}
+🔋 Battery: {{ states('sensor.battery_percent') | float | round(0) }}{{ state_attr('sensor.battery_percent', 'unit_of_measurement', '') }}
+{% else %}
+🔋 Battery: no data
+{% endif %}
+```
+
+Supported helpers are `states('sensor.id', 'fallback')`, `state_attr('sensor.id', 'attribute', 'fallback')`, `has_value('sensor.id')` and `is_state('binary_sensor.id', 'on')`. Use literal entity IDs in quotes. Both `sensor` and `binary_sensor` are supported, with up to 32 distinct entities per message. These helpers are provided by this app; the full HA template environment and service calls are not exposed.
+
+Missing, `unknown`, `unavailable` or unreadable values display **немає даних** by default; conditions or a fallback let you change this. Values are read when the message is generated, and sensor text cannot inject Telegram HTML. Reusable status messages pick up changes on their configured refresh; sensor changes do not trigger new outage or schedule notifications. The public `welcome` template cannot read home sensors.
 
 The public introduction is the **Привітання · welcome** template: replace its text and links as desired. It is shared by all bots on this add-on and receives only `telegram_user_id`, never private account data. Its switch is under **General and service settings → Greeting for new users**; the standard GitHub introduction is enabled by default.
 
@@ -404,7 +433,38 @@ as live warnings.
 
 Keep separate lines for the heading, interval and explanatory notes. Jinja's whitespace trimming removes a newline after a block tag such as `{% endif %}`; preview the **rendered** text for all branches. An explicit `{{ '\n' }}` can preserve a required break.
 
-Overrides are stored in `/data/templates/*.j2` and survive updates. Consequently, updating the app will not automatically fix an old custom template. `export_default_templates: true` copies defaults only when the files do not exist; leave it off unless you need those files.
+Shared overrides are stored in `/data/templates/*.j2`; profile overrides live below `/data/templates/profiles/`. Back up the entire templates directory; both survive updates. Consequently, updating the app will not automatically fix an old custom template. `export_default_templates: true` copies defaults only when the files do not exist; leave it off unless you need those files.
+
+
+<a id="battery-template-example"></a>
+### Example: battery charge in an outage notification
+
+1. Update the bot to **0.5.0-rc8 or later** in the HA app store and reload its web editor. An already compatible DTEK Monitor version can stay as it is.
+2. Open **Інструменти → Шаблони**. Under **Для кого змінюємо шаблон**, select the building/account whose battery you want to show. Choose **Усі профілі** only if the same sensor should appear in every profile using that shared template.
+3. Select **`power_lost`**. Keep the existing text and place the cursor at the end. Add a new line and a label such as `🔋 Battery charge: `.
+4. Click **＋ Вставити сенсор**, search for your inverter/UPS/EcoFlow battery entity, choose **Значення з одиницею виміру**, and select it. Confirm that its unit is `%` and its current value is plausible. This does not require a separate `extra_sensors` configuration.
+5. Click **Побудувати прев’ю**. Check the line break, label and value. **Надіслати тест** is optional and requires a configured test destination; preview sends nothing to Telegram.
+6. Click **Зберегти шаблон**. The change applies on the next matching message without a restart. Make sure power-loss notifications themselves are enabled in the profile; editing their wording does not turn them on.
+
+To paste an example instead, append the following to the existing template and replace **every occurrence** of `sensor.battery_level` with your own percentage sensor. The explicit newline keeps the battery on its own line even after Jinja conditionals:
+
+```jinja
+{{ '\n' }}🔋 Battery charge: {% if has_value('sensor.battery_level') %}{{ states('sensor.battery_level') }}%{% else %}no data{% endif %}
+```
+
+With a sensor value of `85`, the added line is `🔋 Battery charge: 85%`. If that sensor becomes unavailable, the line says `no data`; an outage notification can still be sent.
+
+Each message type has its own template. Repeat the addition wherever you want it:
+
+| Message | Template |
+| --- | --- |
+| Confirmed power loss / restoration | `power_lost` / `power_restored` |
+| Changed schedule / no published outage intervals | `schedule_change` / `schedule_empty` |
+| Changed outage group | `group_change` |
+| Status: power on / off / partial / unknown | `status_on` / `status_off` / `status_partial` / `status_unknown` |
+| Voltage low / high / normal again | `voltage_low` / `voltage_high` / `voltage_normal` |
+
+For a battery shown in the status at all times, customize all four `status_*` templates. If automatic status is disabled, the personal **Стан** command still uses these templates. A battery value is display information: it does not become a new power-detection input or a battery-alert threshold.
 
 <a id="testing"></a>
 ## Test without posting to the main chat

@@ -98,7 +98,7 @@ class UpcomingOutageFeature(Feature):
                 self.state_set("warned_outages", warned_events)
                 continue
 
-            text = self.render(
+            text = await self.async_render(
                 "upcoming_outage",
                 group=event_group(event) or self.state_get("current_group", "—"),
                 minutes=max(math.ceil(time_until), 1),

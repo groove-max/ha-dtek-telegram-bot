@@ -205,7 +205,7 @@ class StatusMessageFeature(Feature):
             return await self._build_partial_text(short_name, group)
         if house_state == "off":
             return await self._build_off_text(short_name, group)
-        return self.render(
+        return await self.async_render(
             "status_unknown", short_name=short_name, group=group,
             next_outage=await self._next_outage_text(),
         )
@@ -230,7 +230,7 @@ class StatusMessageFeature(Feature):
 
         next_outage = await self._next_outage_text()
 
-        return self.render(
+        return await self.async_render(
             "status_on",
             short_name=short_name,
             group=group,
@@ -247,7 +247,7 @@ class StatusMessageFeature(Feature):
 
         next_outage = await self._next_outage_text()
 
-        return self.render(
+        return await self.async_render(
             "status_partial",
             short_name=short_name,
             group=group,
@@ -304,7 +304,7 @@ class StatusMessageFeature(Feature):
 
         outage_type = OUTAGE_TYPE_UA.get(outage_type_raw, outage_type_raw) if outage_type_raw else None
 
-        return self.render(
+        return await self.async_render(
             "status_off",
             short_name=short_name,
             group=group,
